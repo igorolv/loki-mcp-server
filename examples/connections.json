@@ -1,0 +1,16 @@
+{
+  "connections": {
+    "local": {
+      "description": "Local test Loki",
+      "url": "http://localhost:3100",
+      "timezone": "UTC"
+    },
+    "secured": {
+      "description": "Loki configured through environment variables",
+      "url": "${LOKI_URL}",
+      "auth": { "type": "BEARER", "token": "${LOKI_TOKEN}" },
+      "tenant": "${LOKI_TENANT}",
+      "limits": { "maxEntries": 500 }
+    }
+  }
+}
