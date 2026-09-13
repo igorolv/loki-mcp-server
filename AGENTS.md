@@ -62,8 +62,9 @@
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
 S01–S05 и S09 реализованы; S06/S08 отменены и удалены, S07 исключён: Gradle 9.3.1,
-Spring Boot 4.0.0, Spring AI 2.0.0. Доступны `listConnections`, `discoverLogs`, `countLogs`,
-`queryLogs`, `queryMetrics` — все возвращают текст; обязательная внешняя конфигурация
+Spring Boot 4.0.0, Spring AI 2.0.0. S10 реализован. Доступны `listConnections`,
+`discoverLogs` (с `label`), `countLogs`, `queryLogs` (`raw` с метками), `getLogContext`,
+`queryMetrics` — все возвращают текст; обязательная внешняя конфигурация
 и immutable registry. Контракт: [docs/queries.md](docs/queries.md), [docs/discovery.md](docs/discovery.md).
 Стандартные команды Windows PowerShell:
 

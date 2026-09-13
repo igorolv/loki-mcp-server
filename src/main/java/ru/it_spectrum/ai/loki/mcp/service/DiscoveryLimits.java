@@ -9,6 +9,8 @@ public final class DiscoveryLimits {
     /** Above this many distinct values a label is reported as high cardinality without listing. */
     public static final int VALUES_PER_LABEL = 20;
     public static final int VALUES_LISTED = 10;
+    /** discoverLogs(label=...) lists this many values before asking for a narrower selector. */
+    public static final int LABEL_VALUES = 200;
     public static final int FIELDS = 100;
     public static final int FIELDS_LISTED = 30;
     public static final int EXAMPLE_CHARS = 300;

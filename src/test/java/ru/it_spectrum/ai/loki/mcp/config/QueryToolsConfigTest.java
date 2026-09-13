@@ -25,7 +25,7 @@ class QueryToolsConfigTest {
     private static String text(CallToolResult result) { return ((TextContent) result.content().getFirst()).text(); }
 
     @Test void toolsAreTextOnlyWithShortInstructionLikeDescriptions() {
-        assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs", "getLogContext"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
         for (var spec : specs) {
             assertNull(spec.tool().outputSchema(), spec.tool().name());
             assertTrue(spec.tool().description().length() < 700, spec.tool().name() + " description too long");

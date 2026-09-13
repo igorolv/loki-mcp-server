@@ -30,22 +30,24 @@ public class DiscoveryService {
         this.registry = registry; this.client = client; this.clock = clock;
     }
 
-    public String discover(String connection, String selector, String start, String end) {
+    public String discover(String connection, String selector, String start, String end, String label) {
         var definition = registry.require(connection);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        boolean scoped = selector != null && !selector.isBlank();
+        if (scoped && (selector.length() > SELECTOR_CHARACTERS || !SELECTOR.matcher(selector).matches()))
+            throw Errors.invalid("selector must be a stream selector only, like {app=\"backend\"} with double-quoted values; no filters or pipelines.");
+        if (label != null && !label.isBlank()) return values(connection, scoped ? selector.strip() : null, window, definition, label.strip());
         var text = new StringBuilder();
         var labels = new TreeMap<String, Set<String>>();
         String scope;
-        if (selector == null || selector.isBlank()) {
+        if (!scoped) {
             scope = labelsOverview(connection, window, definition, labels, text);
         } else {
-            if (selector.length() > SELECTOR_CHARACTERS || !SELECTOR.matcher(selector).matches())
-                throw Errors.invalid("selector must be a stream selector only, like {app=\"backend\"} with double-quoted values; no filters or pipelines.");
             scope = selector.strip();
             var series = client.series(connection, List.of(scope), window.start(), window.end()).streams();
             text.append("Streams matching ").append(scope).append(" in ").append(window(window, definition.timezone())).append(": ").append(series.size()).append('.');
-            for (var stream : series.subList(0, Math.min(series.size(), SERIES))) for (var label : stream.entrySet())
-                labels.computeIfAbsent(label.getKey(), ignored -> new TreeSet<>()).add(label.getValue());
+            for (var stream : series.subList(0, Math.min(series.size(), SERIES))) for (var pair : stream.entrySet())
+                labels.computeIfAbsent(pair.getKey(), ignored -> new TreeSet<>()).add(pair.getValue());
             if (series.size() > SERIES) text.append(" Labels below come from the first ").append(SERIES).append(" streams.");
             appendLabels(text, labels);
         }
@@ -60,6 +62,27 @@ public class DiscoveryService {
         }
         throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                 "Discovery output does not fit maxResponseBytes of this connection. Use a narrower selector or raise the limit.");
+    }
+
+    /** All values of one label, one per line: the overview lists only a few and the model needs the rest, e.g. every service. */
+    private String values(String connection, String selector, QueryTime.Range window, ConnectionDefinition definition, String label) {
+        if (!label.matches("[a-zA-Z_][a-zA-Z0-9_]*"))
+            throw Errors.invalid("label must be a label name (letters, digits, underscore), e.g. \"applicationName\"; see the names in discoverLogs without label.");
+        var values = new TreeSet<>(client.labelValues(connection, label, window.start(), window.end(), selector).values());
+        String header = "Values of " + label + (selector == null ? "" : " in streams matching " + selector) + ", "
+                + window(window, definition.timezone()) + " (" + connection + "): " + values.size() + ".";
+        if (values.isEmpty()) return header + "\nNo values in this window; check the label name with discoverLogs without label, or widen start/end.";
+        var lines = new ArrayList<>(values.stream().limit(LABEL_VALUES).map(v -> truncate(v, 200)).toList());
+        int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
+        // Alphabetical order is the contract, so the tail is cut rather than the head.
+        while (true) {
+            int hidden = values.size() - lines.size();
+            String text = assemble(header, lines, hidden > 0 ? "(+" + hidden + " more; narrow with selector)" : "");
+            if (bytes(text) <= budget) return text;
+            if (lines.isEmpty()) throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                    "Label values do not fit maxResponseBytes of this connection. Narrow with selector or raise the limit.");
+            lines.removeLast();
+        }
     }
 
     /** Without a selector: label names from /labels, values per label from /label/{name}/values. */

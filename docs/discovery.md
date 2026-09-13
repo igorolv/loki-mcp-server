@@ -1,9 +1,10 @@
 # Обнаружение данных и нормализация строки
 
-## discoverLogs(connection, selector, start, end)
+## discoverLogs(connection, selector, start, end, label)
 
 Текстовый обзор того, что есть в логах, и готовый selector для следующего вызова.
-`start`/`end` по умолчанию — последний час.
+`start`/`end` по умолчанию — последний час. С `label` — только значения одной метки
+(см. ниже).
 
 Без `selector`: имена меток из `/labels` (до 30, по алфавиту), значения каждой —
 из `/label/<name>/values`. Выборка строк берётся по первой метке из `serviceLabels`
@@ -45,6 +46,25 @@ Next: use countLogs or queryLogs with a selector like {namespace="dev", applicat
   `No lines sampled in this window; fields are unknown.`; ошибка `/series` или `/labels`
   возвращается как ошибка инструмента.
 
+## discoverLogs(label=...)
+
+Обзор показывает не больше 10 значений метки; чтобы получить все (например, все сервисы
+стенда), модель передаёт `label="applicationName"`. Ответ — значения из
+`/label/<name>/values` (с `query=<selector>`, если selector задан), по алфавиту, по одному
+на строку, до 200; выборка строк и подсказка `Next:` не выполняются:
+
+```
+Values of applicationName in streams matching {namespace="dev"}, 2026-09-13 10:00:00–11:00:00 (+03:00) (dev): 37.
+auth-service
+nsi-backend
+...
+(+12 more; narrow with selector)
+```
+
+Значения обрезаются до 200 символов; при нехватке бюджета список укорачивается с конца,
+счётчик `(+N more; narrow with selector)` остаётся честным. Пустой ответ говорит проверить
+имя метки в обзоре без `label` или расширить окно. Неверное имя метки — ошибка аргумента.
+
 ## Нормализация строки
 
 `EventNormalizer` даёт `View(format, level, service, message, traceId, stackTrace, jsonFields)`
@@ -68,6 +88,6 @@ JSON распознаётся только у строк, начинающихс
 
 `gradlew.bat build --console=plain`: `EventNormalizerTest` (ECS, плоские ключи,
 приоритет меток, plain text, лимиты), `DiscoveryServiceTest` (selector и без него,
-капы значений, ошибки endpoint, бюджет), stdio smoke. `gradlew.bat integrationTest
+капы значений, ошибки endpoint, бюджет, режим `label`), stdio smoke. `gradlew.bat integrationTest
 --console=plain`: discovery на Loki 2.6.1/3.6.0 (3.x добавляет `service_name`
 самостоятельно — тесты не предполагают точный набор меток).

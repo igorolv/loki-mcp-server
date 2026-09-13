@@ -16,7 +16,7 @@ public class QueryTools {
                     + "'time LEVEL service message' with stack traces shortened. Example query: {app=\"backend\"} |= \"ERROR\"; "
                     + "with JSON logs add | json | log_level=~\"(?i)error\". To find lines of one request use |= \"<traceId>\". "
                     + "If the footer says there are more lines, either narrow the query or repeat with the end value it gives. "
-                    + "Use raw=true with a narrow query to see the complete original line.",
+                    + "Use raw=true with a narrow query to see the complete original line with its stream labels.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String queryLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
@@ -24,8 +24,25 @@ public class QueryTools {
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "Maximum lines to return, default 50", required = false) Integer limit,
-            @McpToolParam(description = "true prints original lines unchanged (full JSON, full stack trace). Default false", required = false) Boolean raw) {
+            @McpToolParam(description = "true prints original lines unchanged (full JSON, full stack trace) with their stream labels. Default false", required = false) Boolean raw) {
         return service.logs(connection, query, start, end, limit, raw);
+    }
+
+    @McpTool(name = "getLogContext",
+            description = "Read what happened around one log line in its stream: a number of lines before it and after it, "
+                    + "regardless of how busy the service is. Use it after queryLogs found an interesting line: pass the stream selector "
+                    + "(the braces part only, e.g. {app=\"backend\"}, without |= filters, so that lines that do not match the filter are shown too) "
+                    + "and the time printed for the line (e.g. \"10:12:03.123\"). Lines at that time are marked with >>>. "
+                    + "The footer tells how to read further back or forward.",
+            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
+    public String getLogContext(
+            @McpToolParam(description = "Connection name from listConnections") String connection,
+            @McpToolParam(description = "Stream selector only, e.g. {app=\"backend\"}; no filters or | json") String selector,
+            @McpToolParam(description = "Time of the line: \"10:12:03.123\" as printed by queryLogs (today or the nearest past day), "
+                    + "or \"2026-09-13T10:12:03.123+03:00\"") String time,
+            @McpToolParam(description = "Lines to show before that time, default 20", required = false) Integer before,
+            @McpToolParam(description = "Lines to show after that time, default 20", required = false) Integer after) {
+        return service.context(connection, selector, time, before, after);
     }
 
     @McpTool(name = "countLogs",

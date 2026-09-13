@@ -130,7 +130,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(5, catalog.size());
+            assertEquals(6, catalog.size());
             var names = new HashSet<String>();
             for (var declaration : catalog) {
                 names.add(declaration.path("name").asText());
@@ -142,7 +142,7 @@ class StdioSmokeTest {
                         declaration.path("annotations").path("openWorldHint").asBoolean());
                 assertEquals("object", declaration.path("inputSchema").path("type").asText());
             }
-            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "queryMetrics")), names);
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "getLogContext", "queryMetrics")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
             assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
@@ -220,7 +220,7 @@ class StdioSmokeTest {
                 } else if (id % 4 == 2) {
                     assertTrue(text.startsWith("count_over_time({kind=\"test\"}[1s]) — test, 2023-11-14 22:13:20–22:13:21 (Z), step 1s, 1 series:\n{kind=\"test\"}\n  22:13:20  NaN"), text);
                 } else if (id % 8 == 7) {
-                    assertTrue(text.contains("\n22:13:20.123 test  Ошибка 🐈\nShown all 1 matching lines."), text);
+                    assertTrue(text.contains("\n22:13:20.123 {kind=\"test\", level=\"error\"}  Ошибка 🐈\nShown all 1 matching lines."), text);
                 } else {
                     assertEquals("{kind=\"test\"} — test, 2023-11-14 22:13:20–22:13:21 (Z), all 1 lines:\n22:13:20.123 ERROR test  Ошибка 🐈\nShown all 1 matching lines.", text);
                 }

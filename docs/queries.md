@@ -35,8 +35,10 @@ Stack trace (`error.stack_trace`, `stack_trace`, `stacktrace`, `exception` ил�
 многострочный plain text с `at `): первая строка исключения, до 5 frames,
 `... (N frames skipped)`, каждый `Caused by:`/`Suppressed:` с одним frame;
 строки `... N more` опускаются. Сообщение обрезается до 400 code points с `…`;
-переводы строк заменяются пробелами. `raw=true` печатает `HH:mm:ss.SSS service  <строка Loki>`
-без разбора, предел 4 000 code points — это путь к полной исходной строке.
+переводы строк заменяются пробелами. `raw=true` печатает `HH:mm:ss.SSS {метки потока}  <строка Loki>`
+без разбора, предел 4 000 code points — это путь к полной исходной строке. Метки печатаются
+по алфавиту в виде `{app="x", pod="y"}` (S10): в режиме «покажи всё» модель видит pod/instance,
+которые обычный режим прячет за именем сервиса.
 
 Заголовок: `newest N of more:` если Loki вернул ровно `limit` строк, `all N lines:` если
 меньше, `no matching lines.` если ноль. Футер: `Shown all N matching lines.`,
@@ -46,6 +48,42 @@ Stack trace (`error.stack_trace`, `stack_trace`, `stacktrace`, `exception` ил�
 timestamp не теряются. Курсоров и хранения между вызовами нет; snapshot не обещается.
 При пустом результате футер предлагает расширить окно, проверить метки через `discoverLogs`
 или упростить фильтр.
+
+## getLogContext(connection, selector, time, before = 20, after = 20)
+
+Строки одного stream selector вокруг момента: `before` строк до него включительно и `after`
+после. Контекст считается по числу строк, а не по времени, поэтому не зависит от плотности
+потока. Два запроса `query_range`: backward с `end` = конец момента и `limit = before + 1`
+(одна строка — сама цель), forward с `start` = конец момента и `limit = after`. Окно каждого
+запроса — `maxIntervalSeconds` подключения в соответствующую сторону.
+
+`selector` — только stream selector (та же проверка, что в `discoverLogs`); `|=` и `| json`
+отклоняются с объяснением: строки-продолжения stack trace без фильтруемого текста должны быть
+видны. `time` — любой формат `start`/`end` плюс голое время суток `10:12:03.123`, `10:12:03`,
+`10:12` из строки страницы: оно берётся в timezone подключения как ближайшее такое время в
+прошлом (сегодня, иначе вчера). Момент имеет точность текста: `10:12:03.123` покрывает
+миллисекунду, `10:12:03` — секунду, RFC3339 без дробной части — секунду, epoch nanoseconds —
+наносекунду. Строки внутри момента отмечены `>>>`; если таких нет, на их месте строка
+`>>> (no line at exactly this time in {...}; lines before and after it follow)`, а лишняя
+строка из запасного слота не показывается.
+
+```
+Context in {app="backend"} around 2026-09-13 10:12:03.123 (+03:00) — dev, lines: 20 before, 1 at that time, 20 after:
+10:11:58.001 INFO  backend  Handling request [trace=4f2a1b3c4d5e6f70…]
+...
+>>> 10:12:03.123 ERROR backend  Connection refused to nsi-backend:8080 [trace=4f2a1b3c4d5e6f70…]
+    java.net.ConnectException: Connection refused
+10:12:03.130 -     backend  	at java.base/sun.nio.ch.Net.connect0(Native Method)
+...
+Earlier: repeat with time="2026-09-13T10:11:58.001+03:00", after=0. Later: repeat with time="2026-09-13T10:12:09.870+03:00", before=0. Full original line: queryLogs with raw=true and a narrow filter.
+```
+
+Футер: если строк до/после меньше запрошенного — `No earlier/later lines within 24h ...`
+(это предел окна, не доказательство отсутствия вообще); иначе готовые `time` для
+продолжения в каждую сторону. Если все `before + 1` строк попали в момент (например,
+секунда точности в нагруженном сервисе) — совет передать время с миллисекундами или
+сузить selector. При нехватке бюджета строки отбрасываются с более длинной стороны,
+отмеченные строки не отбрасываются: `Output limit reached: showing N before and M after of K fetched lines.`
 
 ## countLogs(connection, query, start, end, groupBy)
 
@@ -102,8 +140,10 @@ HTTP 400 и `status=error` от Loki передаются как `Loki rejected 
 ## Проверки
 
 `gradlew.bat build --console=plain` — unit-тесты формата строки, сжатия stack trace,
-футера, бюджета, countLogs/queryMetrics и stdio smoke на реальном jar
+футера, бюджета, countLogs/queryMetrics, getLogContext (два запроса, отметка, точность
+времени, обрезка вокруг цели) и stdio smoke на реальном jar
 (`instructions`, tools/list без output schema, 16 outstanding вызовов с разными бюджетами,
 ошибки без секретов, текст ошибки Loki 400). `gradlew.bat integrationTest --console=plain`
-— Loki 2.6.1/3.6.0: страница, продолжение по `end`, raw, count/groupBy/time, метрики,
-ошибка парсера, discovery.
+— Loki 2.6.1/3.6.0: страница, продолжение по `end`, raw с метками, контекст
+(строки в момент, точное время, момент без строк, отказ pipeline), count/groupBy/time,
+метрики, ошибка парсера, discovery и значения метки.

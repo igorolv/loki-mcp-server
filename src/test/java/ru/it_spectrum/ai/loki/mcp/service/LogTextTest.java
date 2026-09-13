@@ -23,7 +23,7 @@ class LogTextTest {
     @Test void lineShowsLocalTimeLevelServiceMessageAndTrace() {
         var event = event("{\"message\":\"Connection refused\",\"traceId\":\"4f2a1b3c4d5e6f708192a3b4\"}");
         assertEquals("10:12:03.123 ERROR backend  Connection refused [trace=4f2a1b3c4d5e6f70…]", line(event, false));
-        assertEquals("10:12:03.123 backend  " + event.line(), line(event, true));
+        assertEquals("10:12:03.123 {app=\"backend\", level=\"error\"}  " + event.line(), line(event, true));
         var plain = new LogEvent(event.timestampNanos(), Map.of(), "just text", Map.of());
         assertEquals("10:12:03.123 -     -  just text", LogText.line(plain, normalizer.view(plain, List.of("app")), zone, false));
     }

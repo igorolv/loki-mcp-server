@@ -24,13 +24,13 @@ public final class LogText {
     public static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private LogText() {}
 
-    /** One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines. */
+    /**
+     * One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines.
+     * Raw: {@code HH:mm:ss.SSS {stream labels}  original line} — the "show everything" mode also shows pod/instance.
+     */
     public static String line(LogEvent event, EventNormalizer.View view, ZoneId zone, boolean raw) {
         var text = new StringBuilder(TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone)));
-        if (raw) {
-            return text.append(' ').append(view.service() == null ? "-" : view.service()).append("  ")
-                    .append(truncate(event.line(), RAW_CHARS)).toString();
-        }
+        if (raw) return text.append(' ').append(labels(event.labels())).append("  ").append(truncate(event.line(), RAW_CHARS)).toString();
         text.append(' ').append(String.format("%-5s", view.level() == null ? "-" : view.level()));
         text.append(' ').append(view.service() == null ? "-" : view.service()).append("  ");
         text.append(truncate(view.message().replace('\n', ' ').replace("\r", ""), MESSAGE_CHARS));

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 
@@ -20,6 +21,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 @Service
 public class QueryService {
     public static final int DEFAULT_LIMIT = 50;
+    public static final int DEFAULT_CONTEXT = 20;
     public static final int TIME_BUCKETS = 12;
     public static final int METRIC_STEPS = 20;
     private static final List<Duration> NICE_STEPS = List.of(Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(10),
@@ -43,7 +45,7 @@ public class QueryService {
         int usedLimit = limit == null ? Math.min(DEFAULT_LIMIT, definition.limits().maxEntries()) : limit;
         if (usedLimit <= 0 || usedLimit > definition.limits().maxEntries())
             throw Errors.invalid("limit must be between 1 and " + definition.limits().maxEntries() + " for this connection.");
-        var events = fetch(connection, query, window, usedLimit);
+        var events = fetch(connection, query, window, usedLimit, LokiHttpClient.Direction.BACKWARD);
         boolean more = events.size() >= usedLimit;
         ZoneId zone = definition.timezone();
         var lines = new ArrayList<String>(events.size());
@@ -70,6 +72,84 @@ public class QueryService {
             text.append("Older: repeat with end=\"").append(iso(QueryTime.ceilMillis(oldest), zone)).append("\". ");
             text.append("Too many lines? Narrow the query (add a filter or level) or use countLogs.");
         } else text.append("Shown all ").append(shown).append(" matching lines.");
+        return text.toString();
+    }
+
+    /**
+     * Lines of one stream selector around a moment: {@code before} lines up to it and {@code after} lines past it,
+     * counted in lines rather than time, so the result does not depend on how busy the service is.
+     * Lines at the moment itself (within the precision of {@code time}) are marked with {@code >>>}.
+     */
+    public String context(String connection, String selector, String time, Integer before, Integer after) {
+        var definition = registry.require(connection);
+        if (selector == null || selector.isBlank())
+            throw Errors.invalid("selector is required: the stream selector of the line, e.g. {app=\"backend\"}.");
+        if (selector.length() > DiscoveryLimits.SELECTOR_CHARACTERS || !DiscoveryService.SELECTOR.matcher(selector).matches())
+            throw Errors.invalid("selector must be a stream selector only, like {app=\"backend\"}: no |= filters or | json, so that "
+                    + "neighbouring lines without the filtered text (e.g. stack trace continuations) are shown. "
+                    + "Take it from discoverLogs or from the braces of the query you used.");
+        if (time == null || time.isBlank())
+            throw Errors.invalid("time is required: the time of the line as printed by queryLogs, e.g. \"10:12:03.123\", or \"2026-09-13T10:12:03.123+03:00\".");
+        int maximum = definition.limits().maxEntries();
+        int wantBefore = before == null ? Math.min(DEFAULT_CONTEXT, maximum - 1) : before;
+        int wantAfter = after == null ? Math.min(DEFAULT_CONTEXT, maximum) : after;
+        if (wantBefore < 0 || wantAfter < 0 || wantBefore >= maximum || wantAfter > maximum)
+            throw Errors.invalid("before and after must be between 0 and " + (maximum - 1) + " for this connection.");
+        ZoneId zone = definition.timezone();
+        var point = QueryTime.point(time, clock.instant(), zone);
+        Duration reach = Duration.ofSeconds(definition.limits().maxIntervalSeconds());
+        String scope = selector.strip();
+        // One extra line backward for the target itself; the forward page starts right after the moment.
+        var earlier = fetch(connection, scope, new QueryTime.Range(point.end().minus(reach), point.end()), wantBefore + 1, LokiHttpClient.Direction.BACKWARD);
+        var later = wantAfter == 0 ? List.<LogEvent>of()
+                : fetch(connection, scope, new QueryTime.Range(point.end(), point.end().plus(reach)), wantAfter, LokiHttpClient.Direction.FORWARD);
+        int targets = (int) earlier.stream().filter(e -> !QueryTime.fromNanos(e.timestampNanos()).isBefore(point.at())).count();
+        // Without a line at the moment the spare slot holds one more old line than asked for; drop it.
+        if (targets == 0 && earlier.size() > wantBefore) earlier = new ArrayList<>(earlier.subList(earlier.size() - wantBefore, earlier.size()));
+        int beforeCount = earlier.size() - targets;
+        var events = new ArrayList<LogEvent>(earlier); events.addAll(later);
+        var lines = new ArrayList<String>(events.size());
+        for (int i = 0; i < events.size(); i++) {
+            String text = line(events.get(i), normalizer.view(events.get(i), definition.serviceLabels()), zone, false);
+            lines.add(i >= beforeCount && i < earlier.size() ? ">>> " + text : text);
+        }
+        String moment = DATE_TIME.format(point.at().atZone(zone)) + (point.precision().compareTo(Duration.ofSeconds(1)) < 0
+                ? "." + String.format("%03d", point.at().atZone(zone).getNano() / 1_000_000) : "");
+        String header = "Context in " + scope + " around " + moment + " (" + point.at().atZone(zone).getOffset() + ") — " + connection
+                + ", lines: " + beforeCount + " before, " + targets + " at that time, " + later.size() + " after:";
+        String placeholder = targets == 0 ? ">>> (no line at exactly this time in " + scope + "; lines before and after it follow)" : null;
+        int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
+        // The moment stays in the middle: trim the longer side first, never the marked lines.
+        int keepBefore = beforeCount, keepAfter = later.size();
+        while (true) {
+            var window = events.subList(beforeCount - keepBefore, earlier.size() + keepAfter);
+            var marked = withDateMarkers(window, lines.subList(beforeCount - keepBefore, earlier.size() + keepAfter), zone);
+            if (placeholder != null) marked.add(marked.size() - keepAfter, placeholder);
+            int dropped = (beforeCount - keepBefore) + (later.size() - keepAfter);
+            String text = assemble(header, marked, contextFooter(earlier, later, targets, wantBefore, wantAfter, keepBefore, keepAfter, dropped, point, reach, zone));
+            if (bytes(text) <= budget) return text;
+            if (keepBefore == 0 && keepAfter == 0) throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                    "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the selector or raise the limit.");
+            if (keepAfter > keepBefore) keepAfter--; else keepBefore--;
+        }
+    }
+
+    private static String contextFooter(List<LogEvent> earlier, List<LogEvent> later, int targets, int wantBefore, int wantAfter,
+                                        int keepBefore, int keepAfter, int dropped, QueryTime.Point point, Duration reach, ZoneId zone) {
+        var text = new StringBuilder();
+        int beforeCount = earlier.size() - targets;
+        if (dropped > 0) text.append("Output limit reached: showing ").append(keepBefore).append(" before and ").append(keepAfter)
+                .append(" after of ").append(earlier.size() + later.size()).append(" fetched lines. ");
+        String span = QueryTime.human(reach);
+        if (targets > 0 && targets == earlier.size() && targets > wantBefore)
+            text.append("All ").append(targets).append(" fetched lines are at this time; ")
+                    .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs" : "narrow the selector")
+                    .append(" to see what came before. ");
+        else if (beforeCount < wantBefore) text.append("No earlier lines within ").append(span).append(" before this time. ");
+        else if (keepBefore > 0) text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
+        if (wantAfter > 0 && later.size() < wantAfter) text.append("No later lines within ").append(span).append(" after this time. ");
+        else if (keepAfter > 0) text.append("Later: repeat with time=\"").append(iso(QueryTime.fromNanos(later.get(keepAfter - 1).timestampNanos()), zone)).append("\", before=0. ");
+        text.append("Full original line: queryLogs with raw=true and a narrow filter.");
         return text.toString();
     }
 
@@ -170,16 +250,18 @@ public class QueryService {
         return fit(text.toString(), List.of(), ignored -> "", definition.limits().maxResponseBytes() - ENVELOPE_BYTES);
     }
 
-    List<LogEvent> fetch(String connection, String query, QueryTime.Range window, int limit) {
-        var response = client.queryRange(connection, query, window.start(), window.end(), limit, LokiHttpClient.Direction.BACKWARD, null);
+    /** Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD. */
+    List<LogEvent> fetch(String connection, String query, QueryTime.Range window, int limit, LokiHttpClient.Direction direction) {
+        var response = client.queryRange(connection, query, window.start(), window.end(), limit, direction, null);
         if (!(response.data() instanceof LokiResponses.Streams streams))
             throw Errors.invalid("This is a metric expression; queryLogs reads log lines. Use queryMetrics for metric LogQL.");
         var events = new ArrayList<LogEvent>();
         for (var stream : streams.streams()) for (var entry : stream.entries())
             events.add(new LogEvent(entry.timestampNanos(), stream.labels(), entry.line(), entry.structuredMetadata()));
         events.sort(Comparator.comparingLong(LogEvent::nanos)); // Stable: identical timestamps keep upstream order and multiplicity.
-        // Backward reads return the newest entries; a page larger than the limit is trimmed from the old end.
-        return events.size() > limit ? new ArrayList<>(events.subList(events.size() - limit, events.size())) : events;
+        // A page larger than the limit is trimmed on the side the direction did not favour.
+        if (events.size() <= limit) return events;
+        return new ArrayList<>(direction == LokiHttpClient.Direction.BACKWARD ? events.subList(events.size() - limit, events.size()) : events.subList(0, limit));
     }
 
     static String countExpression(String query, Duration range, String by) {

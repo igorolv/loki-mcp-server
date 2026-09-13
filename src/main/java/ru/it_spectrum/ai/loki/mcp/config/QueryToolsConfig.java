@@ -43,7 +43,7 @@ public class QueryToolsConfig {
                             maximum = registry.require(connection).limits().maxResponseBytes();
                         }
                         if (!validator.validate(spec.tool().inputSchema(), args).valid())
-                            throw Errors.invalid("Argument types are wrong. Times and query are strings, limit is an integer, raw is a boolean.");
+                            throw Errors.invalid("Argument types are wrong. Times, query and selector are strings; limit, before and after are integers; raw is a boolean.");
                         var result = spec.callHandler().apply(exchange, request);
                         return size(result) > maximum ? error(new ToolError(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                                 "Response exceeds maxResponseBytes of this connection. Narrow the query or lower the limit.", false)) : result;
