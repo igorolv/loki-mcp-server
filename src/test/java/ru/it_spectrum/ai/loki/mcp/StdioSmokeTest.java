@@ -9,6 +9,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
 import java.util.Map;
+import java.util.List;
 import java.util.stream.StreamSupport;
 
 import java.io.BufferedWriter;
@@ -38,12 +39,15 @@ class StdioSmokeTest {
         upstream.createContext("/", exchange -> {
             try (exchange) {
                 String query = java.net.URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
-                int status = query.contains("query=fail") ? 403 : 200;
+                int status = query.contains("query=fail") ? 403
+                        : exchange.getRequestURI().getPath().endsWith("/series") && query.contains("blocked") ? 404 : 200;
                 String body = status == 403 ? "SECRET_TOKEN upstream error" : query.contains("step=")
                         ? "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}"
                         : query.contains("query=metric")
                         ? "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"NaN\"]}]}}"
                         : "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
+                if (exchange.getRequestURI().getPath().endsWith("/series")) body = status == 404 ? "SECRET_TOKEN path blocked"
+                        : "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(status, bytes.length);
                 exchange.getResponseBody().write(bytes);
@@ -115,7 +119,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(3, catalog.size());
+            assertEquals(4, catalog.size());
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("listConnections")).findFirst().orElseThrow();
             assertEquals("listConnections", tool.path("name").asText());
@@ -197,6 +201,41 @@ class StdioSmokeTest {
                     assertEquals("NaN", payload.path("series").get(0).path("samples").get(0).path("value").asText());
                 }
                 assertNoSecrets(call.toString());
+            }
+            for (int id = 70; id < 86; id++) {
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
+                        "params", Map.of("name", "discoverLogs", "arguments", Map.of("connection", "test",
+                                "selector", id % 2 == 0 ? "{kind=\"test\"}" : "{kind=\"blocked\"}",
+                                "start", "1700000000000000000", "end", "1700000001000000000")))));
+            }
+            ids.clear();
+            for (int i = 0; i < 16; i++) {
+                var call = response(stdout, stderr);
+                int id = call.path("id").asInt();
+                assertTrue(id >= 70 && id < 86 && ids.add(id));
+                var result = call.path("result");
+                assertFalse(result.path("isError").asBoolean(), result.toString());
+                var payload = result.path("structuredContent");
+                var validation = validator.validate(schemas.get("discoverLogs"), mapper.convertValue(payload, Object.class));
+                assertTrue(validation.valid(), validation.errorMessage());
+                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                assertEquals(1, payload.path("coverage").path("entriesExamined").asInt());
+                var capability = payload.path("capabilities").get(0);
+                assertEquals(id % 2 == 0 ? "AVAILABLE" : "UNAVAILABLE_AT_PATH", capability.path("availability").asText());
+                assertEquals(id % 2 != 0, capability.has("errorCode"));
+                assertNoSecrets(call.toString());
+            }
+            for (var bad : List.of(Map.of("selector", "{kind=\"test\"}"),
+                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "sampleLimit", "SECRET_TOKEN"))) {
+                var args = new HashMap<String, Object>(bad);
+                args.put("start", "now-1s"); args.put("end", "now");
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 86, "method", "tools/call",
+                        "params", Map.of("name", "discoverLogs", "arguments", args))));
+                var result = response(stdout, stderr).path("result");
+                assertTrue(result.path("isError").asBoolean());
+                assertEquals(args.containsKey("connection") ? "INVALID_ARGUMENT" : "CONNECTION_REQUIRED",
+                        result.path("structuredContent").path("code").asText());
+                assertNoSecrets(result.toString());
             }
             String[] errorCodes = {"CONNECTION_REQUIRED", "UNKNOWN_CONNECTION", "UPSTREAM_FORBIDDEN", "INVALID_ARGUMENT", "INVALID_ARGUMENT"};
             for (int index = 0; index < errorCodes.length; index++) {

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import ru.it_spectrum.ai.loki.mcp.service.*;
 import ru.it_spectrum.ai.loki.mcp.tools.QueryTools;
 import ru.it_spectrum.ai.loki.mcp.tools.ConnectionTools;
+import ru.it_spectrum.ai.loki.mcp.tools.DiscoveryTools;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
 import tools.jackson.databind.json.JsonMapper;
@@ -17,8 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Configuration(proxyBeanMethods = false)
 public class QueryToolsConfig {
     @Bean
-    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections) {
-        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections))) {
+    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections, DiscoveryService discovery) {
+        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
             @Override protected Class<? extends Throwable> doGetToolCallException() { return Error.class; }
         };
         var mapper = new JsonMapper();

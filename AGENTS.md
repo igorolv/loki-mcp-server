@@ -59,8 +59,8 @@
 Версии сверять с `gradle/libs.versions.toml`; изменения зависимостей
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
-S01–S04 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
-Доступны `listConnections`, `queryLogs`, `queryMetrics`, обязательная внешняя
+S01–S05 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
+Доступны `listConnections`, `queryLogs`, `queryMetrics`, `discoverLogs`, обязательная внешняя
 конфигурация и immutable registry. Контракт запросов: [docs/queries.md](docs/queries.md).
 Стандартные команды Windows PowerShell:
 
@@ -96,7 +96,7 @@ java -jar build/libs/loki-mcp-server.jar
 
 `test` зависит от `bootJar`: `StdioSmokeTest` запускает jar отдельным Java 21
 процессом, проверяет initialize/initialized, 16 outstanding ping-запросов и 16 вызовов
-listConnections, 16 outstanding queryLogs/queryMetrics (instant/range), tools/list,
+listConnections, 16 outstanding queryLogs/queryMetrics (instant/range), 16 discoverLogs, tools/list,
 output schema и равенство text/structuredContent.
 Проверяются default/override конфигурации, чистота stdout и отсутствие секретов
 в ответах и stderr/file логах, безопасный отказ запуска на невалидном файле.
@@ -130,6 +130,19 @@ timestamps, counts, limits и пустые ответы; отсутствие Do
 
 ## Архитектура и модели
 
+S05: `discoverLogs` читает `/series` и ограниченную backward-выборку `/query_range`
+с одним селектором и фиксированным окном. Контракт: [docs/discovery.md](docs/discovery.md).
+Метки результата поиска не подменяют stream labels из `/series`; поля разделены
+по origin и JSON Pointer. `EventNormalizer` разбирает JSON/ECS и сохраняет plain text
+в исходных примерах. Конфликтующие ECS-кандидаты имеют отдельные пути, время события
+не заменяет timestamp Loki. Новые endpoints не определяются по версии, недоступность
+одного пути не мешает второму. `DiscoveryLimits` централизует ограничения выборки,
+series, меток/значений и разбора. Строгий wire budget и проекция остаются S06.
+Проверены 132 обычных теста и 2 контейнерных сценария, включая discovery на Loki
+2.6.1/3.6.0. Loki 3.6.0 может добавлять `service_name` при ingestion; тесты не должны
+предполагать точное отсутствие дополнительных меток. Structured metadata 3.x
+в контейнерной fixture отключена; её transport/provenance проверяются mock/unit-тестами.
+
 - MCP tool-классы — тонкие адаптеры: аргументы, вызов сервисов, типизированный результат.
 - Прикладная логика — в сервисах; HTTP-клиент отвечает за транспорт и Loki DTO.
   Сервисы не зависят от tool-классов.
@@ -137,7 +150,7 @@ timestamps, counts, limits и пустые ответы; отсутствие Do
   описывать Java records в отдельном пакете моделей.
 - `client/LokiResponses` — transport records; `LogStream.labels` содержит метки
   результата, а не доказанный исходный stream scope. Structured metadata и pipeline
-  могут попадать в эти метки. Не угадывать происхождение при реализации S05/S09.
+  могут попадать в эти метки. Не угадывать происхождение при реализации навигации S09.
 - `Map` допустим для произвольных полей событий, меток и внутренних JSON-структур.
   Не заменять им стабильные публичные DTO.
 - Настройки лимитов и таймаутов централизовать; не дублировать магические числа в tools.
@@ -156,7 +169,7 @@ timestamps, counts, limits и пустые ответы; отсутствие Do
 на выбранной версии SDK компиляция и несколько outstanding ping-запросов проверены.
 Несколько outstanding вызовов listConnections проверены в S02; при добавлении data tools
 проверять также их handlers. Не переходить на async без проверки stdio-поведения.
-S04 проверяет handlers queryLogs/queryMetrics. Все tools регистрировать через
+S04 проверяет handlers queryLogs/queryMetrics, S05 — discoverLogs. Все tools регистрировать через
 безопасную обёртку `QueryToolsConfig`: input schema проверяется внутри неё,
 автоматическая input validation SDK отключена из-за логирования исходной диагностики.
 Не регистрировать новые tools отдельными component без этой проверки/обёртки.

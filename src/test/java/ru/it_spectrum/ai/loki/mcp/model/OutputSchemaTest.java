@@ -48,4 +48,18 @@ class OutputSchemaTest {
                     Completeness.COMPLETE, "CURSORS_NOT_IMPLEMENTED", scanned, List.of(), List.of()));
         }
     }
+
+    @Test void discoverySchemaValidatesEmptyAndPopulatedIncludingNullableCapabilities() {
+        var window = new Window("1", "2");
+        var coverage = new DiscoveryResult.Coverage(1, 1, 20, 1, 1, Completeness.COMPLETE, false);
+        validate(new DiscoveryResult("test", "{job=\"test\"}", window, coverage, List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
+        validate(new DiscoveryResult("test", "{job=\"test\"}", window, coverage,
+                List.of(new DiscoveryResult.Capability("series", DiscoveryResult.Availability.AVAILABLE, null),
+                        new DiscoveryResult.Capability("query_range", DiscoveryResult.Availability.UNKNOWN, ErrorCode.UPSTREAM_TIMEOUT)),
+                List.of(new DiscoveryResult.Label("job", List.of("test"), true)),
+                List.of(new DiscoveryResult.Field(DiscoveryResult.Origin.LINE_JSON, "/message", List.of("string", "null"), 1)),
+                List.of(new DiscoveryResult.FormatCount(DiscoveryResult.Format.JSON_OBJECT, 1)),
+                List.of(new DiscoveryResult.Example(new Event("1", Map.of(), "{}", Map.of()), DiscoveryResult.Format.JSON_OBJECT,
+                        List.of(new DiscoveryResult.NormalizedValue("service", DiscoveryResult.Origin.LINE_JSON, "/service.name", "backend")), List.of())), List.of()));
+    }
 }

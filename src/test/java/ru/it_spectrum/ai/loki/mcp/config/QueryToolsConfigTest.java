@@ -15,7 +15,7 @@ class QueryToolsConfigTest {
     @Test void unexpectedFailureIsSafeAndSchemaValidAndInvalidInputNeverInvokesService() {
         var service = mock(QueryService.class);
         when(service.logs("test", "q", "now-1s", "now", null, null)).thenThrow(new IllegalStateException("SECRET cause"));
-        var spec = new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class)).stream()
+        var spec = new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class)).stream()
                 .filter(s -> s.tool().name().equals("queryLogs")).findFirst().orElseThrow();
         var result = spec.callHandler().apply(null, new CallToolRequest("queryLogs",
                 Map.of("connection", "test", "query", "q", "start", "now-1s", "end", "now")));

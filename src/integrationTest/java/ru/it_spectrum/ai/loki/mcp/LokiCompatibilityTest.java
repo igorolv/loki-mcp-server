@@ -96,6 +96,31 @@ class LokiCompatibilityTest {
                 String empty = "sum(count_over_time({fixture=\"absent\"}[10s]))";
                 assertEquals(0, service.metrics("fixture", empty, "instant", null, null, end, null, null, null).returnedPoints());
                 assertEquals(0, service.metrics("fixture", empty, "range", start, end, null, BigDecimal.ONE, null, null).returnedPoints());
+                var discovery = new DiscoveryService(registry, client);
+                var discovered = discovery.discover("fixture", selector, start, end, 10);
+                assertEquals(2, discovered.coverage().seriesRead());
+                assertEquals(3, discovered.coverage().entriesExamined());
+                assertEquals(COMPLETE, discovered.coverage().sampleCompleteness());
+                // Loki 3.x may add service_name during ingestion; discover actual labels rather than assume their absence.
+                assertTrue(discovered.streamLabels().stream().map(l -> l.name()).toList().containsAll(List.of("fixture", "shard")));
+                assertEquals(List.of("a", "b"), discovered.streamLabels().stream().filter(l -> l.name().equals("shard")).findFirst().orElseThrow().observedValues());
+                assertTrue(discovered.capabilities().subList(0, 2).stream().allMatch(c -> c.availability()
+                        == ru.it_spectrum.ai.loki.mcp.model.DiscoveryResult.Availability.AVAILABLE));
+                assertEquals(UNKNOWN, discovery.discover("fixture", selector, start, end, 2).coverage().sampleCompleteness());
+                assertEquals(0, discovery.discover("fixture", "{fixture=\"absent\"}", start, end, 10).coverage().entriesExamined());
+                String ecs = "{\"service.name\":\"backend\",\"log\":{\"level\":\"ERROR\"},\"message\":\"Ошибка 🐈\"}";
+                String mixedBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(java.util.Map.of("streams", List.of(
+                        java.util.Map.of("stream", java.util.Map.of("fixture", "s05"), "values", List.of(List.of(a, ecs), List.of(b, "plain"))))));
+                var mixedPush = http.send(HttpRequest.newBuilder(url.resolve("/loki/api/v1/push"))
+                        .timeout(Duration.ofSeconds(15)).header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(mixedBody)).build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(204, mixedPush.statusCode(), mixedPush.body());
+                var mixed = discovery.discover("fixture", "{fixture=\"s05\"}", start, end, 10);
+                assertEquals(2, mixed.coverage().entriesExamined());
+                assertEquals(2, mixed.formats().size());
+                assertTrue(mixed.fields().stream().anyMatch(f -> f.path().equals("/log/level") && f.observedEntries() == 1));
+                assertTrue(mixed.examples().stream().anyMatch(e -> e.event().line().equals(ecs)
+                        && e.normalized().stream().anyMatch(v -> v.name().equals("service") && v.value().equals("backend"))));
             }
         }
     }

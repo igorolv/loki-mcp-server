@@ -1,6 +1,6 @@
 # Поиск и метрики S04
 
-Доступны `listConnections`, `queryLogs` и `queryMetrics`. Все запросы данных требуют
+Доступны `listConnections`, `queryLogs`, `queryMetrics` и [discoverLogs](discovery.md). Все запросы данных требуют
 явного `connection`. Сервер отправляет LogQL без переписывания и без обязательных probes.
 Контракт HTTP: [Loki API](https://grafana.com/docs/loki/latest/reference/loki-http-api/).
 
