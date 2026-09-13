@@ -1,6 +1,6 @@
 # Поиск и метрики
 
-Доступны `listConnections`, `queryLogs`, `queryMetrics` и [discoverLogs](discovery.md). Все запросы данных требуют
+Доступны `listConnections`, `queryLogs`, [continueLogs](pagination.md), `queryMetrics` и [discoverLogs](discovery.md). Все запросы данных требуют
 явного `connection`. Сервер отправляет LogQL без переписывания и без обязательных probes.
 Контракт HTTP: [Loki API](https://grafana.com/docs/loki/latest/reference/loki-http-api/).
 
@@ -28,10 +28,12 @@ Loki как числовые секунды с точностью, предос�
 ```
 
 `direction` — `forward` или `backward` (default); `limit` — положительное целое,
-не больше `maxEntries`, default равен `maxEntries`. Превышение настройки — ошибка,
+не больше `maxEntries`, default равен `maxEntries`. Это предел страницы MCP;
+`upstreamFetchLimit` — отдельный фактический лимит чтения Loki (maxEntries).
+Превышение настройки — ошибка,
 без молчаливого изменения аргумента. События всех потоков сортируются по времени,
 включая наносекунды. Одинаковые timestamps и повторяющиеся строки не удаляются;
-для равного времени сохраняется порядок полученного ответа, без гарантии между запросами.
+для равного времени применяется детерминированный порядок fingerprint полного события.
 
 `events` содержат `timestampNanos`, `streamId`, выбранные через `fields` поля,
 `truncatedFields` и `limitations`. Метки `resultLabels` вынесены в словарь `streams`.
@@ -55,8 +57,11 @@ Loki как числовые секунды с точностью, предос�
 - `PARTIAL`: часть записей исключена локально по limit или бюджету ответа.
 
 Пустой ответ описывает результат данного запроса; он не устанавливает причину
-отсутствия данных. `continuationUnavailableReason=CURSORS_NOT_IMPLEMENTED`:
-дочитывание страниц ещё не поддерживается. Нельзя имитировать его сдвигом на 1 ns.
+отсутствия данных. `nextCursor` передаётся в `continueLogs(connection, cursor)`.
+Исходное окно фиксировано в queryWindow; window показывает фактический запрос страницы.
+Остановка на насыщении, пересечение, TTL и ограничения описаны в [пагинации](pagination.md).
+Для log query верхняя граница end исключающая; временные границы metric evaluation
+имеют отдельную семантику.
 
 ## queryMetrics
 
@@ -111,7 +116,8 @@ SDK отключена, поскольку она пишет исходную д
 
 Применяются лимиты окна, записей, рядов/точек и HTTP body. В S06 добавлены
 `maxResponseBytes` для полного MCP wire response, проекция и сокращение строк.
-Нет кеша, entryId, деталей или курсоров. Условия сокращения и ошибки минимального
+Кеш событий, entryId и getLogEntry исключены из плана; детали — уточняющий запрос.
+Для логов есть stateless cursors S08. Условия сокращения и ошибки минимального
 бюджета описаны в [контракте компактной выдачи](compact-responses.md).
 
 ## Проверки

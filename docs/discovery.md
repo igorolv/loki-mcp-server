@@ -97,7 +97,7 @@ capabilities, `SAMPLE_NOT_EXAMINED`/`SERIES_NOT_EXAMINED` и `UNKNOWN`, а не 
 В S06 применяется [полный бюджет сериализованного MCP-ответа](compact-responses.md),
 включая исходные примеры, normalized и служебные поля в обеих частях payload.
 Аргумент `fields` доступен у queryLogs; у discovery это имя выходного каталога полей.
-Кеш, `entryId` и курсоры пока не реализованы.
+Кеш и `entryId` исключены из плана. Курсоры есть только у queryLogs/continueLogs (S08).
 
 ## Проверки
 

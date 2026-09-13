@@ -22,7 +22,18 @@ public record CompactLogs(
         @Schema(requiredMode = REQUIRED) List<String> fields,
         @Schema(requiredMode = REQUIRED) List<String> limitations,
         @Schema(requiredMode = REQUIRED) List<Stream> streams,
-        @Schema(requiredMode = REQUIRED) List<Event> events) {
+        @Schema(requiredMode = REQUIRED) List<Event> events,
+        @Schema(requiredMode = NOT_REQUIRED, nullable = true) String nextCursor,
+        @Schema(requiredMode = REQUIRED) int upstreamFetchLimit,
+        @Schema(requiredMode = REQUIRED) QueryResults.Window queryWindow) {
+    public CompactLogs(String connection, QueryResults.Window window, String direction, int limit,
+                       int readEntries, int returnedEntries, int resultStreams, boolean upstreamLimitReached,
+                       QueryResults.Completeness completeness, String continuationUnavailableReason, Long totalLinesProcessed,
+                       List<String> fields, List<String> limitations, List<Stream> streams, List<Event> events) {
+        this(connection, window, direction, limit, readEntries, returnedEntries, resultStreams, upstreamLimitReached,
+                completeness, continuationUnavailableReason, totalLinesProcessed, fields, limitations, streams, events,
+                null, limit, window);
+    }
     public CompactLogs {
         fields = List.copyOf(fields); limitations = List.copyOf(limitations);
         streams = List.copyOf(streams); events = List.copyOf(events);

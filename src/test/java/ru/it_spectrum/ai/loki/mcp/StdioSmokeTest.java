@@ -127,7 +127,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(4, catalog.size());
+            assertEquals(5, catalog.size());
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("listConnections")).findFirst().orElseThrow();
             assertEquals("listConnections", tool.path("name").asText());
@@ -215,6 +215,36 @@ class StdioSmokeTest {
                 }
             }
             // Outstanding data calls exercise actual handlers and SDK serialization, including optional fields.
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 110, "method", "tools/call",
+                    "params", Map.of("name", "queryLogs", "arguments", Map.of("connection", "test", "query", "large",
+                            "start", "1700000000000000000", "end", "1700000001000000000", "limit", 1, "fields", List.of())))));
+            var firstPage = response(stdout, stderr).path("result").path("structuredContent");
+            String cursor = firstPage.path("nextCursor").asText();
+            assertFalse(cursor.isBlank());
+            for (int id = 111; id < 127; id++) {
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
+                        "params", Map.of("name", "continueLogs", "arguments", Map.of("connection", "test", "cursor", cursor)))));
+            }
+            ids.clear();
+            for (int i = 0; i < 16; i++) {
+                String wire = stdout.poll(20, TimeUnit.SECONDS);
+                assertNotNull(wire);
+                assertTrue(wire.getBytes(StandardCharsets.UTF_8).length + 1 <= 6000);
+                assertFalse(wire.contains("loki.internal"));
+                var call = mapper.readTree(wire);
+                assertTrue(ids.add(call.path("id").asInt()));
+                var result = call.path("result");
+                assertFalse(result.path("isError").asBoolean(), result.toString());
+                var payload = result.path("structuredContent");
+                assertEquals(1, payload.path("returnedEntries").asInt());
+                assertTrue(payload.has("nextCursor"));
+                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                var validation = validator.validate(schemas.get("continueLogs"), mapper.convertValue(payload, Object.class));
+                assertTrue(validation.valid(), validation.errorMessage());
+            }
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 127, "method", "tools/call",
+                    "params", Map.of("name", "continueLogs", "arguments", Map.of("connection", "dev", "cursor", cursor)))));
+            assertEquals("INVALID_CURSOR", response(stdout, stderr).path("result").path("structuredContent").path("code").asText());
             for (int id = 35; id < 51; id++) {
                 String name = id % 2 == 0 ? "queryLogs" : "queryMetrics";
                 Map<String, Object> arguments = id % 2 == 0

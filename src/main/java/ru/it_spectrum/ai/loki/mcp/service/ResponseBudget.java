@@ -24,17 +24,19 @@ public final class ResponseBudget {
     public JSONRPCResponse fit(JSONRPCResponse response) {
         if (!(response.result() instanceof CallToolResult result)) return response;
         var payload = (ObjectNode) mapper.valueToTree(result.structuredContent());
+        var draft = result.meta() != null && result.meta().get(LogPagingService.DRAFT_META) instanceof LogPagingService.Draft page ? page : null;
         int maximum = Boolean.TRUE.equals(result.isError()) ? ConnectionLimits.MIN_RESPONSE_BYTES : ConnectionLimits.DEFAULTS.maxResponseBytes();
         if (payload.has("connection")) maximum = registry.require(payload.path("connection").asText()).limits().maxResponseBytes();
-        if (size(response) <= maximum) return response;
+        var initial = draft == null ? response : pageResponse(response.id(), payload, draft);
+        if (size(initial) <= maximum) return initial;
         if (!Boolean.TRUE.equals(result.isError())) {
             while (shortenText(payload)) {
-                var candidate = response(response.id(), payload, false);
+                var candidate = pageResponse(response.id(), payload, draft);
                 if (size(candidate) <= maximum) return candidate;
             }
             markTruncated(payload);
             while (reduce(payload)) {
-                var candidate = response(response.id(), payload, false);
+                var candidate = pageResponse(response.id(), payload, draft);
                 if (size(candidate) <= maximum) return candidate;
             }
         }
@@ -47,6 +49,11 @@ public final class ResponseBudget {
     }
 
     public int size(JSONRPCResponse response) { return mapper.writeValueAsBytes(response).length + 1; }
+
+    private JSONRPCResponse pageResponse(Object id, ObjectNode payload, LogPagingService.Draft draft) {
+        if (draft != null) draft.finish(payload);
+        return response(id, payload, false);
+    }
 
     private JSONRPCResponse response(Object id, ObjectNode payload, boolean error) {
         @SuppressWarnings("unchecked") Map<String, Object> structured = mapper.convertValue(payload, Map.class);

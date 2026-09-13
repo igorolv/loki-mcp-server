@@ -66,7 +66,7 @@ class ResponseBudgetTest {
     @Test void minimumBudgetAndOversizedServiceFieldsYieldSafeTypedError() {
         var logs = ResponseProjection.project(ResponseProjectionTest.logs(List.of()), List.of());
         var payload = check(budget(1024).fit(response(logs, 1)), 1024, CompactLogs.class);
-        assertEquals(0, payload.path("returnedEntries").asInt());
+        assertEquals("RESPONSE_BUDGET_EXCEEDED", payload.path("code").asText());
         var huge = new DiscoveryResult("test", "SECRET".repeat(10000), new Window("1", "2"),
                 new DiscoveryResult.Coverage(0, 0, 10, 0, 0, Completeness.COMPLETE, false),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of());

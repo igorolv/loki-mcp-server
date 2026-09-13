@@ -31,7 +31,8 @@ JSON-строка события может перестать быть JSON, н
 описывает охват записей, а `EVENT_FIELDS_TRUNCATED` — содержимое полей.
 Кеша пока нет: `PROJECTION_APPLIED_ORIGINAL_NOT_CACHED_DETAILS_UNAVAILABLE`
 явно предупреждает, что скрытое/сокращённое содержимое нельзя раскрыть по ID.
-`entryId`, `getLogEntry` и курсоров до S07/S08 нет. После `line_format` исходный
+`entryId` и `getLogEntry` исключены вместе с S07. Детали — уточняющий запрос Loki;
+продолжение — [stateless cursor S08](pagination.md). После `line_format` исходный
 текст до pipeline может быть утрачен ещё в Loki.
 
 ## Бюджет wire response
@@ -60,7 +61,9 @@ HTTP body имеет отдельный лимит. Прямые Java-вызов
 
 Сокращения по размеру отмечены `RESPONSE_BYTE_BUDGET`. При исключении записей/точек
 `completeness=PARTIAL`, `returned*` отражают фактическую выдачу, `read*` не меняются.
-Порядок оставшихся событий и реальная кратность повторов сохраняются; продолжения нет.
+Порядок оставшихся событий и реальная кратность повторов сохраняются.
+У queryLogs/continueLogs курсор рассчитывается по фактически выданному префиксу
+и входит в бюджет. У метрик и discovery продолжения нет.
 У discovery `coverage.localTruncation=true` относится также к сокращению выдачи;
 `entriesExamined` и `sampleCompleteness` описывают обследованную выборку, не размер
 списка примеров. Сокращённые примеры имеют `EXAMPLE_FIELDS_TRUNCATED` в limitations.

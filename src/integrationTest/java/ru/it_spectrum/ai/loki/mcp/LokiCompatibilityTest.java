@@ -79,6 +79,22 @@ class LokiCompatibilityTest {
                 assertEquals(2, logs.resultStreams()); assertEquals(COMPLETE, logs.completeness());
                 assertEquals(List.of(a, a, b), logs.events().stream().map(e -> e.timestampNanos()).toList());
                 assertTrue(logs.events().stream().anyMatch(e -> e.line().equals("Ошибка 🐈")));
+                var paging = new LogPagingService(service, registry, new LogCursorCodec());
+                var mapper = new tools.jackson.databind.json.JsonMapper();
+                for (String direction : List.of("forward", "backward")) {
+                    var page = paging.first("fixture", selector, start, end, direction, 1, List.of("line"));
+                    var received = new java.util.ArrayList<String>();
+                    int iterations = 0;
+                    while (true) {
+                        var payload = mapper.<tools.jackson.databind.node.ObjectNode>valueToTree(page.result());
+                        page.finish(payload);
+                        page.result().events().forEach(e -> received.add(e.timestampNanos()));
+                        if (!payload.has("nextCursor")) break;
+                        assertTrue(++iterations < 5);
+                        page = paging.next("fixture", payload.path("nextCursor").asText());
+                    }
+                    assertEquals(direction.equals("forward") ? List.of(a, a, b) : List.of(b, a, a), received);
+                }
                 var limited = service.logs("fixture", selector, start, end, "backward", 2);
                 assertEquals(2, limited.returnedEntries()); assertEquals(UNKNOWN, limited.completeness());
                 assertEquals(b, limited.events().getFirst().timestampNanos());

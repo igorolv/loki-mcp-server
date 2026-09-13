@@ -18,13 +18,19 @@ import tools.jackson.databind.json.JsonMapper;
 @Configuration(proxyBeanMethods = false)
 public class QueryToolsConfig {
     @Bean
-    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections, DiscoveryService discovery) {
-        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
+    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections, DiscoveryService discovery, LogPagingService paging) {
+        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service, paging), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
             @Override protected Class<? extends Throwable> doGetToolCallException() { return Error.class; }
         };
         var mapper = new JsonMapper();
         var validator = new DefaultJsonSchemaValidator();
-        return provider.getToolSpecifications().stream().map(spec -> SyncToolSpecification.builder().tool(spec.tool())
+        return provider.getToolSpecifications().stream().map(spec -> SyncToolSpecification.builder().tool(
+                spec.tool().name().equals("queryLogs") || spec.tool().name().equals("continueLogs")
+                ? io.modelcontextprotocol.spec.McpSchema.Tool.builder().name(spec.tool().name()).description(spec.tool().description())
+                    .inputSchema(spec.tool().inputSchema()).annotations(spec.tool().annotations())
+                    .outputSchema(provider.getJsonMapper(), org.springframework.ai.mcp.annotation.method.tool.utils.McpJsonSchemaGenerator
+                            .generateFromClass(ru.it_spectrum.ai.loki.mcp.model.CompactLogs.class)).build()
+                : spec.tool())
                 .callHandler((exchange, request) -> {
                     try {
                         var args = request.arguments() == null ? Map.<String, Object>of() : request.arguments();
