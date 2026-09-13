@@ -49,15 +49,16 @@ final class LokiResponseDecoder {
         }
     }
 
+    // Loki 2.6.1 omits "data" entirely from /labels, /label/{name}/values and /series when nothing matches.
     LabelResponse labels(byte[] bytes) {
         JsonNode root = root(bytes);
-        return new LabelResponse(strings(root.path("data")), warnings(root));
+        return new LabelResponse(root.has("data") ? strings(root.path("data")) : List.of(), warnings(root));
     }
 
     SeriesResponse series(byte[] bytes) {
         JsonNode root = root(bytes);
         var streams = new ArrayList<Map<String, String>>();
-        for (JsonNode stream : array(root.path("data"))) streams.add(labelsMap(stream));
+        if (root.has("data")) for (JsonNode stream : array(root.path("data"))) streams.add(labelsMap(stream));
         return new SeriesResponse(streams, warnings(root));
     }
 

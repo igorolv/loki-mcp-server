@@ -118,7 +118,8 @@ public class DiscoveryService {
             else {
                 var shown = values.stream().limit(VALUES_LISTED).map(v -> truncate(v, 60)).toList();
                 text.append(String.join(", ", shown));
-                if (values.size() > shown.size()) text.append(" (+").append(values.size() - shown.size()).append(" more)");
+                if (values.size() > shown.size()) text.append(" (+").append(values.size() - shown.size())
+                        .append(" more: discoverLogs with label=\"").append(label.getKey()).append("\")");
             }
         }
     }

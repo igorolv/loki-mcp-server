@@ -75,6 +75,9 @@ class LokiResponseDecoderTest {
         var series = decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":\"a\"},{\"pod\":\"b\"}]}"));
         assertEquals(List.of(Map.of("pod", "a"), Map.of("pod", "b")), series.streams());
         assertTrue(decoder.series(bytes("{\"status\":\"success\",\"data\":[]}")).streams().isEmpty());
+        // Loki 2.6.1 answers {"status":"success"} without "data" when nothing matches.
+        assertTrue(decoder.labels(bytes("{\"status\":\"success\"}")).values().isEmpty());
+        assertTrue(decoder.series(bytes("{\"status\":\"success\"}")).streams().isEmpty());
         assertThrows(LokiOperationException.class, () -> decoder.labels(bytes("{\"status\":\"success\",\"data\":[3]}")));
         assertThrows(LokiOperationException.class, () -> decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":2}]}")));
     }

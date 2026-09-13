@@ -33,7 +33,9 @@ public final class EventNormalizer {
         var types = new LinkedHashMap<String, String>();
         Format format = parse(event.line(), values, types);
         String level = first(event.labels(), LEVEL_LABELS);
+        // Loki 3.x stamps detected_level="unknown" when it finds nothing; that is the absence of a level, not a level.
         if (level == null) level = first(event.structuredMetadata(), LEVEL_LABELS);
+        if (level != null && level.equalsIgnoreCase("unknown")) level = null;
         if (level == null) level = first(values, LEVEL_FIELDS);
         if (level == null && format == Format.PLAIN) {
             var matcher = PLAIN_LEVEL.matcher(event.line().substring(0, Math.min(event.line().length(), 120)));

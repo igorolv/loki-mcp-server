@@ -106,23 +106,28 @@ class QueryServiceTest {
         assertThrows(LokiOperationException.class, () -> service.count("one", "count_over_time({app=\"x\"}[1m])", null, null, null));
     }
     @Test void countByTimeUsesBucketsCoveringTheWindowAndMarksSpikes() {
-        // 12-minute window, 12 buckets of 60s evaluated at start+60s .. end.
+        // 12-minute window 11:48:00.123–12:00:00.123: 60s buckets aligned to the clock, evaluated at 11:49:00 .. 12:01:00,
+        // the same timestamps Loki itself aligns metric queries to.
         var samples = new java.util.ArrayList<MetricSample>();
-        Instant start = now.minusSeconds(720);
-        for (int i = 1; i <= 12; i++) samples.add(new MetricSample(BigDecimal.valueOf(start.plusSeconds(60L * i).getEpochSecond()), i == 5 ? "340" : "12"));
+        Instant aligned = Instant.parse("2026-09-13T11:48:00Z");
+        for (int i = 1; i <= 12; i++) samples.add(new MetricSample(BigDecimal.valueOf(aligned.plusSeconds(60L * i).getEpochSecond()), i == 5 ? "340" : "12"));
         when(client.queryRange(eq("one"), anyString(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(new QueryResponse(new Matrix(List.of(new MetricSeries(Map.of(), samples))), null, List.of()));
         var text = service.count("one", "{app=\"x\"}", "now-12m", "now", "time");
-        verify(client).queryRange("one", "sum(count_over_time({app=\"x\"} [60s]))", start.plusSeconds(60), now, 3,
+        verify(client).queryRange("one", "sum(count_over_time({app=\"x\"} [60s]))", aligned.plusSeconds(60), aligned.plusSeconds(780), 3,
                 LokiHttpClient.Direction.FORWARD, new BigDecimal("60.000"));
-        assertTrue(text.startsWith("472 lines match"), text);
+        assertTrue(text.startsWith("472 lines match {app=\"x\"} in 2026-09-13 11:48:00–12:01:00 (Z) (one)."), text);
         assertTrue(text.contains("By time (60s buckets, bucket start):"), text);
         assertTrue(text.contains("\n  11:48      12\n"), text);
         assertTrue(text.contains("\n  11:52     340  <- spike\n"), text);
-        assertEquals(12, text.lines().filter(l -> l.startsWith("  1")).count());
+        assertTrue(text.endsWith("\n  12:00       0"), text);
+        assertEquals(13, text.lines().filter(l -> l.startsWith("  1")).count());
         when(client.queryRange(eq("one"), anyString(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(new QueryResponse(new Matrix(List.of()), null, List.of()));
-        assertEquals("0 lines match {app=\"x\"} in 2026-09-13 11:48:00–12:00:00 (Z) (one).", service.count("one", "{app=\"x\"}", "now-12m", "now", "time"));
+        assertEquals("0 lines match {app=\"x\"} in 2026-09-13 11:48:00–12:01:00 (Z) (one).", service.count("one", "{app=\"x\"}", "now-12m", "now", "time"));
+        // A 6-hour window gets 30-minute buckets, a 15-minute window 2-minute ones.
+        assertEquals(Duration.ofMinutes(30), QueryService.niceStep(Duration.ofHours(6), QueryService.TIME_BUCKETS));
+        assertEquals(Duration.ofMinutes(2), QueryService.niceStep(Duration.ofMinutes(15), QueryService.TIME_BUCKETS));
     }
     @Test void metricsRenderSeriesTablesWithNiceStepsAndConnectionCaps() {
         long t0 = now.minusSeconds(600).getEpochSecond();
@@ -212,6 +217,10 @@ class QueryServiceTest {
         var same = service.context("one", "{app=\"x\"}", "11:59:59", 2, 0);
         assertTrue(same.contains("lines: 0 before, 3 at that time, 0 after:\n>>> 11:59:59.001"), same);
         assertTrue(same.contains("All 3 fetched lines are at this time; pass the time with milliseconds as printed by queryLogs to see what came before."), same);
+        // With millisecond precision the lines really share the moment (a plain-text stack trace): ask for more lines, not a narrower selector.
+        var burst = service.context("one", "{app=\"x\"}", "11:59:59.001", 2, 0);
+        assertTrue(burst.contains("lines: 0 before, 3 at that time, 0 after:"), burst);
+        assertTrue(burst.contains("All 3 fetched lines are at this time; repeat with a larger before (e.g. before=15) to see what came before."), burst);
     }
     @Test void contextValidatesBeforeNetworkAndKeepsTheTargetWhenTrimmingForTheBudget() {
         assertTrue(assertThrows(LokiOperationException.class, () -> service.context("one", "{app=\"x\"} |= \"ERROR\"", "11:59:59", null, null)).getMessage().contains("stream selector only"));

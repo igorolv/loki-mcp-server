@@ -6,8 +6,22 @@
       "url": "http://localhost:3100",
       "timezone": "UTC"
     },
+    "dev": {
+      "description": "asva2 DEV stand: Kubernetes, Loki 2.6.1, read-only ingress",
+      "hint": "Service = label applicationName (spring.application.name, NOT the container name: container nsi-connect logs as applicationName=\"nsi-backend\"); values like ssj-ui-backend, ssj-backend, nsi-backend, nspk-ui-backend. Whole environment: {namespace=~\"dev|asv-dev\"}. One release or PR stand: instance=\"ssj-main\", instance=\"ssj-pr-1285\" (helm release name); when applicationName is absent from a stream (service not restarted since the logging change), select by instance or container. Label app is asv-app/sp-app for every Java service and never identifies one. Label level (error, warn, info, lower case) exists only on lines written after the service restarted with the current logging config, and stack trace continuation lines of non-JSON services have no level at all: when the exception body is missing, call getLogContext with the selector WITHOUT level. Label userId exists only inside HTTP requests. traceId, logger, spanId are JSON fields (| json). No detected_level, no structured metadata on this Loki.",
+      "url": "${LOKI_DEV_URL}",
+      "timezone": "Europe/Moscow",
+      "serviceLabels": ["applicationName", "instance", "container"]
+    },
+    "tst": {
+      "description": "asva2 TST stand: docker-compose on the infra host, Loki 3.5, 7-day retention",
+      "hint": "Almost no traffic (only ssj-* services see real users): widen to start=\"now-6h\" or \"now-24h\" before concluding that a service is silent. Service = label applicationName (spring.application.name, NOT the container name: container nsi-connect logs as nsi-backend); container or infrastructure = label service (ssj-connect, config-server, nginx, kafka, keycloak). Whole environment: {job=\"docker\"}. Label level (error, warn, info) exists only on lines written after the service restarted with the current config; detected_level is structured metadata assigned by Loki, not a label, and covers more lines: add | detected_level=\"error\" after the selector. Stack trace continuation lines of non-JSON services have no level: call getLogContext with the selector WITHOUT level. Label userId exists only inside HTTP requests.",
+      "url": "${LOKI_TST_URL}",
+      "timezone": "Europe/Moscow",
+      "serviceLabels": ["applicationName", "service", "container"]
+    },
     "secured": {
-      "description": "Loki configured through environment variables",
+      "description": "Loki behind authentication, configured through environment variables",
       "url": "${LOKI_URL}",
       "auth": { "type": "BEARER", "token": "${LOKI_TOKEN}" },
       "tenant": "${LOKI_TENANT}",

@@ -57,11 +57,11 @@ class DiscoveryServiceTest {
         when(client.labels("one", now.minusSeconds(3600), now, null)).thenReturn(new LabelResponse(List.of("pod", "app", "level"), List.of()));
         when(client.labelValues(eq("one"), eq("app"), any(), any(), isNull())).thenReturn(new LabelResponse(List.of("b", "a"), List.of()));
         when(client.labelValues(eq("one"), eq("level"), any(), any(), isNull())).thenReturn(new LabelResponse(List.of("error", "info"), List.of()));
-        var pods = new ArrayList<String>(); for (int i = 0; i < 25; i++) pods.add("pod-" + i);
+        var pods = new ArrayList<String>(); for (int i = 0; i < 55; i++) pods.add("pod-" + i);
         when(client.labelValues(eq("one"), eq("pod"), any(), any(), isNull())).thenReturn(new LabelResponse(pods, List.of()));
         entries(Map.of("app", "a", "level", "info"), List.of(entry(1, "hello")));
         var text = service.discover("one", null, null, null, null);
-        assertTrue(text.startsWith("Labels in 2026-09-13 11:00:00–12:00:00 (Z) (one): 3.\nLabels:\n  app: a, b\n  level: error, info\n  pod: 25 distinct values (high cardinality, not listed)\n"), text);
+        assertTrue(text.startsWith("Labels in 2026-09-13 11:00:00–12:00:00 (Z) (one): 3.\nLabels:\n  app: a, b\n  level: error, info\n  pod: 55 distinct values (high cardinality, not listed)\n"), text);
         assertTrue(text.contains("Line format (1 newest lines sampled): plain text 1.\nLevels seen: INFO.\nExample line: hello\n"), text);
         assertTrue(text.endsWith("Next: use countLogs or queryLogs with a selector like {app=\"a\"}; filter by the level label, e.g. {..., level=\"error\"}; filter text with |= \"substring\"."), text);
         verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 20, LokiHttpClient.Direction.BACKWARD, null);
@@ -72,7 +72,7 @@ class DiscoveryServiceTest {
         series(streams);
         when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any())).thenThrow(Errors.failure(ErrorCode.UPSTREAM_TIMEOUT, "SECRET"));
         var text = service.discover("one", SELECTOR, "now-1s", "now", null);
-        assertTrue(text.contains("  job: v00, v01, v02, v03, v04, v05, v06, v07, v08, v09 (+5 more)\n"), text);
+        assertTrue(text.contains("  job: v00, v01, v02, v03, v04, v05, v06, v07, v08, v09 (+5 more: discoverLogs with label=\"job\")\n"), text);
         assertTrue(text.contains("No lines sampled in this window; fields are unknown."), text);
         assertFalse(text.contains("SECRET"));
         assertTrue(text.contains("Next: use countLogs or queryLogs with a selector like {job=\"test\"}; filter text"), text);

@@ -25,8 +25,9 @@ public class QueryService {
     public static final int TIME_BUCKETS = 12;
     public static final int METRIC_STEPS = 20;
     private static final List<Duration> NICE_STEPS = List.of(Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(10),
-            Duration.ofSeconds(30), Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(10), Duration.ofMinutes(30),
-            Duration.ofHours(1), Duration.ofHours(3), Duration.ofHours(6), Duration.ofHours(12), Duration.ofDays(1));
+            Duration.ofSeconds(30), Duration.ofMinutes(1), Duration.ofMinutes(2), Duration.ofMinutes(5), Duration.ofMinutes(10),
+            Duration.ofMinutes(15), Duration.ofMinutes(30), Duration.ofHours(1), Duration.ofHours(2), Duration.ofHours(3),
+            Duration.ofHours(6), Duration.ofHours(12), Duration.ofDays(1));
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
     private final Clock clock;
@@ -143,7 +144,8 @@ public class QueryService {
         String span = QueryTime.human(reach);
         if (targets > 0 && targets == earlier.size() && targets > wantBefore)
             text.append("All ").append(targets).append(" fetched lines are at this time; ")
-                    .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs" : "narrow the selector")
+                    .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs"
+                            : "repeat with a larger before (e.g. before=" + Math.min(wantBefore * 5 + 5, 200) + ")")
                     .append(" to see what came before. ");
         else if (beforeCount < wantBefore) text.append("No earlier lines within ").append(span).append(" before this time. ");
         else if (keepBefore > 0) text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
@@ -164,7 +166,7 @@ public class QueryService {
             long total = sum(vector(client.queryInstant(connection, countExpression(query, window.duration(), null), window.end())));
             return total + " lines match " + where + ".";
         }
-        if (groupBy.strip().equals("time")) return buckets(connection, query, window, zone, where);
+        if (groupBy.strip().equals("time")) return buckets(connection, query, window, zone);
         String label = groupBy.strip();
         if (!label.matches("[a-zA-Z_][a-zA-Z0-9_]*"))
             throw Errors.invalid("groupBy must be a label name (letters, digits, underscore) or \"time\".");
@@ -185,14 +187,22 @@ public class QueryService {
         return text.toString();
     }
 
-    private String buckets(String connection, String query, QueryTime.Range window, ZoneId zone, String where) {
-        Duration step = Duration.ofSeconds(Math.max(1, (window.duration().toSeconds() + TIME_BUCKETS - 1) / TIME_BUCKETS));
-        // Each evaluation at t counts (t-step, t]; starting one step in covers the window without a partial leading bucket.
-        var response = client.queryRange(connection, countExpression(query, step, null), window.start().plus(step), window.end(),
+    private String buckets(String connection, String query, QueryTime.Range window, ZoneId zone) {
+        // Clock-aligned "nice" steps: Loki itself aligns metric evaluations to multiples of the step (split by interval),
+        // so requesting other timestamps yields buckets nobody asked for. The edge buckets may extend past the window.
+        Duration step = niceStep(window.duration(), TIME_BUCKETS);
+        long seconds = step.toSeconds();
+        Instant first = Instant.ofEpochSecond(Math.floorDiv(window.start().getEpochSecond(), seconds) * seconds + seconds);
+        long endSecond = window.end().getEpochSecond() + (window.end().getNano() > 0 ? 1 : 0);
+        Instant last = Instant.ofEpochSecond(Math.floorDiv(endSecond + seconds - 1, seconds) * seconds);
+        if (!first.isBefore(last)) last = first.plus(step);
+        // Each evaluation at t counts (t-step, t].
+        var response = client.queryRange(connection, countExpression(query, step, null), first, last,
                 registry.require(connection).limits().maxEntries(), LokiHttpClient.Direction.FORWARD, stepSeconds(step));
         if (!(response.data() instanceof LokiResponses.Matrix matrix)) throw notMetric();
+        String where = query.strip() + " in " + window(new QueryTime.Range(first.minus(step), last), zone) + " (" + connection + ")";
         var counts = new TreeMap<Long, Long>();
-        for (Instant t = window.start().plus(step); !t.isAfter(window.end()); t = t.plus(step)) counts.put(t.getEpochSecond(), 0L);
+        for (Instant t = first; !t.isAfter(last); t = t.plus(step)) counts.put(t.getEpochSecond(), 0L);
         for (var series : matrix.series()) for (var sample : series.samples()) {
             long at = sample.timestampSeconds().setScale(0, RoundingMode.HALF_UP).longValueExact();
             counts.merge(at, value(sample.value()), Long::sum);
@@ -269,8 +279,10 @@ public class QueryService {
         return by == null ? "sum(" + inner + ")" : "sum by (" + by + ") (" + inner + ")";
     }
 
-    static Duration niceStep(Duration window) {
-        Duration minimum = window.dividedBy(METRIC_STEPS);
+    static Duration niceStep(Duration window) { return niceStep(window, METRIC_STEPS); }
+
+    static Duration niceStep(Duration window, int points) {
+        Duration minimum = window.dividedBy(points);
         for (var candidate : NICE_STEPS) if (candidate.compareTo(minimum) >= 0) return candidate;
         return NICE_STEPS.getLast();
     }
