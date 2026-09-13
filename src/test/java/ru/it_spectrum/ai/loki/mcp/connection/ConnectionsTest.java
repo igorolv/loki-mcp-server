@@ -32,7 +32,7 @@ class ConnectionsTest {
         var entries = load("""
                 {"connections":{
                   "a":{"url":"${URL}","auth":{"type":"BEARER","token":"${TOKEN}"},
-                       "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7}},
+                       "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7,"maxMetricSeries":2,"maxMetricPoints":9}},
                   "b":{"url":"http://localhost:1","description":"Test", "auth":{
                        "type":"BASIC","username":"reader","password":"${PASSWORD}"}},
                   "c":{"url":"http://localhost:2"}
@@ -45,6 +45,8 @@ class ConnectionsTest {
         assertEquals("Europe/Moscow", registry.require("a").timezone().getId());
         assertEquals("team-a", registry.require("a").tenant());
         assertEquals(7, registry.require("a").limits().maxEntries());
+        assertEquals(2, registry.require("a").limits().maxMetricSeries());
+        assertEquals(9, registry.require("a").limits().maxMetricPoints());
         assertEquals(ConnectionLimits.DEFAULTS, registry.require("b").limits());
         assertEquals("p$ass\\word", registry.require("b").auth().password());
         assertEquals(ConnectionAuth.NONE, registry.require("c").auth());
@@ -120,6 +122,13 @@ class ConnectionsTest {
         assertEquals(ErrorCode.INTERNAL_ERROR, error.code());
         assertFalse(error.message().contains("SECRET"));
         assertFalse(error.retryable());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"\"maxMetricSeries\":0", "\"maxMetricPoints\":-1",
+            "\"maxMetricPoints\":1.5", "\"maxMetricSeries\":\"2\""})
+    void rejectsInvalidMetricLimits(String limits) {
+        assertSafeConfigurationError(assertThrows(LokiOperationException.class, () -> load(
+                "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{" + limits + "}}}}")));
     }
 
     private void assertSafeConfigurationError(LokiOperationException failure) {

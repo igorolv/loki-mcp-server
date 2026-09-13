@@ -59,9 +59,9 @@
 Версии сверять с `gradle/libs.versions.toml`; изменения зависимостей
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
-S01–S03 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
-Доступен `listConnections`, обязательная внешняя конфигурация и immutable registry.
-Внутренний HTTP-клиент реализован; публичные data tools начинаются с S04.
+S01–S04 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
+Доступны `listConnections`, `queryLogs`, `queryMetrics`, обязательная внешняя
+конфигурация и immutable registry. Контракт запросов: [docs/queries.md](docs/queries.md).
 Стандартные команды Windows PowerShell:
 
 ```powershell
@@ -91,14 +91,17 @@ java -jar build/libs/loki-mcp-server.jar
 Пример: [examples/connections.json](examples/connections.json); реальные значения не коммитить.
 Загрузка строгая и без probes. Ошибки конфигурации завершают запуск без исходного текста
 парсера и credentials. HTTP-клиент применяет auth/tenant, connect/request timeout
-и лимит body; лимиты выборки и MCP-ответа добавляются в S04–S06.
+и лимит body; S04 применяет лимиты окна, записей, metric series/points.
+Бюджет всего MCP-ответа (`maxResponseBytes`) ещё не применяется — S06.
 
 `test` зависит от `bootJar`: `StdioSmokeTest` запускает jar отдельным Java 21
 процессом, проверяет initialize/initialized, 16 outstanding ping-запросов и 16 вызовов
-listConnections, tools/list, output schema и равенство text/structuredContent.
+listConnections, 16 outstanding queryLogs/queryMetrics (instant/range), tools/list,
+output schema и равенство text/structuredContent.
 Проверяются default/override конфигурации, чистота stdout и отсутствие секретов
 в ответах и stderr/file логах, безопасный отказ запуска на невалидном файле.
-Рабочий каталог и fixture connections.json временные; Docker и Loki не нужны.
+Рабочий каталог и fixture connections.json временные; mock Loki — loopback HTTP
+server внутри теста, Docker и реальный Loki не нужны.
 `ConnectionsTest` проверяет конфигурацию/registry/ошибки, `OutputSchemaTest` — DTO.
 
 S03 transport/decoder тесты (только loopback, без Loki/Docker/credentials):
@@ -111,8 +114,18 @@ S03 transport/decoder тесты (только loopback, без Loki/Docker/cred
 `LokiResponseDecoderTest` проверяет JSON fixtures. Это не runtime HTTP listener.
 Транспорт и его ограничения: [docs/http-client.md](docs/http-client.md).
 
-Задачи integration/live пока не созданы. После реализации добавить сюда их точные
-команды и условия запуска. На машине разработки Java 21 обнаружена Gradle в
+Контейнерная проверка S04 (отдельная opt-in задача, не входит в build/test):
+
+```powershell
+.\gradlew.bat integrationTest --console=plain
+```
+
+Требует Docker и загрузку фиксированных образов `grafana/loki:2.6.1`,
+`grafana/loki:3.6.0`; Testcontainers 2.0.3 задан в version catalog.
+Проверяет ingestion только в собственные временные контейнеры, логи/метрики,
+timestamps, counts, limits и пустые ответы; отсутствие Docker — ошибка, не skip.
+Команда проверена на машине разработки. Live-задачи пока нет.
+На машине разработки Java 21 обнаружена Gradle в
 `C:\Program Files\BellSoft\LibericaJDK-21`; путь не зашит в проект.
 
 ## Архитектура и модели
@@ -143,6 +156,11 @@ S03 transport/decoder тесты (только loopback, без Loki/Docker/cred
 на выбранной версии SDK компиляция и несколько outstanding ping-запросов проверены.
 Несколько outstanding вызовов listConnections проверены в S02; при добавлении data tools
 проверять также их handlers. Не переходить на async без проверки stdio-поведения.
+S04 проверяет handlers queryLogs/queryMetrics. Все tools регистрировать через
+безопасную обёртку `QueryToolsConfig`: input schema проверяется внутри неё,
+автоматическая input validation SDK отключена из-за логирования исходной диагностики.
+Не регистрировать новые tools отдельными component без этой проверки/обёртки.
+Ошибки имеют `isError=true` и ToolError в text/structuredContent.
 В текущем SDK результат дублируется в text и structuredContent; S06 должен учитывать
 обе части при бюджетировании. Optional DTO поля должны одинаково сериализоваться в обеих.
 

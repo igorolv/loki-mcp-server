@@ -9,6 +9,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
 import java.util.Map;
+import java.util.stream.StreamSupport;
 
 import java.io.BufferedWriter;
 import java.io.OutputStreamWriter;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -32,6 +34,22 @@ class StdioSmokeTest {
     @ValueSource(booleans = {false, true})
     @Timeout(60)
     void executableJarSpeaksOnlyJsonRpcOnStdout(boolean overrideFile) throws Exception {
+        var upstream = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/", exchange -> {
+            try (exchange) {
+                String query = java.net.URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
+                int status = query.contains("query=fail") ? 403 : 200;
+                String body = status == 403 ? "SECRET_TOKEN upstream error" : query.contains("step=")
+                        ? "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}"
+                        : query.contains("query=metric")
+                        ? "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"NaN\"]}]}}"
+                        : "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(status, bytes.length);
+                exchange.getResponseBody().write(bytes);
+            }
+        });
+        upstream.start();
         String executable = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
         Path java = Path.of(System.getProperty("java.home"), "bin", executable);
         Path stderr = temporaryDirectory.resolve("stderr.log");
@@ -43,9 +61,9 @@ class StdioSmokeTest {
                 {"connections":{
                   "dev":{"description":"Development","url":"http://127.0.0.1:1/private",
                     "auth":{"type":"BEARER","token":"SECRET_TOKEN"},"tenant":"SECRET_TENANT"},
-                  "test":{"url":"http://127.0.0.1:2"}
+                  "test":{"url":"http://127.0.0.1:%d"}
                 }}
-                """);
+                """.formatted(upstream.getAddress().getPort()));
         builder.environment().remove("LOKI_MCP_CONNECTIONS_FILE");
         if (overrideFile) {
             Path explicitFile = temporaryDirectory.resolve("custom.json");
@@ -97,8 +115,9 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(1, catalog.size());
-            JsonNode tool = catalog.get(0);
+            assertEquals(3, catalog.size());
+            JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
+                    .filter(t -> t.path("name").asText().equals("listConnections")).findFirst().orElseThrow();
             assertEquals("listConnections", tool.path("name").asText());
             assertTrue(tool.path("annotations").path("readOnlyHint").asBoolean());
             assertFalse(tool.path("annotations").path("destructiveHint").asBoolean());
@@ -136,7 +155,69 @@ class StdioSmokeTest {
                 }
                 assertNoSecrets(call.toString());
             }
+            var schemas = new HashMap<String, Map<String, Object>>();
+            for (var declaration : catalog) {
+                String name = declaration.path("name").asText();
+                if (!name.equals("listConnections")) {
+                    assertTrue(declaration.path("annotations").path("openWorldHint").asBoolean());
+                    assertTrue(declaration.path("annotations").path("readOnlyHint").asBoolean());
+                    @SuppressWarnings("unchecked") Map<String, Object> output = mapper.convertValue(declaration.path("outputSchema"), Map.class);
+                    schemas.put(name, output);
+                }
+            }
+            // Outstanding data calls exercise actual handlers and SDK serialization, including optional fields.
+            for (int id = 35; id < 51; id++) {
+                String name = id % 2 == 0 ? "queryLogs" : "queryMetrics";
+                Map<String, Object> arguments = id % 2 == 0
+                        ? Map.of("connection", "test", "query", "logs", "start", "1700000000000000000", "end", "1700000001000000000")
+                        : id % 4 == 1 ? Map.of("connection", "test", "query", "metric", "mode", "range",
+                                "start", "1700000000000000000", "end", "1700000001000000000", "stepSeconds", 0.125)
+                        : Map.of("connection", "test", "query", "metric", "mode", "instant", "time", "1700000001000000000");
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
+                        "params", Map.of("name", name, "arguments", arguments))));
+            }
+            ids.clear();
+            for (int i = 0; i < 16; i++) {
+                var call = response(stdout, stderr);
+                int id = call.path("id").asInt();
+                assertTrue(id >= 35 && id < 51 && ids.add(id));
+                var result = call.path("result");
+                assertFalse(result.path("isError").asBoolean(), result.toString());
+                var payload = result.path("structuredContent");
+                var validation = validator.validate(schemas.get(id % 2 == 0 ? "queryLogs" : "queryMetrics"), mapper.convertValue(payload, Object.class));
+                assertTrue(validation.valid(), validation.errorMessage());
+                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                if (id % 4 == 1) {
+                    assertEquals(200, payload.path("totalLinesProcessed").asInt());
+                    assertEquals(0.125, payload.path("stepSeconds").asDouble());
+                } else assertFalse(payload.has("totalLinesProcessed"));
+                if (id % 2 == 0) assertEquals("1700000000123456789", payload.path("events").get(0).path("timestampNanos").asText());
+                else {
+                    if (id % 4 == 3) assertFalse(payload.has("stepSeconds"));
+                    assertEquals("NaN", payload.path("series").get(0).path("samples").get(0).path("value").asText());
+                }
+                assertNoSecrets(call.toString());
+            }
+            String[] errorCodes = {"CONNECTION_REQUIRED", "UNKNOWN_CONNECTION", "UPSTREAM_FORBIDDEN", "INVALID_ARGUMENT", "INVALID_ARGUMENT"};
+            for (int index = 0; index < errorCodes.length; index++) {
+                var arguments = new HashMap<String, Object>(Map.of("query", index == 2 ? "fail" : "logs",
+                        "start", "now-1s", "end", "now"));
+                if (index != 0) arguments.put("connection", index == 1 ? "missing" : "test");
+                if (index == 3) arguments.put("limit", 0);
+                if (index == 4) arguments.put("limit", "SECRET_TOKEN");
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 51 + index, "method", "tools/call",
+                        "params", Map.of("name", "queryLogs", "arguments", arguments))));
+                var call = response(stdout, stderr);
+                var result = call.path("result");
+                assertTrue(result.path("isError").asBoolean(), result.toString());
+                var payload = result.path("structuredContent");
+                assertTrue(payload.has("code"), result.toString());
+                assertEquals(errorCodes[index], payload.path("code").asText(), result.toString());
+                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                assertNoSecrets(call.toString());
+            }
         } finally {
+            upstream.stop(0);
             process.destroy();
             if (!process.waitFor(5, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
@@ -154,6 +235,8 @@ class StdioSmokeTest {
         assertFalse(Files.readString(stderr).contains("Tomcat"), "No embedded web server expected");
         assertNoSecrets(Files.readString(stderr));
         assertNoSecrets(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")));
+        assertFalse(Files.readString(stderr).contains("Ошибка 🐈"));
+        assertFalse(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")).contains("Ошибка 🐈"));
     }
 
     private static void assertNoSecrets(String text) {

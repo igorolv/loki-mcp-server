@@ -42,12 +42,13 @@ public final class ConnectionsLoader {
                 Auth a = e.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
-                Limits l = e.limits() == null ? new Limits(null, null, null, null, null, null) : e.limits();
+                Limits l = e.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : e.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
                         or(l.requestTimeoutMs(), d.requestTimeoutMs()), or(l.maxHttpResponseBytes(), d.maxHttpResponseBytes()),
                         or(l.maxResponseBytes(), d.maxResponseBytes()), or(l.maxEntries(), d.maxEntries()),
-                        l.maxIntervalSeconds() == null ? d.maxIntervalSeconds() : l.maxIntervalSeconds());
+                        l.maxIntervalSeconds() == null ? d.maxIntervalSeconds() : l.maxIntervalSeconds(),
+                        or(l.maxMetricSeries(), d.maxMetricSeries()), or(l.maxMetricPoints(), d.maxMetricPoints()));
                 definitions.add(new ConnectionDefinition(pair.getKey(), e.description(),
                         URI.create(resolve(e.url(), environment)), auth, resolve(e.tenant(), environment),
                         ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits));
@@ -81,5 +82,6 @@ public final class ConnectionsLoader {
     private record Entry(String description, String url, Auth auth, String tenant, String timezone, Limits limits) {}
     private record Auth(ConnectionAuth.Type type, String username, String password, String token) {}
     private record Limits(Integer connectTimeoutMs, Integer requestTimeoutMs, Integer maxHttpResponseBytes,
-                          Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds) {}
+                          Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,
+                          Integer maxMetricSeries, Integer maxMetricPoints) {}
 }

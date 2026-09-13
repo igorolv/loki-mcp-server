@@ -7,6 +7,8 @@ import org.springframework.ai.mcp.annotation.method.tool.utils.McpJsonSchemaGene
 import tools.jackson.databind.json.JsonMapper;
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
+import static ru.it_spectrum.ai.loki.mcp.model.QueryResults.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class OutputSchemaTest {
@@ -29,5 +31,21 @@ class OutputSchemaTest {
         var result = new DefaultJsonSchemaValidator().validate(schema,
                 mapper.readValue(mapper.writeValueAsString(value), Object.class));
         assertTrue(result.valid(), result.errorMessage());
+    }
+
+    @Test void queryRecordsValidatePopulatedAndEmptyWithOptionalStats() {
+        var window = new Window("1700000000123456789", "1700000001123456789");
+        for (Long scanned : new Long[]{null, 200L}) {
+            validate(new Logs("test", window, "forward", 10, 1, 1, 1, false, Completeness.COMPLETE,
+                    "CURSORS_NOT_IMPLEMENTED", scanned, List.of(), List.of(new Event(window.startNanos(),
+                    Map.of("key", "value"), "Ошибка 🐈", Map.of("trace", "x")))));
+            validate(new Logs("test", window, "backward", 10, 0, 0, 0, false, Completeness.COMPLETE,
+                    "CURSORS_NOT_IMPLEMENTED", scanned, List.of(), List.of()));
+            validate(new Metrics("test", "range", window, new BigDecimal("0.125"), 10, 100, 1, 1, 1, 1,
+                    Completeness.COMPLETE, "CURSORS_NOT_IMPLEMENTED", scanned, List.of(),
+                    List.of(new Series(Map.of(), List.of(new Sample(new BigDecimal("1700000000.125"), "+Inf"))))));
+            validate(new Metrics("test", "instant", window, null, 10, 100, 0, 0, 0, 0,
+                    Completeness.COMPLETE, "CURSORS_NOT_IMPLEMENTED", scanned, List.of(), List.of()));
+        }
     }
 }

@@ -39,3 +39,19 @@ tasks.test {
     dependsOn(tasks.bootJar)
     systemProperty("mcp.test.jar", tasks.bootJar.get().archiveFile.get().asFile.absolutePath)
 }
+
+val integrationTest by sourceSets.creating
+configurations[integrationTest.implementationConfigurationName].extendsFrom(configurations.testImplementation.get())
+configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
+dependencies {
+    add(integrationTest.implementationConfigurationName, sourceSets.main.get().output)
+    add(integrationTest.implementationConfigurationName, libs.testcontainers)
+}
+tasks.register<Test>("integrationTest") {
+    description = "Opt-in isolated Loki 2.6.1 and 3.6.0 compatibility tests; requires Docker."
+    group = "verification"
+    testClassesDirs = integrationTest.output.classesDirs
+    classpath = integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter(tasks.test)
+}

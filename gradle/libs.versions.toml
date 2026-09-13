@@ -1,6 +1,7 @@
 [versions]
 spring-boot = "4.0.0"
 spring-ai = "2.0.0"
+testcontainers = "2.0.3"
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
@@ -10,3 +11,4 @@ spring-dependency-management = { id = "io.spring.dependency-management", version
 spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-ai-mcp-server = { module = "org.springframework.ai:spring-ai-starter-mcp-server", version.ref = "spring-ai" }
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }

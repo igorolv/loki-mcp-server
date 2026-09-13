@@ -5,13 +5,13 @@
 ## Текущее состояние
 
 - Обновлено: 2026-09-13.
-- Статус: S01–S03 завершены; HTTP-клиент проверен на mock HTTP, build — 96 тестов.
+- Статус: S01–S04 завершены; build — 119 тестов; Loki 2.6.1/3.6.0 — 2 контейнерных теста.
 - Текущий этап: 2 — Loki API, поиск и обнаружение.
-- Текущий пакет сессии: S04 — Поиск и метрики (не начат).
+- Текущий пакет сессии: S05 — Обнаружение данных (не начат; начать в новой сессии).
 - В работе: нет.
-- Следующий шаг: добавить queryLogs/queryMetrics, фиксированное окно, первичные
-  лимиты, DTO полноты и MCP-ошибки; проверить Loki 2.6.1 и 3.x в контейнерах.
-- Блокеры: для начала S04 нет; доступность Docker ещё не проверена.
+- Следующий шаг: реализовать discoverLogs: метки/значения, ограниченные образцы,
+  обнаружение полей JSON/ECS/plain text и DTO capabilities/покрытия.
+- Блокеры: нет; Docker доступен, контейнерные проверки S04 выполнены.
 
 ## Как вести план между сессиями
 
@@ -157,13 +157,24 @@ Docker и live Loki не использовались; совместимост�
 
 ### S04 — Поиск и метрики
 
-- [ ] Завершён пакет S04.
+- [x] Завершён пакет S04.
 - Зависимости: S03.
 - Объём: этап 2 — `queryLogs`, `queryMetrics`, фиксированное окно и первичные лимиты.
 - Результат: базовые запросы доступны через MCP с явной неполнотой при достижении лимита.
   Продолжение чтения ещё не обещается: курсоры реализуются в S08.
 - Проверка завершения: контейнерные проверки Loki 2.6.1 и 3.x подтверждают логи,
   instant/range метрики, timestamps, число записей и пустые ответы; MCP schemas проходят.
+
+Проверено 2026-09-13: `.\gradlew.bat classes --console=plain`, тесты service,
+stdio/schema и итоговый `.\gradlew.bat build --console=plain` — успешно,
+119 тестов без failures/errors/skipped. `.\gradlew.bat integrationTest --console=plain`
+— успешно, 2 теста на фиксированных `grafana/loki:2.6.1` и `grafana/loki:3.6.0`.
+Проверены общая хронология, наносекунды, повторы/одинаковые timestamps, окна/timezone/DST,
+лимиты записей/metric series/points, empty/type errors, MCP schemas и safe errors.
+Stdio: outstanding queryLogs, instant/range queryMetrics, равенство text/structuredContent,
+optional stats/step и отсутствие credentials/лог-строк в собственной диагностике.
+Осталось по S04: нет. Контракт: `docs/queries.md`. Полный wire budget остаётся S06,
+курсоры S08; live-проверки не запускались и для S04 не требуются.
 
 ### S05 — Обнаружение данных
 
@@ -540,6 +551,8 @@ Loki не предоставляет готовый универсальный �
   остальные слои добавляются по мере реализации).
 - [x] Описать базовые DTO ошибок и результата listConnections, правила output schemas.
 - [ ] Описать специальные DTO полноты, событий и capabilities при реализации S04–S05.
+  - [x] S04: QueryResults — события, метрики, окно, счётчики и полнота.
+  - [ ] S05: capabilities и покрытие discovery.
 - [x] Реализовать конфигурацию подключений и `listConnections`.
 - [x] Добавить MCP smoke test: initialize/initialized, несколько outstanding ping,
   проверка stdout и диагностического логирования через готовый jar.
@@ -550,14 +563,16 @@ Loki не предоставляет готовый универсальный �
 
 ### Этап 2. Loki API, поиск и обнаружение
 
-Статус: S03 выполнен. Проверено 2026-09-13: 56 mock HTTP/decoder тестов;
-`gradlew.bat build --console=plain` — 96 тестов без ошибок/пропусков.
-Осталось: S04–S05 — публичные query/discovery tools, лимиты и контейнерная совместимость.
+Статус: S03–S04 выполнены. Проверено 2026-09-13:
+`gradlew.bat build --console=plain` — 119 тестов без ошибок/пропусков;
+`gradlew.bat integrationTest --console=plain` — 2 успешных контейнерных теста.
+Осталось: S05 — discoverLogs, обнаружение полей, capabilities и покрытие.
 
 - [x] Реализовать прямой HTTP-клиент Loki, auth/tenant, таймауты и ограничение HTTP body.
 - [x] Декодировать streams и metric results, structured metadata и ошибки API.
-- [ ] Реализовать `discoverLogs`, `queryLogs`, `queryMetrics` с первичными лимитами.
-- [ ] Проверить базовую совместимость Loki 2.6.1 и 3.x.
+- [x] Реализовать `queryLogs`, `queryMetrics` с первичными лимитами.
+- [ ] Реализовать `discoverLogs` с первичными лимитами.
+- [x] Проверить базовую совместимость поиска/метрик Loki 2.6.1 и 3.6.0.
 
 Готовность: сценарии чтения работают через прямой HTTP API Loki;
 время метрик, количество записей и пустые результаты представлены корректно.
@@ -774,6 +789,44 @@ Live тесты:
   и DTO полноты без обещания курсоров; использовать существующий client bean.
 - Коммит: не создавался. Исходное состояние при начале S03 — чистый Git,
   последний коммит пользователя `737ae94`; изменения S03 оставлены незакоммиченными.
+
+### 2026-09-13 — S04: Поиск и метрики
+
+- Пакет: S04 завершён; S05 не начат.
+- Сделано: queryLogs/queryMetrics, отдельные публичные records, фиксированное
+  абсолютное окно, epoch nanos/offset/local ISO/now-N, строгие timezone/DST правила,
+  общая сортировка без дедупликации. Лимиты окна/записей и новые maxMetricSeries=100,
+  maxMetricPoints=10000; конфигурация через прежний внешний файл. Metric samples
+  сохраняют числовые секунды и строковые значения. Completeness COMPLETE/UNKNOWN/PARTIAL,
+  read/returned counts и ограничения scope/оригинала/продолжения указаны явно.
+- Проверено: `gradlew.bat classes --console=plain`, service tests и schema/stdio tests;
+  итоговый `gradlew.bat build --console=plain` — 119 тестов, 0 failures/errors/skipped.
+  `gradlew.bat integrationTest --console=plain` — 2 теста, 0 failures/errors/skipped:
+  Loki 2.6.1 и 3.6.0, тестовые логи, несколько потоков, timestamps, лимиты, instant/range
+  агрегации и пустые ответы. Контейнеры создаёт/удаляет Testcontainers 2.0.3;
+  ingestion использует только URL созданного контейнера. Внешние Loki не менялись.
+- Решение: ошибки всех tools проходят через QueryToolsConfig. SDK input validation
+  выполнялась до handler и логировала исходный текст: она отключена на builder,
+  та же schema validation выполняется внутри безопасной обёртки. Annotation provider
+  продолжает генерировать input/output schemas; ToolError идёт с isError=true в обеих
+  частях ответа. Ошибки bindings, неизвестных имён и HTTP проверены по stdio;
+  неожиданное исключение — отдельным тестом. Не добавлять новые component tools
+  в обход общей обёртки. Сырые warnings не выдаются: только признак и UNKNOWN.
+- Ограничения: при достижении log limit неизвестно, есть ли следующая запись;
+  курсоров нет. Window метрик — границы evaluation, LogQL lookback может выходить
+  за них. maxResponseBytes не применяется до S06. Loki 3.6.0 проверен с legacy v11
+  fixture без structured metadata; новые 3.x capabilities этой проверкой не доказаны.
+- Среда: Docker проверен вне sandbox после отказа доступа к pipe; integrationTest
+  выполнен с разрешённым доступом. Обычный build успешен в sandbox. Git diff/status
+  потребовали разрешённого read-only доступа после того, как sandbox перестал
+  распознавать .git. Native-access/deprecated API warnings сборку не блокируют.
+- Документы: docs/queries.md, connections.md, http-client.md и AGENTS.md согласованы.
+- Осталось: S05 — discoverLogs, JSON/ECS/plain text, поля и provenance, capabilities,
+  ограниченные выборки и их покрытие. Строгий wire budget/проекция — S06.
+- Продолжить с: прочитать docs/queries.md, QueryResults, QueryTime/QueryService и
+  LokiResponses. Реализовать discovery через существующие labels/labelValues/series,
+  не считать result labels доказанным stream scope. Сохранить фиксацию now и лимиты.
+- Коммит: не создавался; исходный Git был чистым, изменения S04 оставлены локально.
 
 Шаблон следующей записи (заполнять фактическими результатами):
 

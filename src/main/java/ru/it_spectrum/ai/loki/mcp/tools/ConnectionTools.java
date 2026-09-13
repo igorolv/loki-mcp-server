@@ -1,11 +1,9 @@
 package ru.it_spectrum.ai.loki.mcp.tools;
 
 import org.springframework.ai.mcp.annotation.McpTool;
-import org.springframework.stereotype.Component;
 import ru.it_spectrum.ai.loki.mcp.model.ListConnectionsResult;
 import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
 
-@Component
 public class ConnectionTools {
     private final ConnectionsService service;
     public ConnectionTools(ConnectionsService service) { this.service = service; }
