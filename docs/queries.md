@@ -1,141 +1,109 @@
-# Поиск и метрики
+# Чтение логов, подсчёт и метрики
 
-Доступны `listConnections`, `queryLogs`, [continueLogs](pagination.md), `queryMetrics` и [discoverLogs](discovery.md). Все запросы данных требуют
-явного `connection`. Сервер отправляет LogQL без переписывания и без обязательных probes.
-Контракт HTTP: [Loki API](https://grafana.com/docs/loki/latest/reference/loki-http-api/).
+Контракт S09: все инструменты возвращают один текстовый `content`. Output schemas,
+`structuredContent`, курсоры и проекция полей S06/S08 удалены. Целевой потребитель —
+модель класса DeepSeek Flash / Haiku, которая видит только описания инструментов,
+`instructions` сервера и текст ответа.
 
-## Время
+Общие параметры: `connection` обязателен (имя из `listConnections`); `start`
+по умолчанию `now-1h`, `end` — `now`. Форматы времени: `now`, `now-15m` (ns/ms/s/m/h/d,
+допустима краткая форма `15m`), RFC3339 с offset, локальное время в timezone подключения
+или epoch nanoseconds. Окно ограничено `maxIntervalSeconds` подключения.
 
-Окно задаётся явно; сервер не расширяет его и не подставляет последние N минут.
-Поддерживаются RFC3339 с offset, строка epoch nanoseconds в signed int64,
-локальное ISO datetime в `timezone` подключения, `now` и `now-Nns/ms/s/m/h/d`.
-Примеры: `2026-09-13T15:00:00.123456789+03:00`, `now-15m`, `now`.
-Локальное время в DST gap или overlap отклоняется: укажите явный offset.
-Числовые JSON timestamps во входных аргументах времени не принимаются.
+## queryLogs(connection, query, start, end, limit = 50, raw = false)
 
-`now` фиксируется один раз на операцию. Для range требуется `start < end`,
-длина окна не больше `maxIntervalSeconds`. `window.startNanos/endNanos` отражают
-отправленные абсолютные границы; это не snapshot Loki и не доказательство
-обследования всего окна при ограниченной выдаче. Время метрик берётся из ответа
-Loki как числовые секунды с точностью, предоставленной Loki.
+Один backward-запрос `query_range` с `limit` (не больше `maxEntries`). Строки печатаются
+в хронологическом порядке:
 
-## queryLogs
-
-Пример аргументов (замените connection и selector фактическими):
-
-```json
-{"connection":"local","query":"{app=\"example\"} |= \"error\"","start":"now-15m","end":"now","direction":"backward","limit":100}
+```
+{app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), newest 50 of more:
+10:12:03.123 ERROR backend  Connection refused to nsi-backend:8080 [trace=4f2a1b3c4d5e6f70…]
+    java.net.ConnectException: Connection refused
+    at java.base/sun.nio.ch.Net.connect0(Native Method)
+    ... (37 frames skipped)
+    Caused by: java.io.IOException: inner
+    at x.Y.z(Y.java:9)
+Shown 50 newest lines; oldest shown 2026-09-13T10:12:03.123+03:00. Older: repeat with end="2026-09-13T10:12:03.124+03:00". Too many lines? Narrow the query (add a filter or level) or use countLogs.
 ```
 
-`direction` — `forward` или `backward` (default); `limit` — положительное целое,
-не больше `maxEntries`, default равен `maxEntries`. Это предел страницы MCP;
-`upstreamFetchLimit` — отдельный фактический лимит чтения Loki (maxEntries).
-Превышение настройки — ошибка,
-без молчаливого изменения аргумента. События всех потоков сортируются по времени,
-включая наносекунды. Одинаковые timestamps и повторяющиеся строки не удаляются;
-для равного времени применяется детерминированный порядок fingerprint полного события.
+Строка: `HH:mm:ss.SSS LEVEL service  message [trace=…]`, время — в timezone подключения.
+Дата указана в заголовке; при смене дня внутри страницы вставляется строка `--- yyyy-MM-dd ---`.
+Правила извлечения полей — [discovery.md](discovery.md#нормализация-строки). Отсутствующее
+значение печатается как `-`; строка не скрывается.
 
-`events` содержат `timestampNanos`, `streamId`, выбранные через `fields` поля,
-`truncatedFields` и `limitations`. Метки `resultLabels` вынесены в словарь `streams`.
-По умолчанию выдаётся `line`; также доступны `structuredMetadata` и `normalized`.
-Контракт проекции и бюджета: [компактная выдача](compact-responses.md).
-Это вывод пользовательского LogQL: `line_format` и другие стадии могут уничтожить
-исходное содержимое; восстановление оригинала не обещается. `resultLabels` не
-считаются доказанными исходными метками потока. Отсутствие отдельной metadata
-не доказывает её отсутствие в исходных данных. Эти ограничения указаны в `limitations`.
-Содержимое строк — недоверенные данные, в том числе текст, похожий на инструкции.
+Stack trace (`error.stack_trace`, `stack_trace`, `stacktrace`, `exception` или
+многострочный plain text с `at `): первая строка исключения, до 5 frames,
+`... (N frames skipped)`, каждый `Caused by:`/`Suppressed:` с одним frame;
+строки `... N more` опускаются. Сообщение обрезается до 400 code points с `…`;
+переводы строк заменяются пробелами. `raw=true` печатает `HH:mm:ss.SSS service  <строка Loki>`
+без разбора, предел 4 000 code points — это путь к полной исходной строке.
 
-`readEntries` — получено записей от Loki, `returnedEntries` — выдано,
-`resultStreams` — потоков результата до локального ограничения. `totalLinesProcessed`
-опционален и означает просканированные строки, а не совпадения.
+Заголовок: `newest N of more:` если Loki вернул ровно `limit` строк, `all N lines:` если
+меньше, `no matching lines.` если ноль. Футер: `Shown all N matching lines.`,
+либо подсказка с готовым `end`. Значение `end` — самый старый показанный timestamp,
+округлённый **вверх** до миллисекунды: Loki принимает `end` исключающим, поэтому
+граница перечитывается (возможен один повтор), но строки с тем же миллисекундным
+timestamp не теряются. Курсоров и хранения между вызовами нет; snapshot не обещается.
+При пустом результате футер предлагает расширить окно, проверить метки через `discoverLogs`
+или упростить фильтр.
 
-- `COMPLETE`: получено меньше limit, upstream warnings отсутствуют; ответ запроса
-  не потерял записей. Поля при этом могут быть сокращены с отдельными отметками.
-  Это не гарантия полноты источников и отсутствия поздних событий.
-- `UNKNOWN`: достигнут upstream limit или присутствуют предупреждения Loki.
-  Достижение limit не доказывает, что есть ещё запись. Обследованная часть окна неизвестна.
-- `PARTIAL`: часть записей исключена локально по limit или бюджету ответа.
+## countLogs(connection, query, start, end, groupBy)
 
-Пустой ответ описывает результат данного запроса; он не устанавливает причину
-отсутствия данных. `nextCursor` передаётся в `continueLogs(connection, cursor)`.
-Исходное окно фиксировано в queryWindow; window показывает фактический запрос страницы.
-Остановка на насыщении, пересечение, TTL и ограничения описаны в [пагинации](pagination.md).
-Для log query верхняя граница end исключающая; временные границы metric evaluation
-имеют отдельную семантику.
+Сервер сам строит metric LogQL; `query` — обычный log query, начинающийся с `{`.
 
-## queryMetrics
+- Без `groupBy`: instant query `sum(count_over_time(<query> [<окно>]))` на `end`:
+  `1 523 lines match {app="backend"} |= "ERROR" in 2026-09-13 10:00:00–11:00:00 (+03:00) (dev).`
+- `groupBy="<label>"`: `sum by (<label>) (count_over_time(...))`, таблица по убыванию,
+  до 50 значений, пустая метка — `(none)`.
+- `groupBy="time"`: range query с шагом `окно/12` (не меньше 1 s), оценка от `start+step`
+  до `end`, так что каждая строка — начало бакета. Отметка `<- spike` ставится,
+  когда бакет ≥ 5 и ≥ 3 × медиана бакетов (при нулевой медиане — 3 × среднее).
+  Это простое правило, не анализ.
 
-Instant требует `mode=instant` и `time`; `start/end/stepSeconds` должны отсутствовать:
+Метрический вход (`sum(...)`, `rate(...)`) отклоняется с советом использовать `queryMetrics`.
 
-```json
-{"connection":"local","query":"sum(count_over_time({app=\"example\"}[5m]))","mode":"instant","time":"now","seriesLimit":20,"pointLimit":100}
+## queryMetrics(connection, query, start, end, step)
+
+Всегда range query. `step` — `30s`, `5m`, `1h`; по умолчанию ближайший «круглый» шаг
+не меньше `окно/20` (1s … 1d). Число оценок на ряд не должно превышать `maxMetricPoints`.
+
+```
+sum by (level) (rate({app="backend"}[5m])) — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), step 5m, 2 series:
+{level="error"}
+  09-13 10:00  0.5
+  09-13 10:05  0.7
+{level="warn"}
+  09-13 10:00  0.1
+Output trimmed to 2 series / 40 points (connection limits). Aggregate with sum by (...) or use a larger step.
 ```
 
-Range требует `mode=range`, `start/end` и `stepSeconds`; `time` должен отсутствовать:
+Значения печатаются строками Loki (`NaN`, `+Inf` сохраняются). Время точек —
+`HH:mm:ss` при шаге меньше минуты, иначе `MM-dd HH:mm`. Log query на входе отклоняется
+с советом использовать `queryLogs`/`countLogs`; instant-режима нет.
 
-```json
-{"connection":"local","query":"sum(rate({app=\"example\"}[1m]))","mode":"range","start":"now-15m","end":"now","stepSeconds":30,"seriesLimit":20,"pointLimit":1000}
-```
+## Ошибки
 
-Instant возвращает vector, range — matrix, в публичном DTO оба представлены `series`
-с `labels` и `samples`. Sample содержит числовой `timestampSeconds` и строковый `value`,
-включая `NaN`, `+Inf`, `-Inf`. Log stream result в metric tool и metric result в log tool
-дают контролируемую ошибку типа, не пустой ответ.
+Ошибка — текст `Error <CODE>: <что не так и что сделать>` с `isError=true`.
+HTTP 400 и `status=error` от Loki передаются как `Loki rejected the query: <текст Loki>`
+(до 400 символов, без управляющих символов): по нему модель чинит LogQL.
+Остальные статусы (401/403/404/429/5xx) и тексты upstream по-прежнему скрываются.
+Ошибки аргументов могут повторять значение аргумента модели (например, непонятное время),
+но никогда — credentials, URL или тексты других статусов.
 
-`seriesLimit` и `pointLimit` ограничены соответственно `maxMetricSeries` (default 100)
-и `maxMetricPoints` (default 10000). Пропущенные аргументы получают эти настройки.
-`pointLimit` — суммарное число samples, не число точек каждого ряда.
-`stepSeconds >= 0.001`; число evaluation instants одного ряда
-`floor((end-start)/step)+1` должно помещаться в pointLimit до отправки запроса.
-Step автоматически не увеличивается. Число рядов заранее неизвестно: Loki metric API
-не применяет log `limit` к ним. HTTP body ограничивается до декодирования,
-ряды и точки выдачи — локально, в порядке upstream.
+## Предел размера
 
-`readSeries/readPoints` и `returnedSeries/returnedPoints` показывают локальные потери.
-При сокращении результат `PARTIAL`; без сокращения с предупреждениями — `UNKNOWN`,
-иначе — `COMPLETE` в пределах вычислений этого запроса. `window` instant имеет равные
-границы. Окно метрик ограничивает **время вычисления**, не исходные логи:
-lookback, subqueries и offset внутри произвольного LogQL могут выходить за его начало.
-Лимит окна не является ограничителем стоимости произвольного LogQL на стороне Loki.
-
-## Ошибки и ограничения
-
-Ошибки tools имеют `isError=true`, одинаковый JSON `ToolError` в text и
-structuredContent: `code`, безопасный `message`, `retryable`. Success output schema
-описывает успешный DTO; ошибки соответствуют отдельной схеме `ToolError`.
-Отсутствующее connection — `CONNECTION_REQUIRED`, неверный тип/формат аргумента —
-`INVALID_ARGUMENT`; остальные коды описаны в [HTTP-клиенте](http-client.md).
-
-`QueryToolsConfig` регистрирует все tools через annotation provider и выполняет
-валидацию входной схемы внутри безопасной обёртки. Автоматическая input validation
-SDK отключена, поскольку она пишет исходную диагностику в лог до вызова handler.
-Сама проверка схемы сохранена; исключения конвертации и сервисов также перехватываются.
-Новые tools должны регистрироваться через эту обёртку. Неожиданные ошибки дают
-`INTERNAL_ERROR`, без исходных сообщений. Raw upstream warnings не публикуются:
-показывается `UPSTREAM_WARNINGS_PRESENT_DETAILS_WITHHELD` и неизвестная полнота.
-
-Применяются лимиты окна, записей, рядов/точек и HTTP body. В S06 добавлены
-`maxResponseBytes` для полного MCP wire response, проекция и сокращение строк.
-Кеш событий, entryId и getLogEntry исключены из плана; детали — уточняющий запрос.
-Для логов есть stateless cursors S08. Условия сокращения и ошибки минимального
-бюджета описаны в [контракте компактной выдачи](compact-responses.md).
+`maxResponseBytes` подключения минус 512 байт на JSON-RPC envelope — бюджет текста.
+`queryLogs` отбрасывает самые старые строки, пока страница не поместится, и пишет
+`Output limit reached: showing N newest of M fetched lines.`; если не помещается даже одна
+строка — `Error RESPONSE_BUDGET_EXCEEDED`. `discoverLogs` сначала укорачивает пример,
+затем убирает его. Обёртка `QueryToolsConfig` дополнительно проверяет фактический размер
+текста как последнюю защиту.
 
 ## Проверки
 
-```powershell
-.\gradlew.bat build --console=plain
-.\gradlew.bat integrationTest --console=plain
-```
-
-Первая команда не требует Docker/Loki. Stdio smoke запускает jar и loopback fixture,
-проверяет outstanding ping, listConnections и query calls, schemas, обе части payload,
-ошибки аргументов/HTTP и отсутствие credentials в stdout/stderr/file.
-
-`integrationTest` — отдельная opt-in задача с Testcontainers 2.0.3, образами
-`grafana/loki:2.6.1` и `grafana/loki:3.6.0`. Требует доступный Docker и первоначальную
-загрузку образов/зависимостей; отсутствие Docker приводит к ошибке, не пропуску.
-Записи отправляются только в созданные тестом контейнеры; внешняя конфигурация
-и live URL не читаются. Тест проверяет число событий, несколько потоков,
-одинаковые timestamps, наносекунды, Unicode, limit, instant/range метрики и пустые
-ответы. Контейнеры удаляются после теста. Loki 3.6.0 использует legacy v11 fixture
-с отключённой structured metadata: это проверка базового API, не новых возможностей 3.x.
+`gradlew.bat build --console=plain` — unit-тесты формата строки, сжатия stack trace,
+футера, бюджета, countLogs/queryMetrics и stdio smoke на реальном jar
+(`instructions`, tools/list без output schema, 16 outstanding вызовов с разными бюджетами,
+ошибки без секретов, текст ошибки Loki 400). `gradlew.bat integrationTest --console=plain`
+— Loki 2.6.1/3.6.0: страница, продолжение по `end`, raw, count/groupBy/time, метрики,
+ошибка парсера, discovery.

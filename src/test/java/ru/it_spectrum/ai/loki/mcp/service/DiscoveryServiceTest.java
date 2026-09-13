@@ -6,10 +6,8 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.client.*;
 import ru.it_spectrum.ai.loki.mcp.connection.*;
-import ru.it_spectrum.ai.loki.mcp.model.*;
-import ru.it_spectrum.ai.loki.mcp.model.DiscoveryResult.*;
+import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.QueryResults.Completeness.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,95 +25,82 @@ class DiscoveryServiceTest {
     private void series(List<Map<String, String>> streams) {
         when(client.series(anyString(), anyList(), any(), any())).thenReturn(new SeriesResponse(streams, List.of()));
     }
-    private void entries(List<LogEntry> entries) {
+    private void entries(Map<String, String> labels, List<LogEntry> entries) {
         when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any()))
-                .thenReturn(new QueryResponse(new Streams(List.of(new LogStream(Map.of("service.name", "result-value"), entries))), null, List.of()));
+                .thenReturn(new QueryResponse(new Streams(List.of(new LogStream(labels, entries))), null, List.of()));
     }
-    private LogEntry entry(String line) { return new LogEntry(QueryTime.nanos(now.minusNanos(1)), line, Map.of("service.name", "metadata-value")); }
-    private DiscoveryResult discover() { return service.discover("one", SELECTOR, "now-1s", "now", null); }
-    @Test void mixedFormatsCountsProvenanceMissingLabelsAndExactScope() {
-        series(List.of(Map.of("job", "test")));
-        entries(List.of(entry("{\"service.name\":\"backend\",\"message\":\"Ошибка 🐈\"}"), entry("plain"), entry("{\"message\":12}"), entry("plain")));
-        var result = discover();
-        assertEquals(List.of("job"), result.streamLabels().stream().map(Label::name).toList());
-        assertEquals(4, result.coverage().entriesExamined()); assertEquals(COMPLETE, result.coverage().sampleCompleteness());
-        assertEquals(3, result.examples().size());
-        assertEquals(2, result.formats().stream().filter(f -> f.format() == Format.PLAIN_TEXT).findFirst().orElseThrow().entries());
-        var field = result.fields().stream().filter(f -> f.path().equals("/message") && f.origin() == Origin.LINE_JSON).findFirst().orElseThrow();
-        assertEquals(2, field.observedEntries()); assertEquals(List.of("number", "string"), field.types());
-        assertEquals(3, result.fields().stream().filter(f -> f.path().equals("/service.name")).count());
-        assertEquals("backend", result.examples().getFirst().normalized().stream().filter(v -> v.name().equals("service")).findFirst().orElseThrow().value());
+    private LogEntry entry(int secondsAgo, String line) { return new LogEntry(QueryTime.nanos(now.minusSeconds(secondsAgo)), line, Map.of()); }
+
+    @Test void selectorScopeListsLabelsFormatsFieldsLevelsExampleAndNextStep() {
+        series(List.of(Map.of("job", "test", "applicationName", "backend", "level", "error"),
+                Map.of("job", "test", "applicationName", "frontend", "level", "info")));
+        entries(Map.of("job", "test", "applicationName", "backend"), List.of(
+                entry(1, "{\"service\":{\"name\":\"backend\"},\"log\":{\"level\":\"ERROR\"},\"message\":\"Ошибка 🐈\",\"traceId\":\"t\"}"),
+                entry(2, "plain WARN text"), entry(3, "{\"message\":\"m\",\"log\":{\"level\":\"INFO\"}}")));
+        var text = service.discover("one", SELECTOR, "now-1s", "now");
+        assertEquals("""
+                Streams matching {job="test"} in 2026-09-13 11:59:59–12:00:00 (Z): 2.
+                Labels:
+                  applicationName: backend, frontend
+                  job: test
+                  level: error, info
+                Line format (3 newest lines sampled): JSON 2, plain text 1.
+                Levels seen: ERROR, INFO, WARN.
+                JSON fields (after | json): log_level, message, service_name, traceId.
+                Example line: {"service":{"name":"backend"},"log":{"level":"ERROR"},"message":"Ошибка 🐈","traceId":"t"}
+                Next: use countLogs or queryLogs with a selector like {job="test", applicationName="backend"}; filter JSON fields with | json, e.g. | json | log_level=~"(?i)error"; filter text with |= "substring".""", text);
         verify(client).series("one", List.of(SELECTOR), now.minusSeconds(1), now);
         verify(client).queryRange("one", SELECTOR, now.minusSeconds(1), now, 20, LokiHttpClient.Direction.BACKWARD, null);
         verifyNoMoreInteractions(client);
     }
-    @Test void highCardinalityAndSeriesCapsAreVisibleAndIndependentFromSampleCompleteness() {
-        series(java.util.stream.IntStream.range(0, 150).mapToObj(i -> Map.of("pod", "pod-" + i)).toList());
-        entries(List.of());
-        var result = discover();
-        assertEquals(150, result.coverage().seriesRead()); assertEquals(100, result.coverage().seriesExamined());
-        assertTrue(result.coverage().localTruncation());
-        assertEquals(20, result.streamLabels().getFirst().observedValues().size());
-        assertTrue(result.streamLabels().getFirst().valuesTruncated());
-        assertEquals(COMPLETE, result.coverage().sampleCompleteness());
+    @Test void withoutSelectorLabelsComeFromLabelEndpointsAndSampleUsesAServiceLabel() {
+        when(client.labels("one", now.minusSeconds(3600), now, null)).thenReturn(new LabelResponse(List.of("pod", "app", "level"), List.of()));
+        when(client.labelValues(eq("one"), eq("app"), any(), any(), isNull())).thenReturn(new LabelResponse(List.of("b", "a"), List.of()));
+        when(client.labelValues(eq("one"), eq("level"), any(), any(), isNull())).thenReturn(new LabelResponse(List.of("error", "info"), List.of()));
+        var pods = new ArrayList<String>(); for (int i = 0; i < 25; i++) pods.add("pod-" + i);
+        when(client.labelValues(eq("one"), eq("pod"), any(), any(), isNull())).thenReturn(new LabelResponse(pods, List.of()));
+        entries(Map.of("app", "a", "level", "info"), List.of(entry(1, "hello")));
+        var text = service.discover("one", null, null, null);
+        assertTrue(text.startsWith("Labels in 2026-09-13 11:00:00–12:00:00 (Z) (one): 3.\nLabels:\n  app: a, b\n  level: error, info\n  pod: 25 distinct values (high cardinality, not listed)\n"), text);
+        assertTrue(text.contains("Line format (1 newest lines sampled): plain text 1.\nLevels seen: INFO.\nExample line: hello\n"), text);
+        assertTrue(text.endsWith("Next: use countLogs or queryLogs with a selector like {app=\"a\"}; filter by the level label, e.g. {..., level=\"error\"}; filter text with |= \"substring\"."), text);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 20, LokiHttpClient.Direction.BACKWARD, null);
     }
-    @Test void capsLabelsFieldsAndSamplesWithoutDeduplication() {
-        var labels = new HashMap<String, String>();
-        for (int i = 0; i < 40; i++) labels.put("label" + i, "v");
-        series(List.of(labels));
-        String wide = java.util.stream.IntStream.range(0, 110).mapToObj(i -> "\"f" + i + "\":1").collect(java.util.stream.Collectors.joining(",", "{", "}"));
-        entries(Collections.nCopies(22, entry(wide)));
-        var result = discover();
-        assertEquals(30, result.streamLabels().size()); assertEquals(100, result.fields().size());
-        assertEquals(22, result.coverage().entriesRead()); assertEquals(20, result.coverage().entriesExamined());
-        assertEquals(PARTIAL, result.coverage().sampleCompleteness());
-        assertTrue(result.coverage().localTruncation());
-        assertEquals(20, result.fields().getFirst().observedEntries());
+    @Test void valueListsAreCappedAndSampleFailuresDoNotHideLabels() {
+        var values = new ArrayList<String>(); for (int i = 0; i < 15; i++) values.add("v" + String.format("%02d", i));
+        var streams = new ArrayList<Map<String, String>>(); for (String v : values) streams.add(Map.of("job", v));
+        series(streams);
+        when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any())).thenThrow(Errors.failure(ErrorCode.UPSTREAM_TIMEOUT, "SECRET"));
+        var text = service.discover("one", SELECTOR, "now-1s", "now");
+        assertTrue(text.contains("  job: v00, v01, v02, v03, v04, v05, v06, v07, v08, v09 (+5 more)\n"), text);
+        assertTrue(text.contains("No lines sampled in this window; fields are unknown."), text);
+        assertFalse(text.contains("SECRET"));
+        assertTrue(text.contains("Next: use countLogs or queryLogs with a selector like {job=\"test\"}; filter text"), text);
     }
-    @Test void closedSeriesPathDoesNotBlockLogReadingOrLeakErrorsAndDoesNotPersistAcrossConnections() {
-        when(client.series(eq("one"), anyList(), any(), any())).thenThrow(Errors.failure(ErrorCode.ENDPOINT_UNAVAILABLE, "SAFE"));
-        when(client.series(eq("two"), anyList(), any(), any())).thenReturn(new SeriesResponse(List.of(), List.of()));
-        entries(List.of(entry("plain")));
-        var result = discover();
-        assertEquals(Availability.UNAVAILABLE_AT_PATH, result.capabilities().getFirst().availability());
-        assertEquals(1, result.coverage().entriesExamined());
-        assertFalse(result.toString().contains("SAFE"));
-        var other = service.discover("two", SELECTOR, "now-1s", "now", null);
-        assertEquals(Availability.AVAILABLE, other.capabilities().getFirst().availability());
-        assertEquals(1, other.coverage().sampleLimit());
-        assertEquals(UNKNOWN, other.coverage().sampleCompleteness());
-    }
-    @Test void sampleFailureWarningsAndUncalledCapabilitiesAreExplicit() {
-        when(client.series(anyString(), anyList(), any(), any())).thenReturn(new SeriesResponse(List.of(Map.of("job", "test")), List.of("SECRET")));
-        when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any()))
-                .thenThrow(Errors.failure(ErrorCode.UPSTREAM_TIMEOUT, "SECRET"));
-        var result = discover();
-        assertEquals(UNKNOWN, result.coverage().sampleCompleteness());
-        assertEquals(0, result.coverage().entriesExamined());
-        assertEquals(ErrorCode.UPSTREAM_TIMEOUT, result.capabilities().get(1).errorCode());
-        assertTrue(result.capabilities().subList(2, 6).stream().allMatch(c -> c.availability() == Availability.UNKNOWN));
-        assertFalse(result.toString().contains("SECRET"));
-    }
-    @Test void validatesSelectorsWindowsAndConnectionLimitsBeforeNetwork() {
+    @Test void validatesSelectorsWindowsAndConnectionsBeforeNetwork() {
         for (String selector : List.of("{}", "sum(rate({job=\"x\"}[1m]))", "{job=\"x\"} | json", "{job=\"x\"} |= \"foo\"", "{job=\"x\"} garbage"))
-            assertThrows(LokiOperationException.class, () -> service.discover("one", selector, "now-1s", "now", null));
-        assertThrows(LokiOperationException.class, () -> service.discover(null, SELECTOR, "now-1s", "now", null));
-        assertThrows(LokiOperationException.class, () -> service.discover("missing", SELECTOR, "now-1s", "now", null));
-        assertThrows(LokiOperationException.class, () -> service.discover("two", SELECTOR, "now-11s", "now", null));
-        for (int limit : new int[]{0, -1, 21}) assertThrows(LokiOperationException.class, () -> service.discover("one", SELECTOR, "now-1s", "now", limit));
-        assertThrows(LokiOperationException.class, () -> service.discover("two", SELECTOR, "now-1s", "now", 2));
+            assertTrue(assertThrows(LokiOperationException.class, () -> service.discover("one", selector, "now-1s", "now")).getMessage().contains("stream selector"));
+        assertThrows(LokiOperationException.class, () -> service.discover(null, SELECTOR, "now-1s", "now"));
+        assertThrows(LokiOperationException.class, () -> service.discover("missing", SELECTOR, "now-1s", "now"));
+        assertThrows(LokiOperationException.class, () -> service.discover("two", SELECTOR, "now-11s", "now"));
+        assertThrows(LokiOperationException.class, () -> service.discover("one", "{job=\"" + "x".repeat(9000) + "\"}", "now-1s", "now"));
         verifyNoInteractions(client);
     }
     @Test void matcherQuotedBracesCommasAndEscapesAreNotPipelines() {
-        series(List.of()); entries(List.of());
+        series(List.of()); entries(Map.of(), List.of());
         for (String selector : List.of("{job=~\"a|b\", pod!=\"x\"}", "{job=\"a}b,c\\\"d\"}", "{job!~\"foo\"}"))
-            assertEquals(selector, service.discover("one", selector, "now-1s", "now", null).selector());
-        assertDoesNotThrow(() -> service.discover("one", "{job=\"" + "x".repeat(8000) + "\"}", "now-1s", "now", null));
-        assertThrows(LokiOperationException.class, () -> service.discover("one", "{job=\"" + "x".repeat(9000) + "\"}", "now-1s", "now", null));
+            assertTrue(service.discover("one", selector, "now-1s", "now").startsWith("Streams matching " + selector));
+        assertTrue(service.discover("one", SELECTOR, "now-1s", "now").contains("No labels found in this window."));
     }
-    @Test void cancellationStopsFurtherCalls() {
+    @Test void cancellationStopsFurtherCallsAndSmallBudgetsStillFit() {
         when(client.series(anyString(), anyList(), any(), any())).thenThrow(Errors.failure(ErrorCode.OPERATION_CANCELLED, "safe"));
-        assertThrows(LokiOperationException.class, this::discover);
+        assertThrows(LokiOperationException.class, () -> service.discover("one", SELECTOR, "now-1s", "now"));
         verify(client).series(eq("one"), anyList(), any(), any()); verifyNoMoreInteractions(client);
+        reset(client);
+        series(List.of(Map.of("job", "test")));
+        entries(Map.of("job", "test"), List.of(entry(1, "{\"message\":\"" + "x".repeat(2000) + "\"}")));
+        var text = service.discover("two", SELECTOR, "now-1s", "now");
+        assertTrue(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024 - LogText.ENVELOPE_BYTES, text);
+        assertTrue(text.contains("Example line: {\"message\":\"xxx"), text);
     }
 }

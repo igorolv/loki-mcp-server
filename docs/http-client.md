@@ -1,7 +1,7 @@
 # HTTP-клиент S03
 
 `LokiHttpClient` — внутренний транспортный слой. В S04 поверх него добавлены
-[queryLogs и queryMetrics](queries.md); `listConnections` не использует HTTP.
+[queryLogs, countLogs и queryMetrics](queries.md); `listConnections` не использует HTTP.
 Клиент создаётся Spring как bean; создание не выполняет сетевых запросов.
 
 Контракт транспорта основан на [Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/).
@@ -88,11 +88,12 @@ S04 публикует только факт наличия warnings без ис
 ## Ошибки
 
 Ошибки используют существующий `ToolError` через `LokiOperationException`.
-В сообщения не включаются URL, LogQL, HTTP body, credentials, tenant или исходная
-цепочка исключений. Неуспешный HTTP status обрабатывается сразу по заголовкам:
-error body не сохраняется и не разбирается, поэтому HTML/plain text/JSON от ingress
-не попадают в диагностику. HTTP 200 с `status:error` даёт `UPSTREAM_QUERY_ERROR`
-без исходных `error`/`errorType`.
+В сообщения не включаются URL, credentials, tenant или исходная цепочка исключений.
+Исключение S09 — ошибки запроса, которые описывают LogQL самой модели: тело HTTP 400
+и поле `error` при HTTP 200 `status:error` передаются как `Loki rejected the query: <текст>`
+(до 400 символов, управляющие символы удалены, JSON-тело даёт только `error`).
+Остальные неуспешные статусы обрабатываются по заголовкам: их body не сохраняется,
+поэтому HTML/plain text от ingress не попадают в диагностику.
 
 | Условие | Code | retryable |
 |---|---|---|

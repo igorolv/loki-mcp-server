@@ -1,55 +1,71 @@
 package ru.it_spectrum.ai.loki.mcp.config;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import org.springframework.ai.mcp.annotation.provider.tool.SyncMcpToolProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 import ru.it_spectrum.ai.loki.mcp.service.*;
-import ru.it_spectrum.ai.loki.mcp.tools.QueryTools;
 import ru.it_spectrum.ai.loki.mcp.tools.ConnectionTools;
 import ru.it_spectrum.ai.loki.mcp.tools.DiscoveryTools;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.tools.QueryTools;
 import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
-import tools.jackson.databind.json.JsonMapper;
 
+/** Wraps every tool: explicit connection, argument type check, safe text errors and a last-resort size guard. */
 @Configuration(proxyBeanMethods = false)
 public class QueryToolsConfig {
+    /** listConnections has no connection; its text is bounded by configuration size. */
+    static final int CATALOG_BYTES = 65_536;
+
     @Bean
-    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections, DiscoveryService discovery, LogPagingService paging) {
-        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service, paging), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
+    public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections,
+                                                               DiscoveryService discovery, ConnectionRegistry registry) {
+        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
             @Override protected Class<? extends Throwable> doGetToolCallException() { return Error.class; }
         };
-        var mapper = new JsonMapper();
         var validator = new DefaultJsonSchemaValidator();
-        return provider.getToolSpecifications().stream().map(spec -> SyncToolSpecification.builder().tool(
-                spec.tool().name().equals("queryLogs") || spec.tool().name().equals("continueLogs")
-                ? io.modelcontextprotocol.spec.McpSchema.Tool.builder().name(spec.tool().name()).description(spec.tool().description())
-                    .inputSchema(spec.tool().inputSchema()).annotations(spec.tool().annotations())
-                    .outputSchema(provider.getJsonMapper(), org.springframework.ai.mcp.annotation.method.tool.utils.McpJsonSchemaGenerator
-                            .generateFromClass(ru.it_spectrum.ai.loki.mcp.model.CompactLogs.class)).build()
-                : spec.tool())
+        return provider.getToolSpecifications().stream().map(spec -> SyncToolSpecification.builder().tool(spec.tool())
                 .callHandler((exchange, request) -> {
                     try {
                         var args = request.arguments() == null ? Map.<String, Object>of() : request.arguments();
-                        if (!spec.tool().name().equals("listConnections") && (args.get("connection") == null
-                                || args.get("connection") instanceof String name && name.isBlank())) {
-                            throw Errors.failure(ErrorCode.CONNECTION_REQUIRED, "Specify connection explicitly; use listConnections to discover names.");
+                        String name = spec.tool().name();
+                        int maximum = CATALOG_BYTES;
+                        if (!name.equals("listConnections")) {
+                            if (!(args.get("connection") instanceof String connection) || connection.isBlank())
+                                throw Errors.failure(ErrorCode.CONNECTION_REQUIRED, "Pass connection explicitly; use listConnections to see the names.");
+                            maximum = registry.require(connection).limits().maxResponseBytes();
                         }
-                        if (!validator.validate(spec.tool().inputSchema(), args).valid()) throw QueryTime.invalid();
-                        return spec.callHandler().apply(exchange, request);
+                        if (!validator.validate(spec.tool().inputSchema(), args).valid())
+                            throw Errors.invalid("Argument types are wrong. Times and query are strings, limit is an integer, raw is a boolean.");
+                        var result = spec.callHandler().apply(exchange, request);
+                        return size(result) > maximum ? error(new ToolError(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                                "Response exceeds maxResponseBytes of this connection. Narrow the query or lower the limit.", false)) : result;
                     }
                     catch (Exception exception) {
                         var error = Errors.from(exception);
                         for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
                             if (cause instanceof LokiOperationException safe) { error = safe.error(); break; }
                         }
-                        @SuppressWarnings("unchecked") Map<String, Object> payload = mapper.convertValue(error, Map.class);
-                        return CallToolResult.builder().isError(true).structuredContent(payload)
-                                .addTextContent(mapper.writeValueAsString(error)).build();
+                        return error(error);
                     }
                 }).build()).toList();
+    }
+
+    static CallToolResult error(ToolError error) {
+        return CallToolResult.builder().isError(true).addTextContent(error.text()).build();
+    }
+
+    static int size(CallToolResult result) {
+        int total = 0;
+        if (result.content() != null) for (var content : result.content())
+            if (content instanceof TextContent text && text.text() != null) total += text.text().getBytes(StandardCharsets.UTF_8).length;
+        return total;
     }
 }

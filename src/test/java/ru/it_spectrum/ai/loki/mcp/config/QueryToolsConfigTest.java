@@ -1,36 +1,66 @@
 package ru.it_spectrum.ai.loki.mcp.config;
 
+import java.net.URI;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
-import org.springframework.ai.mcp.annotation.method.tool.utils.McpJsonSchemaGenerator;
-import ru.it_spectrum.ai.loki.mcp.model.ToolError;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import ru.it_spectrum.ai.loki.mcp.connection.*;
 import ru.it_spectrum.ai.loki.mcp.service.*;
-import tools.jackson.databind.json.JsonMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class QueryToolsConfigTest {
-    @Test void unexpectedFailureIsSafeAndSchemaValidAndInvalidInputNeverInvokesService() {
-        var service = mock(QueryService.class);
-        var paging = mock(LogPagingService.class);
-        when(paging.first("test", "q", "now-1s", "now", null, null, null)).thenThrow(new IllegalStateException("SECRET cause"));
-        var spec = new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class), paging).stream()
-                .filter(s -> s.tool().name().equals("queryLogs")).findFirst().orElseThrow();
-        var result = spec.callHandler().apply(null, new CallToolRequest("queryLogs",
-                Map.of("connection", "test", "query", "q", "start", "now-1s", "end", "now")));
+    private final ConnectionRegistry registry = new ConnectionRegistry(List.of(new ConnectionDefinition("test", null,
+            URI.create("http://localhost:1"), ConnectionAuth.NONE, null, ZoneOffset.UTC, new ConnectionLimits(100, 100, 10000, 1024, 10, 3600))));
+    private final QueryService service = mock(QueryService.class);
+    private final List<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> specs =
+            new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class), registry);
+    private CallToolResult call(String tool, Map<String, Object> args) {
+        return specs.stream().filter(s -> s.tool().name().equals(tool)).findFirst().orElseThrow().callHandler().apply(null, new CallToolRequest(tool, args));
+    }
+    private static String text(CallToolResult result) { return ((TextContent) result.content().getFirst()).text(); }
+
+    @Test void toolsAreTextOnlyWithShortInstructionLikeDescriptions() {
+        assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
+        for (var spec : specs) {
+            assertNull(spec.tool().outputSchema(), spec.tool().name());
+            assertTrue(spec.tool().description().length() < 700, spec.tool().name() + " description too long");
+            assertTrue(spec.tool().annotations().readOnlyHint());
+        }
+    }
+    @Test void unexpectedFailureIsSafeAndInvalidInputNeverInvokesService() {
+        when(service.logs("test", "q", null, null, null, null)).thenThrow(new IllegalStateException("SECRET cause"));
+        var result = call("queryLogs", Map.of("connection", "test", "query", "q"));
         assertTrue(result.isError());
-        assertEquals("INTERNAL_ERROR", ((Map<?, ?>) result.structuredContent()).get("code"));
-        assertFalse(result.toString().contains("SECRET"));
-        var mapper = new JsonMapper();
-        @SuppressWarnings("unchecked") Map<String, Object> schema = mapper.readValue(McpJsonSchemaGenerator.generateFromClass(ToolError.class), Map.class);
-        assertTrue(new DefaultJsonSchemaValidator().validate(schema, result.structuredContent()).valid());
-        clearInvocations(service, paging);
-        var invalid = spec.callHandler().apply(null, new CallToolRequest("queryLogs",
-                Map.of("connection", "test", "query", "q", "start", "now-1s", "end", "now", "limit", "SECRET")));
-        assertEquals("INVALID_ARGUMENT", ((Map<?, ?>) invalid.structuredContent()).get("code"));
+        assertEquals("Error INTERNAL_ERROR: Operation failed internally.", text(result));
+        assertNull(result.structuredContent());
+        clearInvocations(service);
+        var invalid = call("queryLogs", Map.of("connection", "test", "query", "q", "limit", "SECRET"));
+        assertTrue(invalid.isError());
+        assertTrue(text(invalid).startsWith("Error INVALID_ARGUMENT: Argument types are wrong."));
         assertFalse(invalid.toString().contains("SECRET"));
-        verifyNoInteractions(service, paging);
+        var missing = call("queryLogs", Map.of("query", "q"));
+        assertTrue(text(missing).startsWith("Error CONNECTION_REQUIRED"));
+        var unknown = call("queryLogs", Map.of("connection", "nope", "query", "q"));
+        assertTrue(text(unknown).startsWith("Error UNKNOWN_CONNECTION"));
+        verifyNoInteractions(service);
+    }
+    @Test void safeErrorsFromServicesAndOversizedTextAreReportedAsText() {
+        when(service.count("test", "{a=\"b\"}", null, null, null)).thenThrow(Errors.invalid("groupBy must be a label name."));
+        var error = call("countLogs", Map.of("connection", "test", "query", "{a=\"b\"}"));
+        assertTrue(error.isError());
+        assertEquals("Error INVALID_ARGUMENT: groupBy must be a label name.", text(error));
+        when(service.logs("test", "q", null, null, null, null)).thenReturn("x".repeat(2000));
+        var oversized = call("queryLogs", Map.of("connection", "test", "query", "q"));
+        assertTrue(oversized.isError());
+        assertTrue(text(oversized).startsWith("Error RESPONSE_BUDGET_EXCEEDED"));
+        when(service.logs("test", "q", null, null, null, null)).thenReturn("fine");
+        var ok = call("queryLogs", Map.of("connection", "test", "query", "q"));
+        assertFalse(ok.isError());
+        assertEquals("fine", text(ok));
     }
 }

@@ -1,6 +1,5 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
-import ru.it_spectrum.ai.loki.mcp.model.ConnectionSummary;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import java.util.Collections;
@@ -21,9 +20,7 @@ public final class ConnectionRegistry {
         definitions = Collections.unmodifiableMap(index);
     }
 
-    public List<ConnectionSummary> list() {
-        return definitions.values().stream().map(c -> new ConnectionSummary(c.name(), c.description())).toList();
-    }
+    public List<ConnectionDefinition> list() { return List.copyOf(definitions.values()); }
 
     public ConnectionDefinition require(String name) {
         if (name == null || name.isBlank()) {

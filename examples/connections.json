@@ -2,6 +2,7 @@
   "connections": {
     "local": {
       "description": "Local test Loki",
+      "hint": "Labels: job, level. JSON lines with log_level and message.",
       "url": "http://localhost:3100",
       "timezone": "UTC"
     },
@@ -10,6 +11,7 @@
       "url": "${LOKI_URL}",
       "auth": { "type": "BEARER", "token": "${LOKI_TOKEN}" },
       "tenant": "${LOKI_TENANT}",
+      "serviceLabels": ["applicationName", "service", "container"],
       "limits": { "maxEntries": 500 }
     }
   }

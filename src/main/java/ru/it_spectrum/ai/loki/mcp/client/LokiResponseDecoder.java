@@ -66,8 +66,8 @@ final class LokiResponseDecoder {
             JsonNode root = object(MAPPER.readTree(bytes));
             String status = string(root.path("status"));
             if ("error".equals(status)) {
-                // The upstream error text and errorType are untrusted and may contain secrets.
-                throw TransportErrors.error(UPSTREAM_QUERY_ERROR);
+                // The error text explains the model's own query; errorType is not needed.
+                throw TransportErrors.queryError(UPSTREAM_QUERY_ERROR, root.path("error").isString() ? root.path("error").stringValue() : null);
             }
             check("success".equals(status));
             return root;

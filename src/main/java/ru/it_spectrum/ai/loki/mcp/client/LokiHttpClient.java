@@ -101,7 +101,7 @@ public final class LokiHttpClient implements AutoCloseable {
             pending = client(connection).sendAsync(request.build(), info -> {
                 var body = new LimitedBodySubscriber(connection.limits().maxHttpResponseBytes());
                 subscriber.set(body);
-                if (info.statusCode() != 200) {
+                if (info.statusCode() != 200 && info.statusCode() != 400) {
                     body.fail(TransportErrors.http(info.statusCode()));
                 } else if (!info.headers().firstValue("Content-Encoding").orElse("identity").equalsIgnoreCase("identity")) {
                     body.fail(TransportErrors.error(UPSTREAM_INVALID_RESPONSE));
@@ -112,7 +112,10 @@ public final class LokiHttpClient implements AutoCloseable {
                 return body;
             });
             // Unlike an InputStream body handler, completion means the entire bounded body arrived.
-            return pending.get(connection.limits().requestTimeoutMs(), TimeUnit.MILLISECONDS).body();
+            var response = pending.get(connection.limits().requestTimeoutMs(), TimeUnit.MILLISECONDS);
+            // A 400 body is Loki's explanation of what is wrong with the model's own query; it is passed on.
+            if (response.statusCode() == 400) throw TransportErrors.badRequest(new String(response.body(), StandardCharsets.UTF_8));
+            return response.body();
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
             throw TransportErrors.error(OPERATION_CANCELLED);

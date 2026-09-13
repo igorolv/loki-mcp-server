@@ -107,11 +107,14 @@ class LokiResponseDecoderTest {
         assertNull(error.getCause());
     }
 
-    @Test void discardsUpstreamErrorTextAndType() {
+    @Test void passesUpstreamErrorTextButNotType() {
         var failure = assertThrows(LokiOperationException.class, () -> decoder.query(bytes(
-                "{\"status\":\"error\",\"errorType\":\"SECRET\",\"error\":\"SECRET log line and credentials\"}")));
+                "{\"status\":\"error\",\"errorType\":\"TYPE\",\"error\":\"query text problem\"}")));
         assertEquals(UPSTREAM_QUERY_ERROR, failure.error().code());
-        assertFalse(failure.toString().contains("SECRET"));
+        assertEquals("Loki rejected the query: query text problem", failure.error().message());
+        assertFalse(failure.toString().contains("TYPE"));
         assertNull(failure.getCause());
+        assertEquals("Loki rejected the query; check its syntax.", assertThrows(LokiOperationException.class,
+                () -> decoder.query(bytes("{\"status\":\"error\",\"error\":5}"))).error().message());
     }
 }

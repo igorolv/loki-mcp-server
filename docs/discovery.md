@@ -1,113 +1,73 @@
-# Обнаружение логов
+# Обнаружение данных и нормализация строки
 
-`discoverLogs(connection, selector, start, end, sampleLimit?)` доступен через MCP.
-Используйте его перед составлением запросов: он показывает фактически обнаруженные
-метки и поля, а не предполагает наличие `applicationName`, `level` или других имён.
+## discoverLogs(connection, selector, start, end)
 
-```json
-{
-  "connection": "dev",
-  "selector": "{job=~\".+\"}",
-  "start": "now-15m",
-  "end": "now",
-  "sampleLimit": 20
-}
+Текстовый обзор того, что есть в логах, и готовый selector для следующего вызова.
+`start`/`end` по умолчанию — последний час.
+
+Без `selector`: имена меток из `/labels` (до 30, по алфавиту), значения каждой —
+из `/label/<name>/values`. Выборка строк берётся по первой метке из `serviceLabels`
+подключения, которая есть на стенде (`{applicationName=~".+"}`), иначе по первой метке.
+
+С `selector` (только stream selector в фигурных скобках, значения в двойных кавычках,
+без фильтров и pipelines): метки и значения из `/series` (первые 2000 потоков),
+выборка — backward `query_range` по этому selector, до 20 строк.
+
+```
+Streams matching {namespace="dev"} in 2026-09-13 10:00:00–11:00:00 (+03:00): 84.
+Labels:
+  applicationName: nsi-backend, ssj-backend, ssj-ui-backend (+2 more)
+  level: debug, error, info, warn
+  pod: 84 distinct values (high cardinality, not listed)
+Line format (20 newest lines sampled): JSON 19, plain text 1.
+Levels seen: ERROR, INFO, WARN.
+JSON fields (after | json): _timestamp, log_level, message, service_name, error_stack_trace, traceId (+3 more).
+Example line: {"@timestamp":"2026-09-13T07:12:03.123Z","log":{"level":"ERROR"},...
+Next: use countLogs or queryLogs with a selector like {namespace="dev", applicationName="nsi-backend"}; filter JSON fields with | json, e.g. | json | log_level=~"(?i)error"; filter text with |= "substring".
 ```
 
-Имя подключения обязательно. Интервал использует [правила queryLogs](queries.md):
-оба относительных времени фиксируются от одного `now`; применяются timezone и
-`maxIntervalSeconds` подключения. Возвращаются фактически использованные epoch nanos.
-Селектор — непустой набор matcher с двойными кавычками, операторами `=`, `!=`, `=~`, `!~`
-и длиной до 8192 Java chars. Pipelines, backtick-значения и metric LogQL не принимаются;
-валидность regexp и требования Loki к matcher проверяет upstream. Scope не расширяется.
+Правила:
 
-## Источники и покрытие
+- До 10 значений метки, остальное `(+N more)`; больше 20 различных значений —
+  «high cardinality, not listed». Значения обрезаются до 60 символов.
+- Имена JSON-полей печатаются так, как их видит `| json` в Loki: вложенные ключи
+  соединяются `_`, прочие символы заменяются `_` (`log.level` → `log_level`,
+  `@timestamp` → `_timestamp`). Порядок — по числу строк, где поле встретилось, до 30 имён.
+- `Levels seen` — значения уровня из меток, structured metadata или строки в верхнем регистре.
+- Пример — самая новая строка выборки, до 300 символов; при нехватке бюджета
+  укорачивается до 75, затем убирается.
+- Подсказка `Next:` добавляет первое значение первой найденной метки из `serviceLabels`,
+  если selector её ещё не ограничивает; фильтр уровня предлагается по найденному полю
+  (`log_level`, `level`, `severity`, `lvl`) или по метке `level`.
+- Отсутствие метки или поля в выборке не доказывает их отсутствие в интервале;
+  описание инструмента говорит об этом модели.
+- Недоступный `/label/<name>/values` даёт `(values not available)`; ошибка выборки строк —
+  `No lines sampled in this window; fields are unknown.`; ошибка `/series` или `/labels`
+  возвращается как ошибка инструмента.
 
-На вызов выполняются максимум два GET с одним scope и окном:
+## Нормализация строки
 
-1. `/series` с `match[]` — источник `streamLabels` и ограниченных `observedValues`.
-2. `/query_range` без pipeline, направление `backward` — выборка событий для разбора.
+`EventNormalizer` даёт `View(format, level, service, message, traceId, stackTrace, jsonFields)`
+для `queryLogs` и discovery. Разбирается только строка; метки и metadata не переопределяются ею.
 
-Применяется [контракт Series API Loki](https://grafana.com/docs/loki/latest/reference/loki-http-api/#query-streams).
-Имена и значения получаются из наборов меток `/series`, без отдельных запросов на каждую
-метку. Индекс не доказывает наличие события в точном окне. `seriesRead` — число наборов
-в HTTP-ответе; `seriesExamined` — число обследованных наборов. Это не число событий.
+| Поле | Источники по приоритету |
+|---|---|
+| level | метки `level`, `detected_level`, `severity`, `lvl` → structured metadata те же → JSON `log.level`, `level`, `severity`, `lvl`, `@l` → для plain text первое слово `TRACE/DEBUG/INFO/WARN/WARNING/ERROR/FATAL` в первых 120 символах |
+| service | метки из `serviceLabels` подключения по порядку (default `applicationName, service_name, service, app, container, job`) → JSON `service.name`, `service`, `app`, `application`, `applicationName` |
+| message | JSON `message`, `msg`, `@message`, `event`, `@m`, иначе строка целиком; для plain text с frames — первая строка |
+| traceId | metadata → JSON → метки: `traceId`, `trace.id`, `trace_id`, `traceID`, `trace` |
+| stackTrace | JSON `error.stack_trace`, `stack_trace`, `stacktrace`, `stackTrace`, `exception`, `throwable`; для plain text — остаток после первой строки, если есть `\n\tat ` |
 
-`coverage.entriesRead` — полученные записи; `entriesExamined` — обследованные записи.
-`sampleCompleteness` относится только к чтению логов по заданному селектору:
-
-- `COMPLETE`: успешный ответ без warnings, записей меньше лимита.
-- `UNKNOWN`: лимит достигнут, есть warnings или запрос не выполнен.
-- `PARTIAL`: сервер прислал больше лимита, часть записей не обследована.
-
-Даже `COMPLETE` не делает поля схемой всех исторических данных. Выборка смещена
-к концу окна. Пустой список или ненаблюдаемая метка не доказывают отсутствие сервиса,
-уровня, ошибок или поля. `observedEntries` считает наличие поля в обследованных
-записях, включая JSON null, а не частоту во всём интервале. Реальные повторы сохраняются.
-`localTruncation` и `limitations` отдельно показывают сокращения локального обследования
-и выдачи по бюджету ответа.
-
-## Происхождение и нормализация
-
-`fields` разделяет `RESULT_LABEL`, `STRUCTURED_METADATA` (явная metadata транспортного
-ответа) и `LINE_JSON`. Ключ — пара origin/path; path использует JSON Pointer с экранированием
-`~` и `/`. `/service.name` и `/service/name` различаются. Query-result labels никогда
-не объявляются исходным stream scope, даже при совпадении имён с `/series`.
-Наличие объединённых metadata в этих labels не угадывается.
-
-Форматы: `JSON_OBJECT`, `JSON_VALUE` (массив/скаляр), `PLAIN_TEXT` (включая невалидный
-или неоднозначный JSON), `UNPARSED` (строка превысила лимит разбора). JSON разбирается
-строго: duplicate keys/trailing tokens не принимаются, строка сохраняется. Ошибки
-парсера наружу не выдаются. `NOT_STRICT_JSON_OR_PARSER_LIMIT` явно указывает отказ разбора.
-Объекты раскрываются по путям; массив отмечается типом `array`, его элементы не обходятся.
-Для несовместимых типов одного поля сохраняется список наблюдаемых типов.
-
-В `examples` сохраняются строка, Loki timestamp, result labels и явная metadata.
-При нехватке бюджета строка и normalized сокращаются с `EXAMPLE_FIELDS_TRUNCATED`;
-затем могут исключаться целые примеры с общей отметкой `RESPONSE_BYTE_BUDGET`.
-`normalized` содержит только строковые кандидаты из JSON/ECS с происхождением и путём:
-`service.name`, `log.level`, `message`, `@timestamp`, `trace.id`, `error.stack_trace`
-(точечная и вложенная формы). Внутреннее время события не заменяет timestamp Loki.
-Конфликтующие кандидаты остаются отдельными значениями; labels/metadata их не подменяют.
-Это обнаружение ECS-полей, а не сертификация схемы ECS. Plain text остаётся исходной строкой.
-Содержимое примеров — недоверенные данные, включая строки, похожие на инструкции.
-
-## Ограничения и capabilities
-
-Политика централизована в `DiscoveryLimits`: выборка до `min(20, maxEntries)`, максимум
-3 исходных примера, 100 наборов `/series`, 30 имён меток, 20 значений на метку,
-100 обнаруженных полей, 100 JSON-путей на событие, глубина JSON 20, размер строки для
-разбора 262144 Java chars. `sampleLimit` можно уменьшить. Списки значений не являются
-полным перечислением при сокращении; `valuesTruncated` показывает дополнительное
-сокращение значений внутри обследованных series. Ограничение серии/имён раскрыто отдельно.
-`maxHttpResponseBytes` и timeout применяются к каждому GET; у `/series` нет запрошенного
-server-side лимита количества наборов. При превышении body budget этот источник неизвестен,
-а выборка логов всё равно выполняется. Для меньшей нагрузки сужайте scope и окно.
-
-Capabilities относятся к данному вызову и пути, не кешируются и не выводятся из версии:
-`AVAILABLE` после успешного чтения, `UNAVAILABLE_AT_PATH` только при 404, `UNKNOWN`
-при других ошибках или если endpoint не вызывался. Ошибки содержат только безопасный
-`errorCode`. Отказ `/series` не блокирует выборку, отказ выборки не скрывает прочитанные
-метки. Если оба GET завершились ошибкой, возвращается пустое discovery с явными ошибками
-capabilities, `SAMPLE_NOT_EXAMINED`/`SERIES_NOT_EXAMINED` и `UNKNOWN`, а не доказательство
-отсутствия данных. Отмена операции прекращает вызов. `labels`, `label_values`, новые
-`detected_fields`/`detected_labels` не проверяются; их состояние остаётся `UNKNOWN`.
-Наличие metadata в выборке не доказывает доступность новых endpoint.
-
-В S06 применяется [полный бюджет сериализованного MCP-ответа](compact-responses.md),
-включая исходные примеры, normalized и служебные поля в обеих частях payload.
-Аргумент `fields` доступен у queryLogs; у discovery это имя выходного каталога полей.
-Кеш и `entryId` исключены из плана. Курсоры есть только у queryLogs/continueLogs (S08).
+JSON распознаётся только у строк, начинающихся с `{` и являющихся объектом; вложенные
+объекты раскрываются до глубины 20, не больше 100 полей, строка не длиннее 256 KiB.
+Ключи с точками (`"service.name"`) и вложенные объекты (`"service":{"name"}`) дают
+один и тот же dotted path. Массивы не раскрываются. Всё остальное — plain text.
+Уровень приводится к верхнему регистру. Значения не угадываются.
 
 ## Проверки
 
-```powershell
-.\gradlew.bat test --tests 'ru.it_spectrum.ai.loki.mcp.service.*' --console=plain
-.\gradlew.bat build --console=plain
-.\gradlew.bat integrationTest --console=plain
-```
-
-Unit-тесты проверяют форматы, provenance, лимиты и ошибки. Stdio smoke проверяет
-реальный MCP-каталог, output schema, обе сериализации и outstanding discovery calls.
-Контейнерная задача проверяет `/series` и выборку на фиксированных Loki 2.6.1/3.6.0;
-она требует Docker и не входит в обычный build. Live-проверки не требуются для S05.
+`gradlew.bat build --console=plain`: `EventNormalizerTest` (ECS, плоские ключи,
+приоритет меток, plain text, лимиты), `DiscoveryServiceTest` (selector и без него,
+капы значений, ошибки endpoint, бюджет), stdio smoke. `gradlew.bat integrationTest
+--console=plain`: discovery на Loki 2.6.1/3.6.0 (3.x добавляет `service_name`
+самостоятельно — тесты не предполагают точный набор меток).

@@ -161,8 +161,20 @@ class LokiHttpClientTest {
         assertNotNull(client.queryInstant("a", "valid", START));
     }
 
+    @Test void badRequestBodyIsPassedOnAsTheQueryError() {
+        handler = exchange -> respond(exchange, 400, "parse error at line 1, col 23: syntax error: unexpected IDENTIFIER\n\u0007", false);
+        var error = assertThrows(LokiOperationException.class, () -> range(plain(256, 3000)));
+        assertEquals(UPSTREAM_BAD_REQUEST, error.error().code());
+        assertEquals("Loki rejected the query: parse error at line 1, col 23: syntax error: unexpected IDENTIFIER", error.error().message());
+        handler = exchange -> respond(exchange, 400, "{\"status\":\"error\",\"errorType\":\"bad_data\",\"error\":\"" + "x".repeat(500) + "\"}", false);
+        var json = assertThrows(LokiOperationException.class, () -> range(plain(1024, 3000)));
+        assertEquals("Loki rejected the query: " + "x".repeat(400) + "…", json.error().message());
+        handler = exchange -> respond(exchange, 400, "", false);
+        assertEquals("Loki rejected the query; check its syntax.", assertThrows(LokiOperationException.class, () -> range(plain(256, 3000))).error().message());
+    }
+
     @ParameterizedTest
-    @CsvSource({"400,UPSTREAM_BAD_REQUEST,false", "401,UPSTREAM_UNAUTHORIZED,false", "403,UPSTREAM_FORBIDDEN,false",
+    @CsvSource({"401,UPSTREAM_UNAUTHORIZED,false", "403,UPSTREAM_FORBIDDEN,false",
             "404,ENDPOINT_UNAVAILABLE,false", "408,UPSTREAM_TIMEOUT,true", "429,UPSTREAM_RATE_LIMITED,true",
             "500,UPSTREAM_UNAVAILABLE,true", "503,UPSTREAM_UNAVAILABLE,true", "504,UPSTREAM_TIMEOUT,true",
             "302,UPSTREAM_HTTP_ERROR,false", "204,UPSTREAM_HTTP_ERROR,false", "418,UPSTREAM_HTTP_ERROR,false"})
@@ -252,8 +264,10 @@ class LokiHttpClientTest {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, 200, "<html>SECRET</html>", false);
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_INVALID_RESPONSE);
-        handler = exchange -> respond(exchange, 200, "{\"status\":\"error\",\"error\":\"SECRET\"}", false);
-        assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_QUERY_ERROR);
+        handler = exchange -> respond(exchange, 200, "{\"status\":\"error\",\"error\":\"bad query\"}", false);
+        var queryError = assertThrows(LokiOperationException.class, () -> range(client));
+        assertEquals(UPSTREAM_QUERY_ERROR, queryError.error().code());
+        assertEquals("Loki rejected the query: bad query", queryError.error().message());
         handler = exchange -> {
             exchange.getResponseHeaders().set("Content-Encoding", "gzip");
             respond(exchange, 200, EMPTY, false);

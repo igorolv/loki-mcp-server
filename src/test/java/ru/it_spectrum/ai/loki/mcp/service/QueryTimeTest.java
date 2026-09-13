@@ -21,9 +21,21 @@ class QueryTimeTest {
     }
     @ParameterizedTest @ValueSource(strings = {"", "secret", "now-0m", "now+1h", "9223372036854775808",
             "now-999999999999999999999d", "2026-03-29T02:30:00", "2026-10-25T02:30:00", "9999-01-01T00:00:00Z"})
-    void rejectsInvalidAndAmbiguousTimeWithoutEcho(String value) {
+    void rejectsInvalidAndAmbiguousTimeWithFormatHint(String value) {
         var failure = assertThrows(LokiOperationException.class, () -> QueryTime.parse(value, now, zone));
-        assertFalse(failure.getMessage().contains("secret"));
+        assertEquals(ru.it_spectrum.ai.loki.mcp.model.ErrorCode.INVALID_ARGUMENT, failure.error().code());
+        assertTrue(failure.getMessage().contains("now-15m") || failure.getMessage().contains("DST"), failure.getMessage());
+    }
+    @Test void blankEndpointsDefaultToLastHourAndShortRelativeFormsAreAccepted() {
+        var window = QueryTime.range(null, "", now, zone, 86400);
+        assertEquals(now.minusSeconds(3600), window.start());
+        assertEquals(now, window.end());
+        assertEquals(now.minusSeconds(900), QueryTime.parse("15m", now, zone));
+        assertEquals(java.time.Duration.ofMinutes(5), QueryTime.duration("5m"));
+        assertEquals("300s", QueryTime.lokiDuration(java.time.Duration.ofMinutes(5)));
+        assertEquals("250ms", QueryTime.lokiDuration(java.time.Duration.ofMillis(250)));
+        assertThrows(LokiOperationException.class, () -> QueryTime.duration("5x"));
+        assertEquals("2026-09-13T14:00:00.123+02:00", QueryTime.iso(now, zone));
     }
     @Test void rejectsMissingReversedAndTooWideIntervals() {
         assertThrows(LokiOperationException.class, () -> QueryTime.parse(null, now, zone));

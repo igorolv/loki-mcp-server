@@ -49,9 +49,10 @@ public final class ConnectionsLoader {
                         or(l.maxResponseBytes(), d.maxResponseBytes()), or(l.maxEntries(), d.maxEntries()),
                         l.maxIntervalSeconds() == null ? d.maxIntervalSeconds() : l.maxIntervalSeconds(),
                         or(l.maxMetricSeries(), d.maxMetricSeries()), or(l.maxMetricPoints(), d.maxMetricPoints()));
-                definitions.add(new ConnectionDefinition(pair.getKey(), e.description(),
+                definitions.add(new ConnectionDefinition(pair.getKey(), e.description(), e.hint(),
                         URI.create(resolve(e.url(), environment)), auth, resolve(e.tenant(), environment),
-                        ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits));
+                        ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits,
+                        e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels()));
             }
             return List.copyOf(definitions);
         } catch (Exception ignored) {
@@ -79,7 +80,8 @@ public final class ConnectionsLoader {
     }
 
     private record FileConfig(Map<String, Entry> connections) {}
-    private record Entry(String description, String url, Auth auth, String tenant, String timezone, Limits limits) {}
+    private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
+                         Limits limits, List<String> serviceLabels) {}
     private record Auth(ConnectionAuth.Type type, String username, String password, String token) {}
     private record Limits(Integer connectTimeoutMs, Integer requestTimeoutMs, Integer maxHttpResponseBytes,
                           Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,

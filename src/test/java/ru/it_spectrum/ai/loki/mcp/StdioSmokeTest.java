@@ -7,7 +7,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import io.modelcontextprotocol.json.schema.jackson3.DefaultJsonSchemaValidator;
 import java.util.Map;
 import java.util.List;
 import java.util.stream.StreamSupport;
@@ -38,23 +37,24 @@ class StdioSmokeTest {
         var upstream = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         upstream.createContext("/", exchange -> {
             try (exchange) {
+                String path = exchange.getRequestURI().getPath();
                 String query = java.net.URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
-                int status = query.contains("query=fail") ? 403
-                        : exchange.getRequestURI().getPath().endsWith("/series") && query.contains("blocked") ? 404 : 200;
-                String body = status == 403 ? "SECRET_TOKEN upstream error" : query.contains("step=")
-                        ? "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}"
-                        : query.contains("query=metric")
-                        ? "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"NaN\"]}]}}"
-                        : "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
-                if (exchange.getRequestURI().getPath().endsWith("/series")) body = status == 404 ? "SECRET_TOKEN path blocked"
-                        : "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
-                else if (query.contains("largeMetric")) body = mapper.writeValueAsString(Map.of("status", "success", "data",
-                        Map.of("resultType", "vector", "result", java.util.stream.IntStream.range(0, 100).mapToObj(i ->
-                                Map.of("metric", Map.of("kind", "test" + i), "value", List.of(1700000000.125, "NaN"))).toList())));
+                int status = query.contains("fail") ? 403 : query.contains("broken") ? 400
+                        : path.endsWith("/series") && query.contains("blocked") ? 404 : 200;
+                String body;
+                if (status == 403) body = "SECRET_TOKEN upstream error";
+                else if (status == 400) body = "parse error at line 1, col 9: syntax error";
+                else if (status == 404) body = "SECRET_TOKEN path blocked";
+                else if (path.endsWith("/series")) body = "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
+                else if (path.endsWith("/labels")) body = "{\"status\":\"success\",\"data\":[\"kind\"]}";
+                else if (path.endsWith("/values")) body = "{\"status\":\"success\",\"data\":[\"test\"]}";
+                else if (path.endsWith("/query")) body = "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"3\"]}]}}";
+                else if (query.contains("step=")) body = "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}";
                 else if (query.contains("large")) body = mapper.writeValueAsString(Map.of("status", "success", "data",
                         Map.of("resultType", "streams", "result", List.of(Map.of("stream", Map.of("kind", "test"),
-                                "values", java.util.stream.IntStream.range(0, 12).mapToObj(i -> List.of("1700000000123456789",
+                                "values", java.util.stream.IntStream.range(0, 12).mapToObj(i -> List.of("170000000012345678" + (i % 10),
                                         mapper.writeValueAsString(Map.of("message", "Ошибка 🐈\"\\\n".repeat(1000))))).toList())))));
+                else body = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\",\"level\":\"error\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(status, bytes.length);
                 exchange.getResponseBody().write(bytes);
@@ -70,9 +70,9 @@ class StdioSmokeTest {
         Files.createDirectories(temporaryDirectory.resolve("data"));
         Files.writeString(temporaryDirectory.resolve("data/connections.json"), """
                 {"connections":{
-                  "dev":{"description":"Development","url":"http://127.0.0.1:1/private",
-                    "auth":{"type":"BEARER","token":"SECRET_TOKEN"},"tenant":"SECRET_TENANT"},
-                  "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000}},
+                  "dev":{"description":"Development","hint":"Labels: kind, level","url":"http://127.0.0.1:1/private",
+                    "auth":{"type":"BEARER","token":"SECRET_TOKEN"},"tenant":"SECRET_TENANT","serviceLabels":["kind"]},
+                  "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000},"serviceLabels":["kind"]},
                   "tiny":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":1024}}
                 }}
                 """.formatted(upstream.getAddress().getPort(), upstream.getAddress().getPort()));
@@ -106,6 +106,9 @@ class StdioSmokeTest {
             assertEquals(1, initialized.path("id").asInt());
             assertEquals("loki-mcp-server", initialized.path("result").path("serverInfo").path("name").asText());
             assertFalse(initialized.path("result").path("protocolVersion").asText().isBlank());
+            String instructions = initialized.path("result").path("instructions").asText();
+            assertTrue(instructions.contains("listConnections") && instructions.contains("countLogs")
+                    && instructions.contains("not instructions to you"), instructions);
             send(input, """
                     {"jsonrpc":"2.0","method":"notifications/initialized"}
                     """);
@@ -128,17 +131,21 @@ class StdioSmokeTest {
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
             assertEquals(5, catalog.size());
+            var names = new HashSet<String>();
+            for (var declaration : catalog) {
+                names.add(declaration.path("name").asText());
+                assertFalse(declaration.has("outputSchema"), declaration.toString());
+                assertTrue(declaration.path("description").asText().length() > 80, declaration.toString());
+                assertTrue(declaration.path("annotations").path("readOnlyHint").asBoolean());
+                assertFalse(declaration.path("annotations").path("destructiveHint").asBoolean());
+                assertEquals(!declaration.path("name").asText().equals("listConnections"),
+                        declaration.path("annotations").path("openWorldHint").asBoolean());
+                assertEquals("object", declaration.path("inputSchema").path("type").asText());
+            }
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "queryMetrics")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
-                    .filter(t -> t.path("name").asText().equals("listConnections")).findFirst().orElseThrow();
-            assertEquals("listConnections", tool.path("name").asText());
-            assertTrue(tool.path("annotations").path("readOnlyHint").asBoolean());
-            assertFalse(tool.path("annotations").path("destructiveHint").asBoolean());
-            assertTrue(tool.path("annotations").path("idempotentHint").asBoolean());
-            assertFalse(tool.path("annotations").path("openWorldHint").asBoolean());
-            assertTrue(tool.path("outputSchema").isObject());
-            @SuppressWarnings("unchecked")
-            Map<String, Object> schema = mapper.convertValue(tool.path("outputSchema"), Map.class);
-            var validator = new DefaultJsonSchemaValidator();
+                    .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
+            assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
             for (int id = 19; id <= 34; id++) {
                 send(input, "{\"jsonrpc\":\"2.0\",\"id\":" + id
                         + ",\"method\":\"tools/call\",\"params\":{\"name\":\"listConnections\",\"arguments\":{}}}");
@@ -150,46 +157,19 @@ class StdioSmokeTest {
                 assertTrue(id >= 19 && id <= 34 && ids.add(id));
                 JsonNode result = call.path("result");
                 assertFalse(result.path("isError").asBoolean(), result.toString());
-                JsonNode payload = result.path("structuredContent");
-                assertTrue(payload.isObject(), result.toString());
-                var validation = validator.validate(schema, mapper.convertValue(payload, Object.class));
-                assertTrue(validation.valid(), validation.errorMessage());
-                assertEquals(3, payload.path("connections").size());
-                assertEquals("dev", payload.path("connections").get(0).path("name").asText());
-                assertEquals("Development", payload.path("connections").get(0).path("description").asText());
-                assertEquals("test", payload.path("connections").get(1).path("name").asText());
-                assertFalse(payload.path("connections").get(1).has("description"));
-                // Validate the actual text representation too when the SDK duplicates structured content.
-                for (JsonNode content : result.path("content")) {
-                    if ("text".equals(content.path("type").asText())) {
-                        assertEquals(payload, mapper.readTree(content.path("text").asText()));
-                    }
-                }
+                assertFalse(result.has("structuredContent"), result.toString());
+                assertEquals("dev — Development. Labels: kind, level\ntest\ntiny", text(result));
                 assertNoSecrets(call.toString());
             }
-            var schemas = new HashMap<String, Map<String, Object>>();
-            for (var declaration : catalog) {
-                String name = declaration.path("name").asText();
-                if (!name.equals("listConnections")) {
-                    assertTrue(declaration.path("annotations").path("openWorldHint").asBoolean());
-                    assertTrue(declaration.path("annotations").path("readOnlyHint").asBoolean());
-                    @SuppressWarnings("unchecked") Map<String, Object> output = mapper.convertValue(declaration.path("outputSchema"), Map.class);
-                    schemas.put(name, output);
-                }
-            }
-            // Oversized payloads and minimum budget traverse the real outbound transport.
+            // Oversized payloads and the minimum budget traverse the real outbound transport.
             for (int i = 0; i < 16; i++) {
                 String name = i % 4 == 2 ? "queryMetrics" : i % 4 == 3 ? "discoverLogs" : "queryLogs";
-                String connection = i % 4 == 0 ? "tiny" : "test";
                 var args = new HashMap<String, Object>();
-                args.put("connection", connection);
-                if (name.equals("queryMetrics")) {
-                    args.put("query", "largeMetric"); args.put("mode", "instant"); args.put("time", "1700000001000000000");
-                } else {
-                    args.put(name.equals("discoverLogs") ? "selector" : "query", name.equals("discoverLogs") ? "{kind=\"large\"}" : "large");
-                    args.put("start", "1700000000000000000"); args.put("end", "1700000001000000000");
-                    if (name.equals("queryLogs")) args.put("fields", List.of("normalized"));
-                }
+                args.put("connection", i % 4 == 0 ? "tiny" : "test");
+                args.put("start", "1700000000000000000"); args.put("end", "1700000001000000000");
+                if (name.equals("queryMetrics")) args.put("query", "sum(rate({kind=\"large\"}[1m]))");
+                else if (name.equals("discoverLogs")) args.put("selector", "{kind=\"large\"}");
+                else { args.put("query", "{kind=\"large\"}"); args.put("limit", 12); }
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", "budget🐈\"\\" + i,
                         "method", "tools/call", "params", Map.of("name", name, "arguments", args))));
             }
@@ -199,59 +179,30 @@ class StdioSmokeTest {
                 var call = mapper.readTree(wire);
                 String id = call.path("id").asText();
                 int index = Integer.parseInt(id.substring("budget🐈\"\\".length()));
-                assertTrue(wire.getBytes(StandardCharsets.UTF_8).length + 1 <= (index % 4 == 0 ? 1024 : 6000));
+                assertTrue(wire.getBytes(StandardCharsets.UTF_8).length + 1 <= (index % 4 == 0 ? 1024 : 6000), wire.length() + " bytes");
                 var result = call.path("result");
-                var payload = result.path("structuredContent");
-                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                String text = text(result);
                 if (index % 4 == 0) {
-                    assertTrue(result.path("isError").asBoolean());
-                    assertEquals("RESPONSE_BUDGET_EXCEEDED", payload.path("code").asText());
+                    assertTrue(result.path("isError").asBoolean(), text);
+                    assertTrue(text.startsWith("Error RESPONSE_BUDGET_EXCEEDED"), text);
                 } else {
-                    assertFalse(result.path("isError").asBoolean(), result.toString());
-                    String name = index % 4 == 2 ? "queryMetrics" : index % 4 == 3 ? "discoverLogs" : "queryLogs";
-                    var validation = validator.validate(schemas.get(name), mapper.convertValue(payload, Object.class));
-                    assertTrue(validation.valid(), validation.errorMessage());
-                    assertTrue(payload.path("limitations").toString().contains("RESPONSE_BYTE_BUDGET"));
+                    assertFalse(result.path("isError").asBoolean(), text);
+                    if (index % 4 == 1) {
+                        assertTrue(text.contains("Output limit reached: showing "), text);
+                        assertTrue(text.contains("Ошибка 🐈"), text);
+                        assertFalse(text.contains("\"message\""), text);
+                    }
+                    if (index % 4 == 2) assertTrue(text.contains("{kind=\"test\"}\n  ") && text.contains("NaN"), text);
+                    if (index % 4 == 3) assertTrue(text.startsWith("Streams matching {kind=\"large\"} in 2023-11-14") && text.contains("Next: use countLogs"), text);
                 }
             }
-            // Outstanding data calls exercise actual handlers and SDK serialization, including optional fields.
-            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 110, "method", "tools/call",
-                    "params", Map.of("name", "queryLogs", "arguments", Map.of("connection", "test", "query", "large",
-                            "start", "1700000000000000000", "end", "1700000001000000000", "limit", 1, "fields", List.of())))));
-            var firstPage = response(stdout, stderr).path("result").path("structuredContent");
-            String cursor = firstPage.path("nextCursor").asText();
-            assertFalse(cursor.isBlank());
-            for (int id = 111; id < 127; id++) {
-                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
-                        "params", Map.of("name", "continueLogs", "arguments", Map.of("connection", "test", "cursor", cursor)))));
-            }
-            ids.clear();
-            for (int i = 0; i < 16; i++) {
-                String wire = stdout.poll(20, TimeUnit.SECONDS);
-                assertNotNull(wire);
-                assertTrue(wire.getBytes(StandardCharsets.UTF_8).length + 1 <= 6000);
-                assertFalse(wire.contains("loki.internal"));
-                var call = mapper.readTree(wire);
-                assertTrue(ids.add(call.path("id").asInt()));
-                var result = call.path("result");
-                assertFalse(result.path("isError").asBoolean(), result.toString());
-                var payload = result.path("structuredContent");
-                assertEquals(1, payload.path("returnedEntries").asInt());
-                assertTrue(payload.has("nextCursor"));
-                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
-                var validation = validator.validate(schemas.get("continueLogs"), mapper.convertValue(payload, Object.class));
-                assertTrue(validation.valid(), validation.errorMessage());
-            }
-            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 127, "method", "tools/call",
-                    "params", Map.of("name", "continueLogs", "arguments", Map.of("connection", "dev", "cursor", cursor)))));
-            assertEquals("INVALID_CURSOR", response(stdout, stderr).path("result").path("structuredContent").path("code").asText());
             for (int id = 35; id < 51; id++) {
-                String name = id % 2 == 0 ? "queryLogs" : "queryMetrics";
-                Map<String, Object> arguments = id % 2 == 0
-                        ? Map.of("connection", "test", "query", "logs", "start", "1700000000000000000", "end", "1700000001000000000")
-                        : id % 4 == 1 ? Map.of("connection", "test", "query", "metric", "mode", "range",
-                                "start", "1700000000000000000", "end", "1700000001000000000", "stepSeconds", 0.125)
-                        : Map.of("connection", "test", "query", "metric", "mode", "instant", "time", "1700000001000000000");
+                String name = id % 4 == 0 ? "queryLogs" : id % 4 == 1 ? "countLogs" : id % 4 == 2 ? "queryMetrics" : "queryLogs";
+                var arguments = new HashMap<String, Object>(Map.of("connection", "test", "start", "1700000000000000000", "end", "1700000001000000000"));
+                if (name.equals("queryMetrics")) { arguments.put("query", "count_over_time({kind=\"test\"}[1s])"); arguments.put("step", "1s"); }
+                else arguments.put("query", "{kind=\"test\"}");
+                if (id % 8 == 1) arguments.put("groupBy", "kind");
+                if (id % 8 == 7) arguments.put("raw", true);
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
                         "params", Map.of("name", name, "arguments", arguments))));
             }
@@ -262,26 +213,24 @@ class StdioSmokeTest {
                 assertTrue(id >= 35 && id < 51 && ids.add(id));
                 var result = call.path("result");
                 assertFalse(result.path("isError").asBoolean(), result.toString());
-                var payload = result.path("structuredContent");
-                var validation = validator.validate(schemas.get(id % 2 == 0 ? "queryLogs" : "queryMetrics"), mapper.convertValue(payload, Object.class));
-                assertTrue(validation.valid(), validation.errorMessage());
-                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                String text = text(result);
                 if (id % 4 == 1) {
-                    assertEquals(200, payload.path("totalLinesProcessed").asInt());
-                    assertEquals(0.125, payload.path("stepSeconds").asDouble());
-                } else assertFalse(payload.has("totalLinesProcessed"));
-                if (id % 2 == 0) assertEquals("1700000000123456789", payload.path("events").get(0).path("timestampNanos").asText());
-                else {
-                    if (id % 4 == 3) assertFalse(payload.has("stepSeconds"));
-                    assertEquals("NaN", payload.path("series").get(0).path("samples").get(0).path("value").asText());
+                    assertTrue(text.startsWith("3 lines match {kind=\"test\"} in 2023-11-14 22:13:20–22:13:21 (Z) (test)."), text);
+                    assertEquals(id % 8 == 1, text.contains("By kind:\n  test    3"), text);
+                } else if (id % 4 == 2) {
+                    assertTrue(text.startsWith("count_over_time({kind=\"test\"}[1s]) — test, 2023-11-14 22:13:20–22:13:21 (Z), step 1s, 1 series:\n{kind=\"test\"}\n  22:13:20  NaN"), text);
+                } else if (id % 8 == 7) {
+                    assertTrue(text.contains("\n22:13:20.123 test  Ошибка 🐈\nShown all 1 matching lines."), text);
+                } else {
+                    assertEquals("{kind=\"test\"} — test, 2023-11-14 22:13:20–22:13:21 (Z), all 1 lines:\n22:13:20.123 ERROR test  Ошибка 🐈\nShown all 1 matching lines.", text);
                 }
                 assertNoSecrets(call.toString());
             }
             for (int id = 70; id < 86; id++) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
-                        "params", Map.of("name", "discoverLogs", "arguments", Map.of("connection", "test",
-                                "selector", id % 2 == 0 ? "{kind=\"test\"}" : "{kind=\"blocked\"}",
-                                "start", "1700000000000000000", "end", "1700000001000000000")))));
+                        "params", Map.of("name", "discoverLogs", "arguments", id % 2 == 0
+                                ? Map.of("connection", "test", "start", "1700000000000000000", "end", "1700000001000000000")
+                                : Map.of("connection", "test", "selector", "{kind=\"blocked\"}", "start", "now-1s", "end", "now")))));
             }
             ids.clear();
             for (int i = 0; i < 16; i++) {
@@ -289,32 +238,30 @@ class StdioSmokeTest {
                 int id = call.path("id").asInt();
                 assertTrue(id >= 70 && id < 86 && ids.add(id));
                 var result = call.path("result");
-                assertFalse(result.path("isError").asBoolean(), result.toString());
-                var payload = result.path("structuredContent");
-                var validation = validator.validate(schemas.get("discoverLogs"), mapper.convertValue(payload, Object.class));
-                assertTrue(validation.valid(), validation.errorMessage());
-                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
-                assertEquals(1, payload.path("coverage").path("entriesExamined").asInt());
-                var capability = payload.path("capabilities").get(0);
-                assertEquals(id % 2 == 0 ? "AVAILABLE" : "UNAVAILABLE_AT_PATH", capability.path("availability").asText());
-                assertEquals(id % 2 != 0, capability.has("errorCode"));
+                String text = text(result);
+                if (id % 2 == 0) {
+                    assertFalse(result.path("isError").asBoolean(), text);
+                    assertTrue(text.startsWith("Labels in 2023-11-14 22:13:20–22:13:21 (Z) (test): 1.\nLabels:\n  kind: test\n"), text);
+                    assertTrue(text.contains("Levels seen: ERROR."), text);
+                    assertTrue(text.contains("Next: use countLogs or queryLogs with a selector like {kind=\"test\"}"), text);
+                } else {
+                    assertTrue(result.path("isError").asBoolean(), text);
+                    assertTrue(text.startsWith("Error ENDPOINT_UNAVAILABLE"), text);
+                }
                 assertNoSecrets(call.toString());
             }
             for (var bad : List.of(Map.of("selector", "{kind=\"test\"}"),
-                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "sampleLimit", "SECRET_TOKEN"))) {
-                var args = new HashMap<String, Object>(bad);
-                args.put("start", "now-1s"); args.put("end", "now");
+                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "start", "SECRET_TOKEN"))) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 86, "method", "tools/call",
-                        "params", Map.of("name", "discoverLogs", "arguments", args))));
+                        "params", Map.of("name", "discoverLogs", "arguments", bad))));
                 var result = response(stdout, stderr).path("result");
                 assertTrue(result.path("isError").asBoolean());
-                assertEquals(args.containsKey("connection") ? "INVALID_ARGUMENT" : "CONNECTION_REQUIRED",
-                        result.path("structuredContent").path("code").asText());
-                assertNoSecrets(result.toString());
+                assertTrue(text(result).startsWith(bad.containsKey("connection") ? "Error INVALID_ARGUMENT: Cannot parse time" : "Error CONNECTION_REQUIRED"), text(result));
             }
-            String[] errorCodes = {"CONNECTION_REQUIRED", "UNKNOWN_CONNECTION", "UPSTREAM_FORBIDDEN", "INVALID_ARGUMENT", "INVALID_ARGUMENT"};
-            for (int index = 0; index < errorCodes.length; index++) {
-                var arguments = new HashMap<String, Object>(Map.of("query", index == 2 ? "fail" : "logs",
+            String[] errors = {"Error CONNECTION_REQUIRED", "Error UNKNOWN_CONNECTION", "Error UPSTREAM_FORBIDDEN", "Error INVALID_ARGUMENT: limit must be",
+                    "Error INVALID_ARGUMENT: Argument types", "Error UPSTREAM_BAD_REQUEST: Loki rejected the query: parse error at line 1, col 9: syntax error"};
+            for (int index = 0; index < errors.length; index++) {
+                var arguments = new HashMap<String, Object>(Map.of("query", index == 2 ? "{kind=\"fail\"}" : index == 5 ? "{kind=\"broken\"}" : "{kind=\"test\"}",
                         "start", "now-1s", "end", "now"));
                 if (index != 0) arguments.put("connection", index == 1 ? "missing" : "test");
                 if (index == 3) arguments.put("limit", 0);
@@ -324,10 +271,7 @@ class StdioSmokeTest {
                 var call = response(stdout, stderr);
                 var result = call.path("result");
                 assertTrue(result.path("isError").asBoolean(), result.toString());
-                var payload = result.path("structuredContent");
-                assertTrue(payload.has("code"), result.toString());
-                assertEquals(errorCodes[index], payload.path("code").asText(), result.toString());
-                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                assertTrue(text(result).startsWith(errors[index]), text(result));
                 assertNoSecrets(call.toString());
             }
         } finally {
@@ -351,6 +295,13 @@ class StdioSmokeTest {
         assertNoSecrets(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")));
         assertFalse(Files.readString(stderr).contains("Ошибка 🐈"));
         assertFalse(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")).contains("Ошибка 🐈"));
+    }
+
+    private static String text(JsonNode result) {
+        var content = result.path("content");
+        assertEquals(1, content.size(), result.toString());
+        assertEquals("text", content.get(0).path("type").asText());
+        return content.get(0).path("text").asText();
     }
 
     private static void assertNoSecrets(String text) {

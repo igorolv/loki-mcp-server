@@ -1,8 +1,9 @@
-# Подключения и контракт S02
+# Подключения и listConnections
 
 Сервер загружает конфигурацию один раз при запуске.
-`listConnections` возвращает имена и описания из файла и не обращается к Loki.
-Для чтения доступны [queryLogs и queryMetrics](queries.md).
+`listConnections` возвращает текст — по строке на подключение: имя, описание и
+подсказку оператора — и не обращается к Loki. Для чтения доступны
+[queryLogs, countLogs, queryMetrics](queries.md) и [discoverLogs](discovery.md).
 Наличие подключения в списке не подтверждает доступность endpoint.
 
 По умолчанию файл — `~/.loki-mcp-server/connections.json`.
@@ -32,8 +33,12 @@
 Формат: объект `connections` с одним или несколькими подключениями.
 Имена чувствительны к регистру, длина 1–64, допустимы ASCII-буквы, цифры,
 точка, дефис и подчёркивание; первый символ — буква или цифра.
-Описание необязательно, до 512 символов. Registry не подставляет подключение
-по умолчанию даже при единственной записи и не обрезает пробелы в имени.
+Описание необязательно, до 512 символов. `hint` — необязательная подсказка модели
+до 1024 символов: какие метки есть на стенде, как выбирать сервис. `serviceLabels` —
+необязательный список меток, по которым строка получает имя сервиса
+(default `applicationName, service_name, service, app, container, job`).
+Registry не подставляет подключение по умолчанию даже при единственной записи
+и не обрезает пробелы в имени.
 
 `url` обязателен: абсолютный HTTP/HTTPS URL, допускается префикс пути.
 User info, query и fragment запрещены. Авторизация задаётся отдельным `auth`:
@@ -62,43 +67,31 @@ password, token и tenant. Подстановка однократная, без
 | `maxMetricSeries` | 100 | Положительное целое int |
 | `maxMetricPoints` | 10000 | Положительное целое int |
 
-В S03 HTTP-клиент применяет auth/tenant, `connectTimeoutMs`, `requestTimeoutMs`
-и `maxHttpResponseBytes` (см. [HTTP-клиент](http-client.md)). В S04 применяются
+HTTP-клиент применяет auth/tenant, `connectTimeoutMs`, `requestTimeoutMs`
+и `maxHttpResponseBytes` (см. [HTTP-клиент](http-client.md)); сервисы —
 `maxEntries`, `maxIntervalSeconds`, `maxMetricSeries` и `maxMetricPoints`.
-`maxResponseBytes` применяется к полному MCP-ответу с S06: [контракт](compact-responses.md).
-`listConnections` возвращает полный список без пагинации в пределах общего бюджета
-65536 байт либо ограниченную ошибку. Сам файл ограничен 1 MiB.
-Профили и overrides capabilities появятся в пакетах обнаружения и профиля asva2;
-неизвестные поля сейчас запрещены.
+`maxResponseBytes` — предел текста ответа: [контракт](queries.md#предел-размера).
+`listConnections` возвращает полный список в пределах 65536 байт либо ошибку.
+Сам файл ограничен 1 MiB. Неизвестные поля запрещены.
 
 Отсутствующий/пустой/невалидный файл, повторяющиеся JSON-ключи, неизвестные поля,
 дробные или строковые числовые лимиты приводят к отказу запуска. Исходный JSON,
 credentials, URL и исходные исключения парсера не включаются в диагностику.
 Сообщение предлагает проверить конфигурацию по примеру. Изменения требуют перезапуска.
 
-Успешный MCP-ответ `listConnections`:
+Ответ `listConnections`:
 
-```json
-{"connections":[{"name":"local","description":"Локальный Loki"}]}
+```
+dev — DEV стенд asva2, Loki 2.6.1. Labels: applicationName, level, instance, pod
+tst — TST стенд, Loki 3.5
 ```
 
-`description` отсутствует, если не задан. DTO содержит только разрешённые публичные
-поля. На текущей версии SDK результат присутствует и в `structuredContent`, и
-в текстовом `content`; jar smoke-тест проверяет равенство и output schema.
-Бюджетирование S06 учитывает обе части wire response и JSON-RPC envelope.
+Описание и подсказка опускаются, если не заданы. URL, credentials и лимиты не выводятся.
 
-Общий DTO ошибок `ToolError` содержит `code`, `message`, `retryable` (все обязательны).
-Базовые коды: `CONFIGURATION_ERROR`, `CONNECTION_REQUIRED`, `INVALID_CONNECTION`,
-`UNKNOWN_CONNECTION`, `INTERNAL_ERROR` имеют `retryable=false`.
-Транспортные коды и условия повторения добавлены в S03: [HTTP-клиент](http-client.md).
-`LokiOperationException` переносит безопасный DTO между слоями; `Errors.from`
-преобразует неожиданное исключение в фиксированную внутреннюю ошибку без исходного текста.
-Неверное имя не отражается в сообщении. Ошибка загрузки завершает процесс до
-обслуживания tools; у `listConnections` нет аргумента выбора подключения.
-Ошибки операций с данными возвращаются с `isError=true`; безопасная MCP-обёртка
-проверена в S04 (см. [контракт запросов](queries.md)).
-
-DTO результатов, полноты, событий и capabilities уточняются при реализации
-соответствующих операций. Для всех публичных полей обязательно явное
-`@Schema.requiredMode`; необязательные поля получают `NOT_REQUIRED` и `nullable=true`.
-Применение `NON_NULL` должно быть согласовано между текстовой и структурированной выдачей.
+Ошибки — текст `Error <CODE>: <сообщение>` с `isError=true` (внутренний `ToolError`:
+`code`, `message`, `retryable`). Базовые коды: `CONFIGURATION_ERROR`, `CONNECTION_REQUIRED`,
+`INVALID_CONNECTION`, `UNKNOWN_CONNECTION`, `INTERNAL_ERROR`. Транспортные коды —
+[HTTP-клиент](http-client.md). `LokiOperationException` переносит безопасный
+`ToolError` между слоями; `Errors.from` превращает неожиданное исключение в фиксированную
+внутреннюю ошибку без исходного текста. Ошибка загрузки завершает процесс до обслуживания
+tools; у `listConnections` нет аргумента выбора подключения.

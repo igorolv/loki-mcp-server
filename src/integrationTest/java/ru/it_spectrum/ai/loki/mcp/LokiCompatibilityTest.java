@@ -1,6 +1,5 @@
 package ru.it_spectrum.ai.loki.mcp;
 
-import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
@@ -16,11 +15,10 @@ import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.connection.*;
 import ru.it_spectrum.ai.loki.mcp.service.*;
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.model.QueryResults.Completeness.*;
 
 class LokiCompatibilityTest {
     @ParameterizedTest @ValueSource(strings = {"2.6.1", "3.6.0"}) @Timeout(240)
-    void logsAndMetricsAgainstIsolatedLoki(String version) throws Exception {
+    void logsCountsMetricsAndDiscoveryAgainstIsolatedLoki(String version) throws Exception {
         String config = """
                 auth_enabled: false
                 server:
@@ -56,17 +54,16 @@ class LokiCompatibilityTest {
                 .withExposedPorts(3100).waitingFor(Wait.forHttp("/ready").forStatusCode(200).withStartupTimeout(Duration.ofSeconds(120)))) {
             loki.start();
             URI url = URI.create("http://" + loki.getHost() + ":" + loki.getMappedPort(3100));
-            var registry = new ConnectionRegistry(List.of(new ConnectionDefinition("fixture", null, url,
-                    ConnectionAuth.NONE, null, ZoneOffset.UTC, ConnectionLimits.DEFAULTS)));
+            // Loki 3.x adds service_name itself; naming the service by shard keeps both versions comparable.
+            var registry = new ConnectionRegistry(List.of(new ConnectionDefinition("fixture", null, null, url,
+                    ConnectionAuth.NONE, null, ZoneOffset.UTC, ConnectionLimits.DEFAULTS, List.of("shard"))));
             // Only this container-derived URL can be used for ingestion; no external config or live URLs.
             Instant base = Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
             String a = QueryTime.nanos(base.plusNanos(123456789)), b = QueryTime.nanos(base.plusSeconds(1).plusNanos(987654321));
-            String body = """
-                    {"streams":[
-                      {"stream":{"fixture":"s04","shard":"a"},"values":[["%s","Ошибка 🐈"],["%s","second"]]},
-                      {"stream":{"fixture":"s04","shard":"b"},"values":[["%s","same timestamp other stream"]]}
-                    ]}
-                    """.formatted(a, b, a);
+            String ecs = "{\"service\":{\"name\":\"backend\"},\"log\":{\"level\":\"ERROR\"},\"message\":\"Ошибка 🐈\",\"error\":{\"stack_trace\":\"java.io.IOException: x\\n\\tat a.B(B.java:1)\"}}";
+            String body = new tools.jackson.databind.json.JsonMapper().writeValueAsString(java.util.Map.of("streams", List.of(
+                    java.util.Map.of("stream", java.util.Map.of("fixture", "s04", "shard", "a", "level", "info"), "values", List.of(List.of(a, ecs), List.of(b, "second"))),
+                    java.util.Map.of("stream", java.util.Map.of("fixture", "s04", "shard", "b"), "values", List.of(List.of(a, "same timestamp other stream"))))));
             try (var http = HttpClient.newHttpClient(); var client = new LokiHttpClient(registry)) {
                 var pushed = http.send(HttpRequest.newBuilder(url.resolve("/loki/api/v1/push"))
                         .timeout(Duration.ofSeconds(15)).header("Content-Type", "application/json")
@@ -74,69 +71,48 @@ class LokiCompatibilityTest {
                 assertEquals(204, pushed.statusCode(), pushed.body());
                 var service = new QueryService(registry, client);
                 String start = base.toString(), end = base.plusSeconds(3).toString(), selector = "{fixture=\"s04\"}";
-                var logs = service.logs("fixture", selector, start, end, "forward", 10);
-                assertEquals(3, logs.readEntries()); assertEquals(3, logs.returnedEntries());
-                assertEquals(2, logs.resultStreams()); assertEquals(COMPLETE, logs.completeness());
-                assertEquals(List.of(a, a, b), logs.events().stream().map(e -> e.timestampNanos()).toList());
-                assertTrue(logs.events().stream().anyMatch(e -> e.line().equals("Ошибка 🐈")));
-                var paging = new LogPagingService(service, registry, new LogCursorCodec());
-                var mapper = new tools.jackson.databind.json.JsonMapper();
-                for (String direction : List.of("forward", "backward")) {
-                    var page = paging.first("fixture", selector, start, end, direction, 1, List.of("line"));
-                    var received = new java.util.ArrayList<String>();
-                    int iterations = 0;
-                    while (true) {
-                        var payload = mapper.<tools.jackson.databind.node.ObjectNode>valueToTree(page.result());
-                        page.finish(payload);
-                        page.result().events().forEach(e -> received.add(e.timestampNanos()));
-                        if (!payload.has("nextCursor")) break;
-                        assertTrue(++iterations < 5);
-                        page = paging.next("fixture", payload.path("nextCursor").asText());
-                    }
-                    assertEquals(direction.equals("forward") ? List.of(a, a, b) : List.of(b, a, a), received);
-                }
-                var limited = service.logs("fixture", selector, start, end, "backward", 2);
-                assertEquals(2, limited.returnedEntries()); assertEquals(UNKNOWN, limited.completeness());
-                assertEquals(b, limited.events().getFirst().timestampNanos());
-                assertEquals(0, service.logs("fixture", selector + " |= `absent`", start, end, null, 10).returnedEntries());
-                String metric = "sum(count_over_time(" + selector + "[10s]))";
-                var instant = service.metrics("fixture", metric, "instant", null, null, end, null, null, null);
-                assertEquals(1, instant.returnedSeries()); assertEquals(1, instant.returnedPoints());
-                assertEquals(0, new BigDecimal("3").compareTo(new BigDecimal(instant.series().getFirst().samples().getFirst().value())));
-                assertEquals(0, BigDecimal.valueOf(base.plusSeconds(3).getEpochSecond())
-                        .compareTo(instant.series().getFirst().samples().getFirst().timestampSeconds()));
-                var range = service.metrics("fixture", metric, "range", base.plusSeconds(2).toString(), end,
-                        null, BigDecimal.ONE, null, null);
-                assertEquals(1, range.returnedSeries()); assertEquals(2, range.returnedPoints());
-                for (var sample : range.series().getFirst().samples()) assertEquals(0, new BigDecimal("3").compareTo(new BigDecimal(sample.value())));
-                String empty = "sum(count_over_time({fixture=\"absent\"}[10s]))";
-                assertEquals(0, service.metrics("fixture", empty, "instant", null, null, end, null, null, null).returnedPoints());
-                assertEquals(0, service.metrics("fixture", empty, "range", start, end, null, BigDecimal.ONE, null, null).returnedPoints());
+                String time = LogText.TIME.format(base.plusNanos(123456789).atZone(ZoneOffset.UTC));
+                var logs = service.logs("fixture", selector, start, end, 10, null);
+                assertTrue(logs.contains(", all 3 lines:\n"), logs);
+                assertTrue(logs.contains(time + " INFO  a  Ошибка 🐈\n    java.io.IOException: x\n    at a.B(B.java:1)\n"), logs);
+                assertTrue(logs.contains(time + " -     b  same timestamp other stream\n"), logs);
+                assertTrue(logs.endsWith("Shown all 3 matching lines."), logs);
+                assertEquals(2, logs.lines().filter(l -> l.startsWith(time)).count());
+                var limited = service.logs("fixture", selector, start, end, 2, null);
+                assertTrue(limited.contains("newest 2 of more:"), limited);
+                String olderEnd = QueryTime.iso(base.plusNanos(124000000), ZoneOffset.UTC);
+                assertTrue(limited.contains("Older: repeat with end=\"" + olderEnd + "\""), limited);
+                var older = service.logs("fixture", selector, start, olderEnd, 10, null);
+                assertTrue(older.contains(", all 2 lines:\n"), older); // the millisecond ceiling re-reads the boundary instead of skipping it
+                var raw = service.logs("fixture", selector + " |= \"🐈\"", start, end, 10, true);
+                assertTrue(raw.contains(time + " a  " + ecs + "\n"), raw);
+                assertTrue(service.logs("fixture", selector + " |= `absent`", start, end, null, null).contains("no matching lines."));
+                assertEquals("3 lines match " + selector + " in " + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC) + " (fixture).",
+                        service.count("fixture", selector, start, end, null));
+                var byShard = service.count("fixture", selector, start, end, "shard");
+                assertTrue(byShard.endsWith("By shard:\n  a       2\n  b       1"), byShard);
+                var byTime = service.count("fixture", selector, start, end, "time");
+                assertTrue(byTime.startsWith("3 lines match"), byTime);
+                assertTrue(byTime.contains("By time (1s buckets, bucket start):"), byTime);
+                assertEquals(3, byTime.lines().filter(l -> l.matches("  \\d\\d:\\d\\d:\\d\\d +\\d+.*")).count(), byTime);
+                assertTrue(service.count("fixture", "{fixture=\"absent\"}", start, end, "time").startsWith("0 lines match"));
+                var metrics = service.metrics("fixture", "sum(count_over_time(" + selector + "[1s]))", start, end, "1s");
+                assertTrue(metrics.contains("step 1s, 1 series:\n{}\n"), metrics);
+                assertTrue(metrics.lines().anyMatch(l -> l.matches("  \\d\\d:\\d\\d:\\d\\d  2")), metrics);
+                assertTrue(service.metrics("fixture", "sum(count_over_time({fixture=\"absent\"}[1s]))", start, end, "1s").endsWith("matched no data in this window."));
+                var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
+                assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
                 var discovery = new DiscoveryService(registry, client);
-                var discovered = discovery.discover("fixture", selector, start, end, 10);
-                assertEquals(2, discovered.coverage().seriesRead());
-                assertEquals(3, discovered.coverage().entriesExamined());
-                assertEquals(COMPLETE, discovered.coverage().sampleCompleteness());
-                // Loki 3.x may add service_name during ingestion; discover actual labels rather than assume their absence.
-                assertTrue(discovered.streamLabels().stream().map(l -> l.name()).toList().containsAll(List.of("fixture", "shard")));
-                assertEquals(List.of("a", "b"), discovered.streamLabels().stream().filter(l -> l.name().equals("shard")).findFirst().orElseThrow().observedValues());
-                assertTrue(discovered.capabilities().subList(0, 2).stream().allMatch(c -> c.availability()
-                        == ru.it_spectrum.ai.loki.mcp.model.DiscoveryResult.Availability.AVAILABLE));
-                assertEquals(UNKNOWN, discovery.discover("fixture", selector, start, end, 2).coverage().sampleCompleteness());
-                assertEquals(0, discovery.discover("fixture", "{fixture=\"absent\"}", start, end, 10).coverage().entriesExamined());
-                String ecs = "{\"service.name\":\"backend\",\"log\":{\"level\":\"ERROR\"},\"message\":\"Ошибка 🐈\"}";
-                String mixedBody = new tools.jackson.databind.json.JsonMapper().writeValueAsString(java.util.Map.of("streams", List.of(
-                        java.util.Map.of("stream", java.util.Map.of("fixture", "s05"), "values", List.of(List.of(a, ecs), List.of(b, "plain"))))));
-                var mixedPush = http.send(HttpRequest.newBuilder(url.resolve("/loki/api/v1/push"))
-                        .timeout(Duration.ofSeconds(15)).header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(mixedBody)).build(), HttpResponse.BodyHandlers.ofString());
-                assertEquals(204, mixedPush.statusCode(), mixedPush.body());
-                var mixed = discovery.discover("fixture", "{fixture=\"s05\"}", start, end, 10);
-                assertEquals(2, mixed.coverage().entriesExamined());
-                assertEquals(2, mixed.formats().size());
-                assertTrue(mixed.fields().stream().anyMatch(f -> f.path().equals("/log/level") && f.observedEntries() == 1));
-                assertTrue(mixed.examples().stream().anyMatch(e -> e.event().line().equals(ecs)
-                        && e.normalized().stream().anyMatch(v -> v.name().equals("service") && v.value().equals("backend"))));
+                var scoped = discovery.discover("fixture", selector, start, end);
+                assertTrue(scoped.startsWith("Streams matching " + selector), scoped);
+                assertTrue(scoped.contains("\n  shard: a, b\n"), scoped);
+                assertTrue(scoped.contains("Line format (3 newest lines sampled): JSON 1, plain text 2.\nLevels seen: INFO.\n"), scoped);
+                assertTrue(scoped.contains("JSON fields (after | json): error_stack_trace, log_level, message, service_name."), scoped);
+                assertTrue(scoped.contains("| json | log_level=~\"(?i)error\""), scoped);
+                var overview = discovery.discover("fixture", null, start, end);
+                assertTrue(overview.startsWith("Labels in "), overview);
+                assertTrue(overview.contains("\n  fixture: s04\n") && overview.contains("\n  shard: a, b\n"), overview);
+                assertTrue(discovery.discover("fixture", "{fixture=\"absent\"}", start, end).contains("No lines sampled in this window"));
             }
         }
     }
