@@ -25,6 +25,18 @@ class OutputSchemaTest {
         assertFalse(mapper.writeValueAsString(new ConnectionSummary("one", null)).contains("description"));
     }
 
+    @Test void compactProjectionValidatesAllOptionalCombinations() {
+        var logs = new Logs("test", new Window("1", "2"), "forward", 1, 1, 1, 1, true,
+                Completeness.UNKNOWN, "CURSORS_NOT_IMPLEMENTED", null, List.of(),
+                List.of(new Event("1", Map.of("job", "test"), "{\"message\":\"Ошибка 🐈\"}", Map.of("trace", "id"))));
+        var options = List.of("line", "normalized", "structuredMetadata");
+        for (int mask = 0; mask < 8; mask++) {
+            var fields = new java.util.ArrayList<String>();
+            for (int i = 0; i < 3; i++) if ((mask & (1 << i)) != 0) fields.add(options.get(i));
+            validate(ru.it_spectrum.ai.loki.mcp.service.ResponseProjection.project(logs, fields));
+        }
+    }
+
     private void validate(Object value) {
         @SuppressWarnings("unchecked")
         Map<String, Object> schema = mapper.readValue(McpJsonSchemaGenerator.generateFromClass(value.getClass()), Map.class);

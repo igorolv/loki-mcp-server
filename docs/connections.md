@@ -65,8 +65,9 @@ password, token и tenant. Подстановка однократная, без
 В S03 HTTP-клиент применяет auth/tenant, `connectTimeoutMs`, `requestTimeoutMs`
 и `maxHttpResponseBytes` (см. [HTTP-клиент](http-client.md)). В S04 применяются
 `maxEntries`, `maxIntervalSeconds`, `maxMetricSeries` и `maxMetricPoints`.
-`maxResponseBytes` будет применяться к полному MCP-ответу в S06. `listConnections`
-возвращает полный список конфигурации без пагинации. Сам файл ограничен 1 MiB.
+`maxResponseBytes` применяется к полному MCP-ответу с S06: [контракт](compact-responses.md).
+`listConnections` возвращает полный список без пагинации в пределах общего бюджета
+65536 байт либо ограниченную ошибку. Сам файл ограничен 1 MiB.
 Профили и overrides capabilities появятся в пакетах обнаружения и профиля asva2;
 неизвестные поля сейчас запрещены.
 
@@ -84,7 +85,7 @@ credentials, URL и исходные исключения парсера не в
 `description` отсутствует, если не задан. DTO содержит только разрешённые публичные
 поля. На текущей версии SDK результат присутствует и в `structuredContent`, и
 в текстовом `content`; jar smoke-тест проверяет равенство и output schema.
-При будущем бюджетировании S06 нужно учитывать обе части wire response.
+Бюджетирование S06 учитывает обе части wire response и JSON-RPC envelope.
 
 Общий DTO ошибок `ToolError` содержит `code`, `message`, `retryable` (все обязательны).
 Базовые коды: `CONFIGURATION_ERROR`, `CONNECTION_REQUIRED`, `INVALID_CONNECTION`,

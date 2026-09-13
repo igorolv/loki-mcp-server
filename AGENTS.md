@@ -59,7 +59,7 @@
 Версии сверять с `gradle/libs.versions.toml`; изменения зависимостей
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
-S01–S05 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
+S01–S06 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
 Доступны `listConnections`, `queryLogs`, `queryMetrics`, `discoverLogs`, обязательная внешняя
 конфигурация и immutable registry. Контракт запросов: [docs/queries.md](docs/queries.md).
 Стандартные команды Windows PowerShell:
@@ -92,7 +92,9 @@ java -jar build/libs/loki-mcp-server.jar
 Загрузка строгая и без probes. Ошибки конфигурации завершают запуск без исходного текста
 парсера и credentials. HTTP-клиент применяет auth/tenant, connect/request timeout
 и лимит body; S04 применяет лимиты окна, записей, metric series/points.
-Бюджет всего MCP-ответа (`maxResponseBytes`) ещё не применяется — S06.
+S06 применяет бюджет всего MCP-ответа (`maxResponseBytes`) через декоратор штатного
+stdio-транспорта: обе части payload, JSON-RPC envelope с фактическим id и LF.
+Проекция queryLogs, сокращения и исключительные случаи: [docs/compact-responses.md](docs/compact-responses.md).
 
 `test` зависит от `bootJar`: `StdioSmokeTest` запускает jar отдельным Java 21
 процессом, проверяет initialize/initialized, 16 outstanding ping-запросов и 16 вызовов
@@ -137,7 +139,7 @@ S05: `discoverLogs` читает `/series` и ограниченную backward-
 в исходных примерах. Конфликтующие ECS-кандидаты имеют отдельные пути, время события
 не заменяет timestamp Loki. Новые endpoints не определяются по версии, недоступность
 одного пути не мешает второму. `DiscoveryLimits` централизует ограничения выборки,
-series, меток/значений и разбора. Строгий wire budget и проекция остаются S06.
+series, меток/значений и разбора. S06 добавляет строгий wire budget и проекцию queryLogs.
 Проверены 132 обычных теста и 2 контейнерных сценария, включая discovery на Loki
 2.6.1/3.6.0. Loki 3.6.0 может добавлять `service_name` при ingestion; тесты не должны
 предполагать точное отсутствие дополнительных меток. Structured metadata 3.x
@@ -174,8 +176,21 @@ S04 проверяет handlers queryLogs/queryMetrics, S05 — discoverLogs. В
 автоматическая input validation SDK отключена из-за логирования исходной диагностики.
 Не регистрировать новые tools отдельными component без этой проверки/обёртки.
 Ошибки имеют `isError=true` и ToolError в text/structuredContent.
-В текущем SDK результат дублируется в text и structuredContent; S06 должен учитывать
+В текущем SDK результат дублируется в text и structuredContent; S06 учитывает
 обе части при бюджетировании. Optional DTO поля должны одинаково сериализоваться в обеих.
+
+S06: `CompactLogs` — публичная выдача queryLogs; исходные `QueryResults.Event/Logs`
+остаются моделями сервисов и примеров discovery. Словарь `streams` содержит метки
+результата, не доказанный исходный stream scope. `fields` выбирает line/normalized/
+structuredMetadata (default line); timestamps и streamId обязательны. Сокращения
+текста отделены от исключения событий и полноты. Скрытые поля пока не кешируются:
+не обещать getLogEntry, entryId или курсоры до S07/S08. `ResponseBudget` сокращает
+текст, затем хвост массивов; сохраняет счётчики чтения и пересчитывает выданные.
+Для discovery сокращение выдачи отражено coverage.localTruncation/limitations,
+sampleCompleteness продолжает описывать обследованную выборку.
+Проверены 142 обычных теста, включая реальные байты 16 outstanding больших ответов
+с разными бюджетами подключений, schema и равенство payload. Контейнерные результаты
+S05 остаются последней проверкой Loki 2.6.1/3.6.0; S06 не меняет HTTP-запросы.
 
 ## Достоверность и экономия контекста
 

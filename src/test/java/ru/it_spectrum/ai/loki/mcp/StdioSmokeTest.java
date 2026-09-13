@@ -48,6 +48,13 @@ class StdioSmokeTest {
                         : "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
                 if (exchange.getRequestURI().getPath().endsWith("/series")) body = status == 404 ? "SECRET_TOKEN path blocked"
                         : "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
+                else if (query.contains("largeMetric")) body = mapper.writeValueAsString(Map.of("status", "success", "data",
+                        Map.of("resultType", "vector", "result", java.util.stream.IntStream.range(0, 100).mapToObj(i ->
+                                Map.of("metric", Map.of("kind", "test" + i), "value", List.of(1700000000.125, "NaN"))).toList())));
+                else if (query.contains("large")) body = mapper.writeValueAsString(Map.of("status", "success", "data",
+                        Map.of("resultType", "streams", "result", List.of(Map.of("stream", Map.of("kind", "test"),
+                                "values", java.util.stream.IntStream.range(0, 12).mapToObj(i -> List.of("1700000000123456789",
+                                        mapper.writeValueAsString(Map.of("message", "Ошибка 🐈\"\\\n".repeat(1000))))).toList())))));
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(status, bytes.length);
                 exchange.getResponseBody().write(bytes);
@@ -65,9 +72,10 @@ class StdioSmokeTest {
                 {"connections":{
                   "dev":{"description":"Development","url":"http://127.0.0.1:1/private",
                     "auth":{"type":"BEARER","token":"SECRET_TOKEN"},"tenant":"SECRET_TENANT"},
-                  "test":{"url":"http://127.0.0.1:%d"}
+                  "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000}},
+                  "tiny":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":1024}}
                 }}
-                """.formatted(upstream.getAddress().getPort()));
+                """.formatted(upstream.getAddress().getPort(), upstream.getAddress().getPort()));
         builder.environment().remove("LOKI_MCP_CONNECTIONS_FILE");
         if (overrideFile) {
             Path explicitFile = temporaryDirectory.resolve("custom.json");
@@ -146,7 +154,7 @@ class StdioSmokeTest {
                 assertTrue(payload.isObject(), result.toString());
                 var validation = validator.validate(schema, mapper.convertValue(payload, Object.class));
                 assertTrue(validation.valid(), validation.errorMessage());
-                assertEquals(2, payload.path("connections").size());
+                assertEquals(3, payload.path("connections").size());
                 assertEquals("dev", payload.path("connections").get(0).path("name").asText());
                 assertEquals("Development", payload.path("connections").get(0).path("description").asText());
                 assertEquals("test", payload.path("connections").get(1).path("name").asText());
@@ -167,6 +175,43 @@ class StdioSmokeTest {
                     assertTrue(declaration.path("annotations").path("readOnlyHint").asBoolean());
                     @SuppressWarnings("unchecked") Map<String, Object> output = mapper.convertValue(declaration.path("outputSchema"), Map.class);
                     schemas.put(name, output);
+                }
+            }
+            // Oversized payloads and minimum budget traverse the real outbound transport.
+            for (int i = 0; i < 16; i++) {
+                String name = i % 4 == 2 ? "queryMetrics" : i % 4 == 3 ? "discoverLogs" : "queryLogs";
+                String connection = i % 4 == 0 ? "tiny" : "test";
+                var args = new HashMap<String, Object>();
+                args.put("connection", connection);
+                if (name.equals("queryMetrics")) {
+                    args.put("query", "largeMetric"); args.put("mode", "instant"); args.put("time", "1700000001000000000");
+                } else {
+                    args.put(name.equals("discoverLogs") ? "selector" : "query", name.equals("discoverLogs") ? "{kind=\"large\"}" : "large");
+                    args.put("start", "1700000000000000000"); args.put("end", "1700000001000000000");
+                    if (name.equals("queryLogs")) args.put("fields", List.of("normalized"));
+                }
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", "budget🐈\"\\" + i,
+                        "method", "tools/call", "params", Map.of("name", name, "arguments", args))));
+            }
+            for (int i = 0; i < 16; i++) {
+                String wire = stdout.poll(20, TimeUnit.SECONDS);
+                assertNotNull(wire);
+                var call = mapper.readTree(wire);
+                String id = call.path("id").asText();
+                int index = Integer.parseInt(id.substring("budget🐈\"\\".length()));
+                assertTrue(wire.getBytes(StandardCharsets.UTF_8).length + 1 <= (index % 4 == 0 ? 1024 : 6000));
+                var result = call.path("result");
+                var payload = result.path("structuredContent");
+                assertEquals(payload, mapper.readTree(result.path("content").get(0).path("text").asText()));
+                if (index % 4 == 0) {
+                    assertTrue(result.path("isError").asBoolean());
+                    assertEquals("RESPONSE_BUDGET_EXCEEDED", payload.path("code").asText());
+                } else {
+                    assertFalse(result.path("isError").asBoolean(), result.toString());
+                    String name = index % 4 == 2 ? "queryMetrics" : index % 4 == 3 ? "discoverLogs" : "queryLogs";
+                    var validation = validator.validate(schemas.get(name), mapper.convertValue(payload, Object.class));
+                    assertTrue(validation.valid(), validation.errorMessage());
+                    assertTrue(payload.path("limitations").toString().contains("RESPONSE_BYTE_BUDGET"));
                 }
             }
             // Outstanding data calls exercise actual handlers and SDK serialization, including optional fields.
