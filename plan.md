@@ -5,13 +5,13 @@
 ## Текущее состояние
 
 - Обновлено: 2026-09-13.
-- Статус: S01 и S02 завершены; подключения и listConnections проверены через stdio.
-- Текущий этап: 2 — Loki API, поиск и обнаружение (следующий шаг).
-- Текущий пакет сессии: S03 — HTTP-клиент Loki (не начат).
+- Статус: S01–S03 завершены; HTTP-клиент проверен на mock HTTP, build — 96 тестов.
+- Текущий этап: 2 — Loki API, поиск и обнаружение.
+- Текущий пакет сессии: S04 — Поиск и метрики (не начат).
 - В работе: нет.
-- Следующий шаг: реализовать прямой HTTP-клиент с настройками ConnectionDefinition,
-  auth/tenant, таймаутами, ограничением body, Loki DTO и mock HTTP тестами.
-- Блокеры: для S03 нет. Доступность TST не установлена; S03 не требует стенда.
+- Следующий шаг: добавить queryLogs/queryMetrics, фиксированное окно, первичные
+  лимиты, DTO полноты и MCP-ошибки; проверить Loki 2.6.1 и 3.x в контейнерах.
+- Блокеры: для начала S04 нет; доступность Docker ещё не проверена.
 
 ## Как вести план между сессиями
 
@@ -137,13 +137,23 @@ Jar smoke: default/override файла, tools/list, 16 outstanding tool calls и
 
 ### S03 — HTTP-клиент Loki
 
-- [ ] Завершён пакет S03.
+- [x] Завершён пакет S03.
 - Зависимости: S02.
 - Объём: этап 2 — прямой HTTP-клиент, auth/tenant, таймауты, лимит HTTP body,
   декодирование logs/metrics/metadata и ошибок API.
 - Результат: транспортный слой отделён от публичного MCP-контракта.
 - Проверка завершения: mock HTTP тесты проверяют URL/заголовки, форматы времени,
   ответы Loki, ошибки, таймауты и превышение размера; реальные стенды не требуются.
+
+Проверено 2026-09-13: `.\gradlew.bat classes --console=plain`,
+`.\gradlew.bat test --tests 'ru.it_spectrum.ai.loki.mcp.client.*' --console=plain` — успешно,
+56 transport/decoder тестов. Итоговый `.\gradlew.bat build --console=plain` — успешно,
+96 тестов, 0 failures/errors/skipped, включая прежние schema/stdio тесты.
+Проверены URL/prefix/encoding, Basic/Bearer/tenant isolation, metadata endpoints,
+streams/vector/matrix, exact timestamps, реальные дубликаты, Unicode, body budget
+с Content-Length/chunked, HTTP/API ошибки, headers/body/TLS timeout и interrupt.
+Осталось по S03: нет. Документ: `docs/http-client.md`.
+Docker и live Loki не использовались; совместимость реальных версий — S04.
 
 ### S04 — Поиск и метрики
 
@@ -341,6 +351,12 @@ registry неизменяемый, без probes. Формат и defaults оп�
 Basic/Bearer, tenant, timezone и лимиты валидируются; их применение — S03–S06.
 Неизвестные поля запрещены; профиль и overrides capabilities пока не принимаются.
 
+Реализовано в S03: transport bean с отдельным Java HttpClient на registry name,
+GET query/query_range/labels/label values/series; URL-prefix и query encoding,
+auth/tenant, connect timeout, deadline полного body и потоковый лимит байтов.
+Redirects отключены, обязательных probes нет. HTTP-ошибки безопасны и локальны
+для вызова; 404 не отключает остальные endpoint. Детали: `docs/http-client.md`.
+
 Каждый инструмент работы с данными принимает обязательный `connection`.
 Не выбирать стенд неявно, даже если подключение одно. `listConnections` возвращает
 имена и описания без секретов. Сбой одного endpoint не блокирует остальные.
@@ -534,11 +550,12 @@ Loki не предоставляет готовый универсальный �
 
 ### Этап 2. Loki API, поиск и обнаружение
 
-Статус: не начат. Проверено: проверки реализации не запускались.
-Осталось: все пункты этапа и подтверждение критериев готовности.
+Статус: S03 выполнен. Проверено 2026-09-13: 56 mock HTTP/decoder тестов;
+`gradlew.bat build --console=plain` — 96 тестов без ошибок/пропусков.
+Осталось: S04–S05 — публичные query/discovery tools, лимиты и контейнерная совместимость.
 
-- [ ] Реализовать прямой HTTP-клиент Loki, auth/tenant, таймауты и ограничение HTTP body.
-- [ ] Декодировать streams и metric results, structured metadata и ошибки API.
+- [x] Реализовать прямой HTTP-клиент Loki, auth/tenant, таймауты и ограничение HTTP body.
+- [x] Декодировать streams и metric results, structured metadata и ошибки API.
 - [ ] Реализовать `discoverLogs`, `queryLogs`, `queryMetrics` с первичными лимитами.
 - [ ] Проверить базовую совместимость Loki 2.6.1 и 3.x.
 
@@ -726,6 +743,37 @@ Live тесты:
 - Продолжить с: прочитать ConnectionDefinition/ConnectionLimits и docs/connections.md,
   реализовать отдельный HTTP-клиент и transport DTO без изменения публичного listConnections.
 - Коммит: не создавался; прежние и новые файлы остаются незакоммиченными.
+
+### 2026-09-13 — S03: HTTP-клиент Loki
+
+- Пакет: S03 завершён.
+- Сделано: Java 21 HttpClient с GET allowlist, отдельными клиентами подключений,
+  auth/tenant, сохранением URL prefix, кодированием query и точными epoch nanoseconds.
+  Добавлены bounded BodySubscriber, deadline до конца body, connect timeout,
+  отмена и закрытие, safe transport errors. Новых зависимостей и MCP tools нет.
+  Transport records отделены от публичных моделей: streams/vector/matrix,
+  labels/series, отдельная metadata, optional totalLinesProcessed и warnings.
+- Проверено: `gradlew.bat classes --console=plain` и
+  `gradlew.bat test --tests 'ru.it_spectrum.ai.loki.mcp.client.*' --console=plain`
+  успешны (56 тестов: 26 HTTP, 30 decoder). Итоговый
+  `gradlew.bat build --console=plain` успешен: 96 тестов, без ошибок/пропусков.
+  Проверены HTTP-коды, HTML/JSON ошибки, byte budgets, таймауты headers/body/TLS,
+  interruption, Unicode, дубликаты, timestamps, auth isolation и отсутствие секретов.
+- Среда: одна попытка общей сборки в sandbox не смогла загрузить Gradle из-за
+  запрета сети; итоговая сборка выполнена с разрешённым доступом. Docker/live не нужны
+  для S03 и не использовались. Предупреждение Gradle native-access остаётся неблокирующим.
+- Решения: только identity encoding, redirects отключены; error body не сохраняется.
+  Лимиты выборки/окна применяются в S04, всего MCP wire response — S06.
+  Метки query result не доказывают исходный stream scope: Loki может объединять
+  structured metadata и pipeline-поля с labels. Отдельная плоская metadata сохраняется,
+  неизвестные формы отклоняются; происхождение объединённых меток не угадывается.
+- Документы: `docs/http-client.md`, обновлены `docs/connections.md`, AGENTS.md и план.
+- Осталось: S04 — queryLogs/queryMetrics и прикладные DTO/ошибки, ограничения,
+  контейнерные проверки фиксированных Loki 2.6.1/3.x. Сначала проверить Docker.
+- Продолжить с: прочитать `docs/http-client.md`, спроектировать фиксированное окно
+  и DTO полноты без обещания курсоров; использовать существующий client bean.
+- Коммит: не создавался. Исходное состояние при начале S03 — чистый Git,
+  последний коммит пользователя `737ae94`; изменения S03 оставлены незакоммиченными.
 
 Шаблон следующей записи (заполнять фактическими результатами):
 

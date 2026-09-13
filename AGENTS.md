@@ -59,9 +59,9 @@
 Версии сверять с `gradle/libs.versions.toml`; изменения зависимостей
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
-S01–S02 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
+S01–S03 реализованы: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0.
 Доступен `listConnections`, обязательная внешняя конфигурация и immutable registry.
-HTTP-чтения Loki пока нет; оно реализуется начиная с S03.
+Внутренний HTTP-клиент реализован; публичные data tools начинаются с S04.
 Стандартные команды Windows PowerShell:
 
 ```powershell
@@ -90,7 +90,8 @@ java -jar build/libs/loki-mcp-server.jar
 Формат, env placeholders, defaults и контракт: [docs/connections.md](docs/connections.md).
 Пример: [examples/connections.json](examples/connections.json); реальные значения не коммитить.
 Загрузка строгая и без probes. Ошибки конфигурации завершают запуск без исходного текста
-парсера и credentials. Transport settings хранятся, их применение относится к S03–S06.
+парсера и credentials. HTTP-клиент применяет auth/tenant, connect/request timeout
+и лимит body; лимиты выборки и MCP-ответа добавляются в S04–S06.
 
 `test` зависит от `bootJar`: `StdioSmokeTest` запускает jar отдельным Java 21
 процессом, проверяет initialize/initialized, 16 outstanding ping-запросов и 16 вызовов
@@ -99,6 +100,16 @@ listConnections, tools/list, output schema и равенство text/structured
 в ответах и stderr/file логах, безопасный отказ запуска на невалидном файле.
 Рабочий каталог и fixture connections.json временные; Docker и Loki не нужны.
 `ConnectionsTest` проверяет конфигурацию/registry/ошибки, `OutputSchemaTest` — DTO.
+
+S03 transport/decoder тесты (только loopback, без Loki/Docker/credentials):
+
+```powershell
+.\gradlew.bat test --tests 'ru.it_spectrum.ai.loki.mcp.client.*' --console=plain
+```
+
+`LokiHttpClientTest` поднимает тестовый loopback HTTP server и TCP socket для TLS timeout;
+`LokiResponseDecoderTest` проверяет JSON fixtures. Это не runtime HTTP listener.
+Транспорт и его ограничения: [docs/http-client.md](docs/http-client.md).
 
 Задачи integration/live пока не созданы. После реализации добавить сюда их точные
 команды и условия запуска. На машине разработки Java 21 обнаружена Gradle в
@@ -111,6 +122,9 @@ listConnections, tools/list, output schema и равенство text/structured
   Сервисы не зависят от tool-классов.
 - Сырые HTTP DTO не являются публичным MCP-контрактом. Стабильные ответы и ошибки
   описывать Java records в отдельном пакете моделей.
+- `client/LokiResponses` — transport records; `LogStream.labels` содержит метки
+  результата, а не доказанный исходный stream scope. Structured metadata и pipeline
+  могут попадать в эти метки. Не угадывать происхождение при реализации S05/S09.
 - `Map` допустим для произвольных полей событий, меток и внутренних JSON-структур.
   Не заменять им стабильные публичные DTO.
 - Настройки лимитов и таймаутов централизовать; не дублировать магические числа в tools.

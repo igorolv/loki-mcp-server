@@ -59,8 +59,9 @@ password, token и tenant. Подстановка однократная, без
 | `maxEntries` | 1000 | Положительное целое int |
 | `maxIntervalSeconds` | 86400 | Положительное целое long |
 
-В S02 лимиты и транспортные настройки хранятся и валидируются. Их применение
-к HTTP, запросам и бюджету ответов добавляется в S03–S06. `listConnections`
+В S03 HTTP-клиент применяет auth/tenant, `connectTimeoutMs`, `requestTimeoutMs`
+и `maxHttpResponseBytes` (см. [HTTP-клиент](http-client.md)). Применение остальных
+лимитов к запросам и бюджету ответов добавляется в S04–S06. `listConnections`
 возвращает полный список конфигурации без пагинации. Сам файл ограничен 1 MiB.
 Профили и overrides capabilities появятся в пакетах обнаружения и профиля asva2;
 неизвестные поля сейчас запрещены.
@@ -82,8 +83,9 @@ credentials, URL и исходные исключения парсера не в
 При будущем бюджетировании S06 нужно учитывать обе части wire response.
 
 Общий DTO ошибок `ToolError` содержит `code`, `message`, `retryable` (все обязательны).
-Текущие коды: `CONFIGURATION_ERROR`, `CONNECTION_REQUIRED`, `INVALID_CONNECTION`,
-`UNKNOWN_CONNECTION`, `INTERNAL_ERROR`. Все пока имеют `retryable=false`.
+Базовые коды: `CONFIGURATION_ERROR`, `CONNECTION_REQUIRED`, `INVALID_CONNECTION`,
+`UNKNOWN_CONNECTION`, `INTERNAL_ERROR` имеют `retryable=false`.
+Транспортные коды и условия повторения добавлены в S03: [HTTP-клиент](http-client.md).
 `LokiOperationException` переносит безопасный DTO между слоями; `Errors.from`
 преобразует неожиданное исключение в фиксированную внутреннюю ошибку без исходного текста.
 Неверное имя не отражается в сообщении. Ошибка загрузки завершает процесс до
