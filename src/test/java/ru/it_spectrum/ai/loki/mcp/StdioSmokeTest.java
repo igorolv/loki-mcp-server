@@ -251,7 +251,7 @@ class StdioSmokeTest {
                 assertNoSecrets(call.toString());
             }
             for (var bad : List.of(Map.of("selector", "{kind=\"test\"}"),
-                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "start", "SECRET_TOKEN"))) {
+                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "start", "MODEL_ARGUMENT"))) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 86, "method", "tools/call",
                         "params", Map.of("name", "discoverLogs", "arguments", bad))));
                 var result = response(stdout, stderr).path("result");
@@ -265,7 +265,7 @@ class StdioSmokeTest {
                         "start", "now-1s", "end", "now"));
                 if (index != 0) arguments.put("connection", index == 1 ? "missing" : "test");
                 if (index == 3) arguments.put("limit", 0);
-                if (index == 4) arguments.put("limit", "SECRET_TOKEN");
+                if (index == 4) arguments.put("limit", "MODEL_ARGUMENT");
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 51 + index, "method", "tools/call",
                         "params", Map.of("name", "queryLogs", "arguments", arguments))));
                 var call = response(stdout, stderr);
@@ -292,9 +292,17 @@ class StdioSmokeTest {
                 "Rolling file logging should be active");
         assertFalse(Files.readString(stderr).contains("Tomcat"), "No embedded web server expected");
         assertNoSecrets(Files.readString(stderr));
-        assertNoSecrets(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")));
+        String serverLog = Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log"));
+        assertNoSecrets(serverLog);
         assertFalse(Files.readString(stderr).contains("Ошибка 🐈"));
-        assertFalse(Files.readString(temporaryDirectory.resolve("data/logs/loki-mcp-server.log")).contains("Ошибка 🐈"));
+        assertFalse(serverLog.contains("Ошибка 🐈"), "Log line contents must not reach the server log");
+        // Diagnostics: configured connections at startup, one line per tool call and per Loki request, connection in MDC.
+        assertTrue(serverLog.contains("[server] ") && serverLog.contains("Configured connections: dev (UTC, auth BEARER), test (UTC, auth NONE)"), serverLog);
+        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.config.QueryToolsConfig - Tool queryLogs {end=1700000001000000000, query={kind=\"test\"}, start=1700000000000000000} -> ok, "), serverLog);
+        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient - GET /loki/api/v1/query_range {start=1700000000000000000, end=1700000001000000000, query={kind=\"test\"}, limit=50, direction=backward} -> 200, "), serverLog);
+        assertTrue(serverLog.contains("Tool queryLogs {end=now, limit=MODEL_ARGUMENT, query={kind=\"test\"}, start=now-1s} -> INVALID_ARGUMENT, "), serverLog);
+        assertTrue(serverLog.contains("GET /loki/api/v1/query_range {") && serverLog.contains("-> UPSTREAM_FORBIDDEN, "), serverLog);
+        assertTrue(serverLog.contains("[server] ru.it_spectrum.ai.loki.mcp.config.QueryToolsConfig - Tool listConnections {} -> ok, "), "MDC restored between calls: " + serverLog);
     }
 
     private static String text(JsonNode result) {

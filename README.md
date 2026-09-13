@@ -71,7 +71,9 @@ env = { LOKI_MCP_CONNECTIONS_FILE = "C:/path/connections.json" }
 
 Любой другой клиент — команда `java -jar loki-mcp-server.jar`, транспорт stdio.
 stdout занят JSON-RPC; собственные логи сервера пишутся в stderr и в
-`~/.loki-mcp-server/logs`.
+`~/.loki-mcp-server/logs`. В логе — подключения при старте, строка на каждый вызов
+инструмента (аргументы, результат, размер, время) и на каждый запрос к Loki (path,
+параметры, статус, время); URL, credentials и содержимое строк логов туда не попадают.
 
 ## Как спрашивать
 

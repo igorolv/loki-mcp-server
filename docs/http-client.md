@@ -28,6 +28,12 @@
 LogQL кодируется как единый query parameter; его содержимое не исполняется локально.
 Префикс пути из базового URL сохраняется, завершающие `/` нормализуются.
 
+Каждый запрос пишет одну строку в лог сервера: `GET /loki/api/v1/query_range
+{start=…, end=…, query=…, limit=…, direction=…} -> 200, 1586 bytes, 397 ms` или
+`-> UPSTREAM_BAD_REQUEST, 44 ms`. Логируются только API-path и параметры (текст
+LogQL модели, обрезанный до 200 символов); базовый URL с host и префиксом, заголовки
+авторизации, tenant и тело ответа не логируются.
+
 Для каждого registry name лениво создаётся отдельный Java 21 `HttpClient`.
 Basic передаёт Base64 от UTF-8 `username:password`, Bearer — отдельный Authorization,
 tenant — `X-Scope-OrgID`. Redirects отключены, cookies и authenticator не настроены.

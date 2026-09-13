@@ -21,6 +21,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
@@ -29,6 +31,7 @@ import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
 
 /** Only known GET endpoints are exposed. Each call requires an explicit registry name. */
 public final class LokiHttpClient implements AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(LokiHttpClient.class);
     public enum Direction { FORWARD, BACKWARD }
     private final ConnectionRegistry registry;
     private final LokiResponseDecoder decoder = new LokiResponseDecoder();
@@ -81,6 +84,31 @@ public final class LokiHttpClient implements AutoCloseable {
     }
 
     private byte[] get(ConnectionDefinition connection, String path, List<Param> params) {
+        long started = System.nanoTime();
+        try {
+            byte[] body = send(connection, path, params);
+            log.info("GET {} {} -> 200, {} bytes, {} ms", path, describe(params), body.length, millis(started));
+            return body;
+        } catch (LokiOperationException failure) {
+            log.warn("GET {} {} -> {}, {} ms", path, describe(params), failure.error().code(), millis(started));
+            throw failure;
+        }
+    }
+
+    /** Parameters are the model's own query text and time bounds; the base URL, credentials and tenant are never logged. */
+    private static String describe(List<Param> params) {
+        var text = new StringBuilder("{");
+        for (var param : params) {
+            if (text.length() > 1) text.append(", ");
+            String value = param.value().replace('\n', ' ');
+            text.append(param.name()).append('=').append(value.length() <= 200 ? value : value.substring(0, 200) + "…");
+        }
+        return text.append('}').toString();
+    }
+
+    private static long millis(long startNanos) { return (System.nanoTime() - startNanos) / 1_000_000; }
+
+    private byte[] send(ConnectionDefinition connection, String path, List<Param> params) {
         CompletableFuture<HttpResponse<byte[]>> pending = null;
         var subscriber = new AtomicReference<LimitedBodySubscriber>();
         try {

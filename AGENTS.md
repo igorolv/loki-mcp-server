@@ -88,6 +88,13 @@ java -jar build/libs/loki-mcp-server.jar
 Процесс ожидает JSON-RPC на stdin. Логи идут в stderr и
 `~/.loki-mcp-server/logs/loki-mcp-server.log`; каталог можно изменить через
 `LOKI_MCP_DATA_DIR`. Не перенаправлять stderr в stdout при подключении MCP-клиента.
+Диагностика (`Diagnostics`, обёртка `QueryToolsConfig`, `LokiHttpClient`): при старте —
+имена подключений с timezone и типом auth; на каждый вызов инструмента — одна строка
+`Tool <имя> {аргументы} -> ok|<код>, байты, мс`; на каждый запрос к Loki — `GET <path>
+{параметры} -> 200|<код>, байты, мс`; имя подключения текущего вызова — в MDC
+(`[dev]`, вне вызова `[server]`). Аргументы модели (query, selector, времена) логируются
+с обрезкой до 200 символов; URL, credentials, tenant, тела ответов и строки логов стенда
+в диагностику не попадают — stdio smoke это проверяет.
 
 Перед запуском создать `~/.loki-mcp-server/connections.json` (или внутри
 `LOKI_MCP_DATA_DIR`). `LOKI_MCP_CONNECTIONS_FILE` переопределяет путь отдельно.
