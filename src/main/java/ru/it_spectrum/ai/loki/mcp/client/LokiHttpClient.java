@@ -1,5 +1,11 @@
 package ru.it_spectrum.ai.loki.mcp.client;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
@@ -11,34 +17,32 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
-import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
 import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
 
-/** Only known GET endpoints are exposed. Each call requires an explicit registry name. */
+/**
+ * Only known GET endpoints are exposed. Each call requires an explicit registry name.
+ */
 public final class LokiHttpClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(LokiHttpClient.class);
-    public enum Direction { FORWARD, BACKWARD }
+
+    public enum Direction {FORWARD, BACKWARD}
+
     private final ConnectionRegistry registry;
     private final LokiResponseDecoder decoder = new LokiResponseDecoder();
     private final Map<String, HttpClient> clients = new HashMap<>();
     private boolean closed;
 
-    public LokiHttpClient(ConnectionRegistry registry) { this.registry = registry; }
+    public LokiHttpClient(ConnectionRegistry registry) {
+        this.registry = registry;
+    }
 
     public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
                                     int limit, Direction direction, BigDecimal stepSeconds) {
@@ -95,7 +99,9 @@ public final class LokiHttpClient implements AutoCloseable {
         }
     }
 
-    /** Parameters are the model's own query text and time bounds; the base URL, credentials and tenant are never logged. */
+    /**
+     * Parameters are the model's own query text and time bounds; the base URL, credentials and tenant are never logged.
+     */
     private static String describe(List<Param> params) {
         var text = new StringBuilder("{");
         for (var param : params) {
@@ -106,7 +112,9 @@ public final class LokiHttpClient implements AutoCloseable {
         return text.append('}').toString();
     }
 
-    private static long millis(long startNanos) { return (System.nanoTime() - startNanos) / 1_000_000; }
+    private static long millis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
+    }
 
     private byte[] send(ConnectionDefinition connection, String path, List<Param> params) {
         CompletableFuture<HttpResponse<byte[]>> pending = null;
@@ -123,7 +131,8 @@ public final class LokiHttpClient implements AutoCloseable {
                 case BASIC -> request.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(
                         (auth.username() + ":" + auth.password()).getBytes(StandardCharsets.UTF_8)));
                 case BEARER -> request.header("Authorization", "Bearer " + auth.token());
-                case NONE -> { }
+                case NONE -> {
+                }
             }
             if (connection.tenant() != null) request.header("X-Scope-OrgID", connection.tenant());
             pending = client(connection).sendAsync(request.build(), info -> {
@@ -142,7 +151,8 @@ public final class LokiHttpClient implements AutoCloseable {
             // Unlike an InputStream body handler, completion means the entire bounded body arrived.
             var response = pending.get(connection.limits().requestTimeoutMs(), TimeUnit.MILLISECONDS);
             // A 400 body is Loki's explanation of what is wrong with the model's own query; it is passed on.
-            if (response.statusCode() == 400) throw TransportErrors.badRequest(new String(response.body(), StandardCharsets.UTF_8));
+            if (response.statusCode() == 400)
+                throw TransportErrors.badRequest(new String(response.body(), StandardCharsets.UTF_8));
             return response.body();
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
@@ -177,7 +187,8 @@ public final class LokiHttpClient implements AutoCloseable {
                 .followRedirects(HttpClient.Redirect.NEVER).build());
     }
 
-    @Override public synchronized void close() {
+    @Override
+    public synchronized void close() {
         closed = true;
         clients.values().forEach(HttpClient::shutdownNow);
         clients.clear();
@@ -191,10 +202,12 @@ public final class LokiHttpClient implements AutoCloseable {
         }
         return params;
     }
+
     private List<Param> window(Instant start, Instant end) {
         require(start != null && end != null && start.isBefore(end));
         return new ArrayList<>(List.of(new Param("start", nanos(start)), new Param("end", nanos(end))));
     }
+
     private String nanos(Instant time) {
         require(time != null);
         try {
@@ -204,7 +217,15 @@ public final class LokiHttpClient implements AutoCloseable {
             throw TransportErrors.error(INVALID_ARGUMENT);
         }
     }
-    private String encode(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20"); }
-    private void require(boolean valid) { if (!valid) throw TransportErrors.error(INVALID_ARGUMENT); }
-    private record Param(String name, String value) {}
+
+    private String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private void require(boolean valid) {
+        if (!valid) throw TransportErrors.error(INVALID_ARGUMENT);
+    }
+
+    private record Param(String name, String value) {
+    }
 }

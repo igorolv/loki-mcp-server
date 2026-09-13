@@ -1,15 +1,23 @@
 package ru.it_spectrum.ai.loki.mcp.config;
 
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import org.junit.jupiter.api.Test;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
+import ru.it_spectrum.ai.loki.mcp.service.DiscoveryService;
+import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.service.QueryService;
+
 import java.net.URI;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.TextContent;
-import ru.it_spectrum.ai.loki.mcp.connection.*;
-import ru.it_spectrum.ai.loki.mcp.service.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -19,12 +27,17 @@ class QueryToolsConfigTest {
     private final QueryService service = mock(QueryService.class);
     private final List<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> specs =
             new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class), registry);
+
     private CallToolResult call(String tool, Map<String, Object> args) {
         return specs.stream().filter(s -> s.tool().name().equals(tool)).findFirst().orElseThrow().callHandler().apply(null, new CallToolRequest(tool, args));
     }
-    private static String text(CallToolResult result) { return ((TextContent) result.content().getFirst()).text(); }
 
-    @Test void toolsAreTextOnlyWithShortInstructionLikeDescriptions() {
+    private static String text(CallToolResult result) {
+        return ((TextContent) result.content().getFirst()).text();
+    }
+
+    @Test
+    void toolsAreTextOnlyWithShortInstructionLikeDescriptions() {
         assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs", "getLogContext"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
         for (var spec : specs) {
             assertNull(spec.tool().outputSchema(), spec.tool().name());
@@ -32,7 +45,9 @@ class QueryToolsConfigTest {
             assertTrue(spec.tool().annotations().readOnlyHint());
         }
     }
-    @Test void unexpectedFailureIsSafeAndInvalidInputNeverInvokesService() {
+
+    @Test
+    void unexpectedFailureIsSafeAndInvalidInputNeverInvokesService() {
         when(service.logs("test", "q", null, null, null, null)).thenThrow(new IllegalStateException("SECRET cause"));
         var result = call("queryLogs", Map.of("connection", "test", "query", "q"));
         assertTrue(result.isError());
@@ -49,7 +64,9 @@ class QueryToolsConfigTest {
         assertTrue(text(unknown).startsWith("Error UNKNOWN_CONNECTION"));
         verifyNoInteractions(service);
     }
-    @Test void safeErrorsFromServicesAndOversizedTextAreReportedAsText() {
+
+    @Test
+    void safeErrorsFromServicesAndOversizedTextAreReportedAsText() {
         when(service.count("test", "{a=\"b\"}", null, null, null)).thenThrow(Errors.invalid("groupBy must be a label name."));
         var error = call("countLogs", Map.of("connection", "test", "query", "{a=\"b\"}"));
         assertTrue(error.isError());

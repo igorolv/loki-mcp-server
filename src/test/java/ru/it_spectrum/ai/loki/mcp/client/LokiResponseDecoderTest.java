@@ -4,19 +4,26 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
+import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_INVALID_RESPONSE;
+import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_QUERY_ERROR;
 
 class LokiResponseDecoderTest {
     private final LokiResponseDecoder decoder = new LokiResponseDecoder();
-    private byte[] bytes(String json) { return json.getBytes(StandardCharsets.UTF_8); }
 
-    @Test void preservesNanosecondsDuplicatesStreamsMetadataAndUntrustedText() {
+    private byte[] bytes(String json) {
+        return json.getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void preservesNanosecondsDuplicatesStreamsMetadataAndUntrustedText() {
         var response = decoder.query(bytes("""
                 {"status":"success","warnings":["partial upstream sample"],"data":{
                   "resultType":"streams","result":[
@@ -40,7 +47,8 @@ class LokiResponseDecoderTest {
         assertThrows(UnsupportedOperationException.class, () -> first.structuredMetadata().clear());
     }
 
-    @Test void decodesExactNumericMetricTimestampsAndSpecialValues() {
+    @Test
+    void decodesExactNumericMetricTimestampsAndSpecialValues() {
         var vector = decoder.query(bytes("""
                 {"status":"success","data":{"resultType":"vector","result":[
                   {"metric":{"level":"error"},"value":[1720000000.123456789,"NaN"]},
@@ -61,7 +69,8 @@ class LokiResponseDecoderTest {
         assertEquals("1.25e-3", series.getFirst().samples().getFirst().value());
     }
 
-    @ParameterizedTest @ValueSource(strings = {"streams", "vector", "matrix"})
+    @ParameterizedTest
+    @ValueSource(strings = {"streams", "vector", "matrix"})
     void acceptsEmptyResultsWithoutInventingStatistics(String type) {
         var response = decoder.query(bytes("{\"status\":\"success\",\"data\":{\"resultType\":\"" + type + "\",\"result\":[]}}"));
         assertNotNull(response.data());
@@ -69,7 +78,8 @@ class LokiResponseDecoderTest {
         assertTrue(response.warnings().isEmpty());
     }
 
-    @Test void decodesMetadataAndEmptyMetadata() {
+    @Test
+    void decodesMetadataAndEmptyMetadata() {
         assertEquals(List.of("a", "b"), decoder.labels(bytes("{\"status\":\"success\",\"data\":[\"a\",\"b\"]}")).values());
         assertTrue(decoder.labels(bytes("{\"status\":\"success\",\"data\":[]}")).values().isEmpty());
         var series = decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":\"a\"},{\"pod\":\"b\"}]}"));
@@ -82,7 +92,8 @@ class LokiResponseDecoderTest {
         assertThrows(LokiOperationException.class, () -> decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":2}]}")));
     }
 
-    @ParameterizedTest @ValueSource(strings = {
+    @ParameterizedTest
+    @ValueSource(strings = {
             "SECRET invalid", "<html>SECRET</html>", "null", "{}", "[]",
             "{\"status\":\"success\",\"data\":null}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"future\",\"result\":[]}}",
@@ -110,7 +121,8 @@ class LokiResponseDecoderTest {
         assertNull(error.getCause());
     }
 
-    @Test void passesUpstreamErrorTextButNotType() {
+    @Test
+    void passesUpstreamErrorTextButNotType() {
         var failure = assertThrows(LokiOperationException.class, () -> decoder.query(bytes(
                 "{\"status\":\"error\",\"errorType\":\"TYPE\",\"error\":\"query text problem\"}")));
         assertEquals(UPSTREAM_QUERY_ERROR, failure.error().code());

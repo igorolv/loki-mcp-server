@@ -1,5 +1,13 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
+import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -8,16 +16,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
-import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
-import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 
-/** Log pages, counts and metrics rendered as text. Each call is one bounded Loki request (two for time buckets). */
+/**
+ * Log pages, counts and metrics rendered as text. Each call is one bounded Loki request (two for time buckets).
+ */
 @Service
 public class QueryService {
     public static final int DEFAULT_LIMIT = 50;
@@ -32,13 +36,21 @@ public class QueryService {
     private final LokiHttpClient client;
     private final Clock clock;
     private final EventNormalizer normalizer = new EventNormalizer();
+
     @Autowired
-    public QueryService(ConnectionRegistry registry, LokiHttpClient client) { this(registry, client, Clock.systemUTC()); }
-    public QueryService(ConnectionRegistry registry, LokiHttpClient client, Clock clock) {
-        this.registry = registry; this.client = client; this.clock = clock;
+    public QueryService(ConnectionRegistry registry, LokiHttpClient client) {
+        this(registry, client, Clock.systemUTC());
     }
 
-    /** Newest {@code limit} lines of the window, printed in chronological order. */
+    public QueryService(ConnectionRegistry registry, LokiHttpClient client, Clock clock) {
+        this.registry = registry;
+        this.client = client;
+        this.clock = clock;
+    }
+
+    /**
+     * Newest {@code limit} lines of the window, printed in chronological order.
+     */
     public String logs(String connection, String query, String start, String end, Integer limit, Boolean raw) {
         var definition = registry.require(connection);
         requireLogQuery(query);
@@ -50,7 +62,8 @@ public class QueryService {
         boolean more = events.size() >= usedLimit;
         ZoneId zone = definition.timezone();
         var lines = new ArrayList<String>(events.size());
-        for (var event : events) lines.add(line(event, normalizer.view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
+        for (var event : events)
+            lines.add(line(event, normalizer.view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
         String header = query.strip() + " — " + connection + ", " + window(window, zone) + ", "
                 + (events.isEmpty() ? "no matching lines." : more ? "newest " + events.size() + " of more:" : "all " + events.size() + " lines:");
         var marked = withDateMarkers(events, lines, zone);
@@ -67,7 +80,8 @@ public class QueryService {
         if (shown < 1) shown = 1;
         var oldest = QueryTime.fromNanos(events.get(events.size() - shown).timestampNanos());
         var text = new StringBuilder();
-        if (dropped > 0) text.append("Output limit reached: showing ").append(shown).append(" newest of ").append(events.size()).append(" fetched lines. ");
+        if (dropped > 0)
+            text.append("Output limit reached: showing ").append(shown).append(" newest of ").append(events.size()).append(" fetched lines. ");
         if (more || dropped > 0) {
             text.append("Shown ").append(shown).append(" newest lines; oldest shown ").append(iso(oldest, zone)).append(". ");
             text.append("Older: repeat with end=\"").append(iso(QueryTime.ceilMillis(oldest), zone)).append("\". ");
@@ -106,9 +120,11 @@ public class QueryService {
                 : fetch(connection, scope, new QueryTime.Range(point.end(), point.end().plus(reach)), wantAfter, LokiHttpClient.Direction.FORWARD);
         int targets = (int) earlier.stream().filter(e -> !QueryTime.fromNanos(e.timestampNanos()).isBefore(point.at())).count();
         // Without a line at the moment the spare slot holds one more old line than asked for; drop it.
-        if (targets == 0 && earlier.size() > wantBefore) earlier = new ArrayList<>(earlier.subList(earlier.size() - wantBefore, earlier.size()));
+        if (targets == 0 && earlier.size() > wantBefore)
+            earlier = new ArrayList<>(earlier.subList(earlier.size() - wantBefore, earlier.size()));
         int beforeCount = earlier.size() - targets;
-        var events = new ArrayList<LogEvent>(earlier); events.addAll(later);
+        var events = new ArrayList<LogEvent>(earlier);
+        events.addAll(later);
         var lines = new ArrayList<String>(events.size());
         for (int i = 0; i < events.size(); i++) {
             String text = line(events.get(i), normalizer.view(events.get(i), definition.serviceLabels()), zone, false);
@@ -131,7 +147,8 @@ public class QueryService {
             if (bytes(text) <= budget) return text;
             if (keepBefore == 0 && keepAfter == 0) throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                     "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the selector or raise the limit.");
-            if (keepAfter > keepBefore) keepAfter--; else keepBefore--;
+            if (keepAfter > keepBefore) keepAfter--;
+            else keepBefore--;
         }
     }
 
@@ -139,23 +156,30 @@ public class QueryService {
                                         int keepBefore, int keepAfter, int dropped, QueryTime.Point point, Duration reach, ZoneId zone) {
         var text = new StringBuilder();
         int beforeCount = earlier.size() - targets;
-        if (dropped > 0) text.append("Output limit reached: showing ").append(keepBefore).append(" before and ").append(keepAfter)
-                .append(" after of ").append(earlier.size() + later.size()).append(" fetched lines. ");
+        if (dropped > 0)
+            text.append("Output limit reached: showing ").append(keepBefore).append(" before and ").append(keepAfter)
+                    .append(" after of ").append(earlier.size() + later.size()).append(" fetched lines. ");
         String span = QueryTime.human(reach);
         if (targets > 0 && targets == earlier.size() && targets > wantBefore)
             text.append("All ").append(targets).append(" fetched lines are at this time; ")
                     .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs"
                             : "repeat with a larger before (e.g. before=" + Math.min(wantBefore * 5 + 5, 200) + ")")
                     .append(" to see what came before. ");
-        else if (beforeCount < wantBefore) text.append("No earlier lines within ").append(span).append(" before this time. ");
-        else if (keepBefore > 0) text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
-        if (wantAfter > 0 && later.size() < wantAfter) text.append("No later lines within ").append(span).append(" after this time. ");
-        else if (keepAfter > 0) text.append("Later: repeat with time=\"").append(iso(QueryTime.fromNanos(later.get(keepAfter - 1).timestampNanos()), zone)).append("\", before=0. ");
+        else if (beforeCount < wantBefore)
+            text.append("No earlier lines within ").append(span).append(" before this time. ");
+        else if (keepBefore > 0)
+            text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
+        if (wantAfter > 0 && later.size() < wantAfter)
+            text.append("No later lines within ").append(span).append(" after this time. ");
+        else if (keepAfter > 0)
+            text.append("Later: repeat with time=\"").append(iso(QueryTime.fromNanos(later.get(keepAfter - 1).timestampNanos()), zone)).append("\", before=0. ");
         text.append("Full original line: queryLogs with raw=true and a narrow filter.");
         return text.toString();
     }
 
-    /** Count of matching lines, optionally broken down by a label or by time buckets. */
+    /**
+     * Count of matching lines, optionally broken down by a label or by time buckets.
+     */
     public String count(String connection, String query, String start, String end, String groupBy) {
         var definition = registry.require(connection);
         requireLogQuery(query);
@@ -181,7 +205,10 @@ public class QueryService {
         int width = Math.max(6, rows.stream().mapToInt(r -> r.getKey().length()).max().orElse(1));
         int shown = 0;
         for (var row : rows) {
-            if (shown++ >= DEFAULT_LIMIT) { text.append("\n  (+").append(rows.size() - DEFAULT_LIMIT).append(" more values)"); break; }
+            if (shown++ >= DEFAULT_LIMIT) {
+                text.append("\n  (+").append(rows.size() - DEFAULT_LIMIT).append(" more values)");
+                break;
+            }
             text.append("\n  ").append(String.format("%-" + width + "s  %d", row.getKey().isEmpty() ? "(none)" : row.getKey(), row.getValue()));
         }
         return text.toString();
@@ -203,14 +230,16 @@ public class QueryService {
         String where = query.strip() + " in " + window(new QueryTime.Range(first.minus(step), last), zone) + " (" + connection + ")";
         var counts = new TreeMap<Long, Long>();
         for (Instant t = first; !t.isAfter(last); t = t.plus(step)) counts.put(t.getEpochSecond(), 0L);
-        for (var series : matrix.series()) for (var sample : series.samples()) {
-            long at = sample.timestampSeconds().setScale(0, RoundingMode.HALF_UP).longValueExact();
-            counts.merge(at, value(sample.value()), Long::sum);
-        }
+        for (var series : matrix.series())
+            for (var sample : series.samples()) {
+                long at = sample.timestampSeconds().setScale(0, RoundingMode.HALF_UP).longValueExact();
+                counts.merge(at, value(sample.value()), Long::sum);
+            }
         long total = counts.values().stream().mapToLong(Long::longValue).sum();
         var text = new StringBuilder(total + " lines match " + where + ".");
         if (total == 0) return text.toString();
-        var sorted = new ArrayList<>(counts.values()); Collections.sort(sorted);
+        var sorted = new ArrayList<>(counts.values());
+        Collections.sort(sorted);
         double median = sorted.get(sorted.size() / 2);
         double reference = median > 0 ? median : (double) total / sorted.size();
         var format = step.toSeconds() < 60 ? DateTimeFormatter.ofPattern("HH:mm:ss") : DateTimeFormatter.ofPattern("HH:mm");
@@ -223,12 +252,16 @@ public class QueryService {
         return text.toString();
     }
 
-    /** Range metric query as a table: one block per series, one row per point. */
+    /**
+     * Range metric query as a table: one block per series, one row per point.
+     */
     public String metrics(String connection, String query, String start, String end, String step) {
         var definition = registry.require(connection);
-        if (query == null || query.isBlank()) throw Errors.invalid("query is required: a metric LogQL expression such as sum(rate({app=\"x\"}[5m])).");
-        if (query.strip().startsWith("{")) throw Errors.invalid("This looks like a log query. Use queryLogs to read lines or countLogs to count them; "
-                + "queryMetrics needs a metric expression such as sum by (level) (count_over_time({app=\"x\"}[5m])).");
+        if (query == null || query.isBlank())
+            throw Errors.invalid("query is required: a metric LogQL expression such as sum(rate({app=\"x\"}[5m])).");
+        if (query.strip().startsWith("{"))
+            throw Errors.invalid("This looks like a log query. Use queryLogs to read lines or countLogs to count them; "
+                    + "queryMetrics needs a metric expression such as sum by (level) (count_over_time({app=\"x\"}[5m])).");
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
         Duration used = step == null || step.isBlank() ? niceStep(window.duration()) : QueryTime.duration(step);
         long evaluations = window.duration().toMillis() / used.toMillis() + 1;
@@ -239,16 +272,23 @@ public class QueryService {
         if (!(response.data() instanceof LokiResponses.Matrix matrix)) throw notMetric();
         ZoneId zone = definition.timezone();
         var text = new StringBuilder(query.strip() + " — " + connection + ", " + window(window, zone) + ", step " + QueryTime.lokiDuration(used));
-        if (matrix.series().isEmpty()) return text.append(": no series. The expression matched no data in this window.").toString();
+        if (matrix.series().isEmpty())
+            return text.append(": no series. The expression matched no data in this window.").toString();
         int maxSeries = definition.limits().maxMetricSeries(), maxPoints = definition.limits().maxMetricPoints(), points = 0, shownSeries = 0;
         var format = used.toSeconds() < 60 ? DateTimeFormatter.ofPattern("HH:mm:ss") : DateTimeFormatter.ofPattern("MM-dd HH:mm");
         text.append(", ").append(matrix.series().size()).append(matrix.series().size() == 1 ? " series:" : " series:");
         boolean trimmed = false;
         for (var series : matrix.series()) {
-            if (shownSeries >= maxSeries || points >= maxPoints) { trimmed = true; break; }
+            if (shownSeries >= maxSeries || points >= maxPoints) {
+                trimmed = true;
+                break;
+            }
             text.append('\n').append(labels(series.labels()));
             for (var sample : series.samples()) {
-                if (points >= maxPoints) { trimmed = true; break; }
+                if (points >= maxPoints) {
+                    trimmed = true;
+                    break;
+                }
                 text.append("\n  ").append(format.format(Instant.ofEpochSecond(sample.timestampSeconds().setScale(0, RoundingMode.DOWN).longValueExact()).atZone(zone)))
                         .append("  ").append(sample.value());
                 points++;
@@ -260,14 +300,17 @@ public class QueryService {
         return fit(text.toString(), List.of(), ignored -> "", definition.limits().maxResponseBytes() - ENVELOPE_BYTES);
     }
 
-    /** Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD. */
+    /**
+     * Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD.
+     */
     List<LogEvent> fetch(String connection, String query, QueryTime.Range window, int limit, LokiHttpClient.Direction direction) {
         var response = client.queryRange(connection, query, window.start(), window.end(), limit, direction, null);
         if (!(response.data() instanceof LokiResponses.Streams streams))
             throw Errors.invalid("This is a metric expression; queryLogs reads log lines. Use queryMetrics for metric LogQL.");
         var events = new ArrayList<LogEvent>();
-        for (var stream : streams.streams()) for (var entry : stream.entries())
-            events.add(new LogEvent(entry.timestampNanos(), stream.labels(), entry.line(), entry.structuredMetadata()));
+        for (var stream : streams.streams())
+            for (var entry : stream.entries())
+                events.add(new LogEvent(entry.timestampNanos(), stream.labels(), entry.line(), entry.structuredMetadata()));
         events.sort(Comparator.comparingLong(LogEvent::nanos)); // Stable: identical timestamps keep upstream order and multiplicity.
         // A page larger than the limit is trimmed on the side the direction did not favour.
         if (events.size() <= limit) return events;
@@ -279,7 +322,9 @@ public class QueryService {
         return by == null ? "sum(" + inner + ")" : "sum by (" + by + ") (" + inner + ")";
     }
 
-    static Duration niceStep(Duration window) { return niceStep(window, METRIC_STEPS); }
+    static Duration niceStep(Duration window) {
+        return niceStep(window, METRIC_STEPS);
+    }
 
     static Duration niceStep(Duration window, int points) {
         Duration minimum = window.dividedBy(points);
@@ -288,9 +333,11 @@ public class QueryService {
     }
 
     private static void requireLogQuery(String query) {
-        if (query == null || query.isBlank()) throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\".");
-        if (!query.strip().startsWith("{")) throw Errors.invalid("A log query starts with a stream selector in braces, e.g. {app=\"backend\"} |= \"ERROR\". "
-                + "For metric expressions use queryMetrics.");
+        if (query == null || query.isBlank())
+            throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\".");
+        if (!query.strip().startsWith("{"))
+            throw Errors.invalid("A log query starts with a stream selector in braces, e.g. {app=\"backend\"} |= \"ERROR\". "
+                    + "For metric expressions use queryMetrics.");
     }
 
     private static List<LokiResponses.VectorSample> vector(LokiResponses.QueryResponse response) {
@@ -305,11 +352,16 @@ public class QueryService {
     }
 
     private static long value(String metricValue) {
-        try { return new BigDecimal(metricValue).setScale(0, RoundingMode.HALF_UP).longValueExact(); }
-        catch (NumberFormatException | ArithmeticException ignored) { return 0; }
+        try {
+            return new BigDecimal(metricValue).setScale(0, RoundingMode.HALF_UP).longValueExact();
+        } catch (NumberFormatException | ArithmeticException ignored) {
+            return 0;
+        }
     }
 
-    private static BigDecimal stepSeconds(Duration step) { return BigDecimal.valueOf(step.toMillis(), 3); }
+    private static BigDecimal stepSeconds(Duration step) {
+        return BigDecimal.valueOf(step.toMillis(), 3);
+    }
 
     private static LokiOperationException notMetric() {
         return Errors.invalid("Loki returned a result type this tool cannot show. Check that the expression is what the tool expects.");

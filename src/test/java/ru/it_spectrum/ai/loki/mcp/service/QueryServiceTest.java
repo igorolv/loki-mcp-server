@@ -1,18 +1,21 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import org.junit.jupiter.api.Test;
+import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.*;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import ru.it_spectrum.ai.loki.mcp.client.*;
-import ru.it_spectrum.ai.loki.mcp.connection.*;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
+import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
 
 class QueryServiceTest {
     private final LokiHttpClient client = mock(LokiHttpClient.class);
@@ -23,13 +26,18 @@ class QueryServiceTest {
             new ConnectionDefinition("two", null, URI.create("http://localhost:2"), ConnectionAuth.NONE, null,
                     ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 1024, 100, 86400, 100, 1000))));
     private final QueryService service = new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
+
     private void range(QueryData data, List<String> warnings) {
         when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(new QueryResponse(data, new QueryStats(999L), warnings));
     }
-    private static LogEntry entry(String nanos, String line) { return new LogEntry(nanos, line, Map.of()); }
 
-    @Test void pageIsChronologicalWithHeaderAndFooterAndKeepsDuplicates() {
+    private static LogEntry entry(String nanos, String line) {
+        return new LogEntry(nanos, line, Map.of());
+    }
+
+    @Test
+    void pageIsChronologicalWithHeaderAndFooterAndKeepsDuplicates() {
         String a = QueryTime.nanos(now.minusSeconds(1)), b = QueryTime.nanos(now);
         range(new Streams(List.of(new LogStream(Map.of("app", "x", "level", "info"), List.of(entry(b, "{\"message\":\"newest\"}"))),
                 new LogStream(Map.of("app", "y"), List.of(entry(a, "dup"), entry(a, "dup"))))), List.of());
@@ -47,20 +55,25 @@ class QueryServiceTest {
         assertTrue(fewer.endsWith("Shown all 2 matching lines."), fewer);
         verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, LokiHttpClient.Direction.BACKWARD, null);
     }
-    @Test void emptyPageExplainsWhatToTryAndWarningsAreNotEchoed() {
+
+    @Test
+    void emptyPageExplainsWhatToTryAndWarningsAreNotEchoed() {
         range(new Streams(List.of()), List.of("SECRET_URL_TOKEN"));
         var text = service.logs("one", "{app=\"x\"}", "now-1s", "now", null, null);
         assertTrue(text.contains("no matching lines."));
         assertTrue(text.contains("Try a wider window"));
         assertFalse(text.contains("SECRET"));
     }
-    @Test void rawPrintsOriginalLinesAndBudgetDropsOldestLines() {
+
+    @Test
+    void rawPrintsOriginalLinesAndBudgetDropsOldestLines() {
         String json = "{\"message\":\"m\",\"extra\":\"" + "x".repeat(600) + "\"}";
         range(new Streams(List.of(new LogStream(Map.of("app", "x"), List.of(entry(QueryTime.nanos(now), json))))), List.of());
         var raw = service.logs("one", "{app=\"x\"}", "now-1s", "now", 1, true);
         assertTrue(raw.contains("12:00:00.123 {app=\"x\"}  " + json), raw);
         var lines = new java.util.ArrayList<LogEntry>();
-        for (int i = 0; i < 100; i++) lines.add(entry(QueryTime.nanos(now.minusSeconds(100 - i)), "line " + i + " " + "y".repeat(30)));
+        for (int i = 0; i < 100; i++)
+            lines.add(entry(QueryTime.nanos(now.minusSeconds(100 - i)), "line " + i + " " + "y".repeat(30)));
         range(new Streams(List.of(new LogStream(Map.of("app", "x"), lines))), List.of());
         var text = service.logs("two", "{app=\"x\"}", "now-1h", "now", 100, false);
         assertTrue(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 1024 - LogText.ENVELOPE_BYTES);
@@ -69,7 +82,9 @@ class QueryServiceTest {
         assertTrue(text.contains("Output limit reached: showing "), text);
         assertTrue(text.contains("Older: repeat with end=\"2026-09-13T"), text);
     }
-    @Test void validatesBeforeNetworkWithActionableMessages() {
+
+    @Test
+    void validatesBeforeNetworkWithActionableMessages() {
         assertThrows(LokiOperationException.class, () -> service.logs(null, "{a=\"b\"}", null, null, null, null));
         assertThrows(LokiOperationException.class, () -> service.logs("missing", "{a=\"b\"}", null, null, null, null));
         assertTrue(assertThrows(LokiOperationException.class, () -> service.logs("one", "{a=\"b\"}", "now-3h", "now", null, null))
@@ -83,7 +98,9 @@ class QueryServiceTest {
                 .getMessage().contains("now-15m"));
         verifyNoInteractions(client);
     }
-    @Test void countBuildsTheMetricExpressionAndRendersTotalsAndGroups() {
+
+    @Test
+    void countBuildsTheMetricExpressionAndRendersTotalsAndGroups() {
         when(client.queryInstant(eq("one"), anyString(), any())).thenReturn(new QueryResponse(new Vector(List.of(
                 new VectorSample(Map.of(), new MetricSample(BigDecimal.ONE, "1523")))), null, List.of()));
         assertEquals("1523 lines match {app=\"x\"} |= \"ERROR\" in 2026-09-13 11:45:00–12:00:00 (Z) (one).",
@@ -105,12 +122,15 @@ class QueryServiceTest {
         assertThrows(LokiOperationException.class, () -> service.count("one", "{app=\"x\"}", null, null, "bad-name"));
         assertThrows(LokiOperationException.class, () -> service.count("one", "count_over_time({app=\"x\"}[1m])", null, null, null));
     }
-    @Test void countByTimeUsesBucketsCoveringTheWindowAndMarksSpikes() {
+
+    @Test
+    void countByTimeUsesBucketsCoveringTheWindowAndMarksSpikes() {
         // 12-minute window 11:48:00.123–12:00:00.123: 60s buckets aligned to the clock, evaluated at 11:49:00 .. 12:01:00,
         // the same timestamps Loki itself aligns metric queries to.
         var samples = new java.util.ArrayList<MetricSample>();
         Instant aligned = Instant.parse("2026-09-13T11:48:00Z");
-        for (int i = 1; i <= 12; i++) samples.add(new MetricSample(BigDecimal.valueOf(aligned.plusSeconds(60L * i).getEpochSecond()), i == 5 ? "340" : "12"));
+        for (int i = 1; i <= 12; i++)
+            samples.add(new MetricSample(BigDecimal.valueOf(aligned.plusSeconds(60L * i).getEpochSecond()), i == 5 ? "340" : "12"));
         when(client.queryRange(eq("one"), anyString(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(new QueryResponse(new Matrix(List.of(new MetricSeries(Map.of(), samples))), null, List.of()));
         var text = service.count("one", "{app=\"x\"}", "now-12m", "now", "time");
@@ -129,7 +149,9 @@ class QueryServiceTest {
         assertEquals(Duration.ofMinutes(30), QueryService.niceStep(Duration.ofHours(6), QueryService.TIME_BUCKETS));
         assertEquals(Duration.ofMinutes(2), QueryService.niceStep(Duration.ofMinutes(15), QueryService.TIME_BUCKETS));
     }
-    @Test void metricsRenderSeriesTablesWithNiceStepsAndConnectionCaps() {
+
+    @Test
+    void metricsRenderSeriesTablesWithNiceStepsAndConnectionCaps() {
         long t0 = now.minusSeconds(600).getEpochSecond();
         var samples = List.of(new MetricSample(new BigDecimal(t0 + ".5"), "0.5"), new MetricSample(BigDecimal.valueOf(t0 + 60), "NaN"),
                 new MetricSample(BigDecimal.valueOf(t0 + 120), "+Inf"));
@@ -140,7 +162,7 @@ class QueryServiceTest {
                 LokiHttpClient.Direction.FORWARD, new BigDecimal("30.000"));
         assertTrue(text.startsWith("sum by (level) (rate({app=\"x\"}[1m])) — one, 2026-09-13 11:50:00–12:00:00 (Z), step 30s, 3 series:"), text);
         assertTrue(text.contains("""
-
+                
                 {level="error"}
                   11:50:00  0.5
                   11:51:00  NaN
@@ -161,14 +183,18 @@ class QueryServiceTest {
         range(new Streams(List.of()), List.of());
         assertThrows(LokiOperationException.class, () -> service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "5m"));
     }
-    @Test void niceStepCoversTheWindowWithAboutTwentyPoints() {
+
+    @Test
+    void niceStepCoversTheWindowWithAboutTwentyPoints() {
         assertEquals(Duration.ofSeconds(30), QueryService.niceStep(Duration.ofMinutes(10)));
         assertEquals(Duration.ofMinutes(5), QueryService.niceStep(Duration.ofHours(1)));
         assertEquals(Duration.ofHours(1), QueryService.niceStep(Duration.ofHours(20)));
         assertEquals(Duration.ofDays(1), QueryService.niceStep(Duration.ofDays(60)));
         assertEquals(Duration.ofSeconds(1), QueryService.niceStep(Duration.ofSeconds(5)));
     }
-    @Test void contextReadsLinesAroundTheMomentInTwoQueriesAndMarksTheTarget() {
+
+    @Test
+    void contextReadsLinesAroundTheMomentInTwoQueriesAndMarksTheTarget() {
         Instant at = Instant.parse("2026-09-13T11:59:59.123Z");
         String selector = "{app=\"x\"}";
         when(client.queryRange("one", selector, at.plusMillis(1).minusSeconds(7200), at.plusMillis(1), 2, LokiHttpClient.Direction.BACKWARD, null))
@@ -178,28 +204,30 @@ class QueryServiceTest {
                 .thenReturn(new QueryResponse(new Streams(List.of(new LogStream(Map.of("app", "x"), List.of(
                         entry(QueryTime.nanos(at.plusMillis(877)), "later"), entry(QueryTime.nanos(at.plusSeconds(5)), "too far"))))), null, List.of()));
         assertEquals("""
-                Context in {app="x"} around 2026-09-13 11:59:59.123 (Z) — one, lines: 1 before, 1 at that time, 1 after:
-                11:59:58.000 -     x  earlier
-                >>> 11:59:59.123 -     x  target
-                12:00:00.000 -     x  later
-                Earlier: repeat with time="2026-09-13T11:59:58.000+00:00", after=0. Later: repeat with time="2026-09-13T12:00:00.000+00:00", before=0. Full original line: queryLogs with raw=true and a narrow filter.""",
+                        Context in {app="x"} around 2026-09-13 11:59:59.123 (Z) — one, lines: 1 before, 1 at that time, 1 after:
+                        11:59:58.000 -     x  earlier
+                        >>> 11:59:59.123 -     x  target
+                        12:00:00.000 -     x  later
+                        Earlier: repeat with time="2026-09-13T11:59:58.000+00:00", after=0. Later: repeat with time="2026-09-13T12:00:00.000+00:00", before=0. Full original line: queryLogs with raw=true and a narrow filter.""",
                 service.context("one", selector, "11:59:59.123", 1, 1));
         // The same moment as RFC3339 with milliseconds; after=0 skips the forward query.
         assertTrue(service.context("one", selector, "2026-09-13T11:59:59.123Z", 1, 0).contains("\n>>> 11:59:59.123 -     x  target\nEarlier:"));
         verify(client, times(2)).queryRange(eq("one"), eq(selector), any(), any(), eq(2), eq(LokiHttpClient.Direction.BACKWARD), isNull());
         verify(client, times(1)).queryRange(eq("one"), eq(selector), any(), any(), eq(1), eq(LokiHttpClient.Direction.FORWARD), isNull());
     }
-    @Test void contextWithoutAnExactLineMarksThePlaceAndExplainsMissingNeighbours() {
+
+    @Test
+    void contextWithoutAnExactLineMarksThePlaceAndExplainsMissingNeighbours() {
         Instant at = Instant.parse("2026-09-13T11:59:59Z");
         when(client.queryRange(eq("one"), anyString(), any(), any(), anyInt(), eq(LokiHttpClient.Direction.BACKWARD), isNull()))
                 .thenReturn(new QueryResponse(new Streams(List.of(new LogStream(Map.of("app", "x"), List.of(entry(QueryTime.nanos(at.minusSeconds(90000)), "old"))))), null, List.of()));
         when(client.queryRange(eq("one"), anyString(), any(), any(), anyInt(), eq(LokiHttpClient.Direction.FORWARD), isNull()))
                 .thenReturn(new QueryResponse(new Streams(List.of()), null, List.of()));
         assertEquals("""
-                Context in {app="x"} around 2026-09-13 11:59:59 (Z) — one, lines: 1 before, 0 at that time, 0 after:
-                10:59:59.000 -     x  old
-                >>> (no line at exactly this time in {app="x"}; lines before and after it follow)
-                No earlier lines within 2h before this time. No later lines within 2h after this time. Full original line: queryLogs with raw=true and a narrow filter.""",
+                        Context in {app="x"} around 2026-09-13 11:59:59 (Z) — one, lines: 1 before, 0 at that time, 0 after:
+                        10:59:59.000 -     x  old
+                        >>> (no line at exactly this time in {app="x"}; lines before and after it follow)
+                        No earlier lines within 2h before this time. No later lines within 2h after this time. Full original line: queryLogs with raw=true and a narrow filter.""",
                 service.context("one", "{app=\"x\"}", "11:59:59", 2, 2));
         verify(client).queryRange("one", "{app=\"x\"}", at.plusSeconds(1).minusSeconds(7200), at.plusSeconds(1), 3, LokiHttpClient.Direction.BACKWARD, null);
         verify(client).queryRange("one", "{app=\"x\"}", at.plusSeconds(1), at.plusSeconds(7201), 2, LokiHttpClient.Direction.FORWARD, null);
@@ -222,7 +250,9 @@ class QueryServiceTest {
         assertTrue(burst.contains("lines: 0 before, 3 at that time, 0 after:"), burst);
         assertTrue(burst.contains("All 3 fetched lines are at this time; repeat with a larger before (e.g. before=15) to see what came before."), burst);
     }
-    @Test void contextValidatesBeforeNetworkAndKeepsTheTargetWhenTrimmingForTheBudget() {
+
+    @Test
+    void contextValidatesBeforeNetworkAndKeepsTheTargetWhenTrimmingForTheBudget() {
         assertTrue(assertThrows(LokiOperationException.class, () -> service.context("one", "{app=\"x\"} |= \"ERROR\"", "11:59:59", null, null)).getMessage().contains("stream selector only"));
         assertTrue(assertThrows(LokiOperationException.class, () -> service.context("one", "{app=\"x\"} | json", "11:59:59", null, null)).getMessage().contains("stream selector only"));
         assertTrue(assertThrows(LokiOperationException.class, () -> service.context("one", "", "11:59:59", null, null)).getMessage().contains("selector is required"));
@@ -234,10 +264,13 @@ class QueryServiceTest {
         verifyNoInteractions(client);
         // Connection two: 1024-byte budget, Moscow time. Defaults of 20/20 are trimmed evenly around the marked line.
         Instant at = Instant.parse("2026-09-13T08:59:59.123Z"); // 11:59:59.123 in Moscow
-        var before = new java.util.ArrayList<LogEntry>(); var after = new java.util.ArrayList<LogEntry>();
-        for (int i = 1; i <= 20; i++) before.add(entry(QueryTime.nanos(at.minusSeconds(i)), "before " + i + " " + "b".repeat(10)));
+        var before = new java.util.ArrayList<LogEntry>();
+        var after = new java.util.ArrayList<LogEntry>();
+        for (int i = 1; i <= 20; i++)
+            before.add(entry(QueryTime.nanos(at.minusSeconds(i)), "before " + i + " " + "b".repeat(10)));
         before.add(entry(QueryTime.nanos(at), "target line"));
-        for (int i = 1; i <= 20; i++) after.add(entry(QueryTime.nanos(at.plusSeconds(i)), "after " + i + " " + "a".repeat(10)));
+        for (int i = 1; i <= 20; i++)
+            after.add(entry(QueryTime.nanos(at.plusSeconds(i)), "after " + i + " " + "a".repeat(10)));
         when(client.queryRange(eq("two"), anyString(), any(), any(), eq(21), eq(LokiHttpClient.Direction.BACKWARD), isNull()))
                 .thenReturn(new QueryResponse(new Streams(List.of(new LogStream(Map.of("app", "x"), before))), null, List.of()));
         when(client.queryRange(eq("two"), anyString(), any(), any(), eq(20), eq(LokiHttpClient.Direction.FORWARD), isNull()))

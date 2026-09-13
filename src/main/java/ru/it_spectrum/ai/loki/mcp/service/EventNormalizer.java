@@ -1,22 +1,33 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
-import java.util.*;
-import java.util.regex.Pattern;
+import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
-import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
+
 import static ru.it_spectrum.ai.loki.mcp.service.DiscoveryLimits.*;
 
-/** Picks level, service, message, trace id and stack trace out of labels, structured metadata and a JSON line.
- * Only the line is parsed; nothing is guessed when a value is absent. */
+/**
+ * Picks level, service, message, trace id and stack trace out of labels, structured metadata and a JSON line.
+ * Only the line is parsed; nothing is guessed when a value is absent.
+ */
 public final class EventNormalizer {
-    public enum Format { JSON, PLAIN }
+    public enum Format {JSON, PLAIN}
+
     public record View(Format format, String level, String service, String message, String traceId, String stackTrace,
                        Map<String, String> jsonFields) {
-        public View { jsonFields = Map.copyOf(jsonFields); }
+        public View {
+            jsonFields = Map.copyOf(jsonFields);
+        }
     }
+
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
@@ -63,11 +74,17 @@ public final class EventNormalizer {
         return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, message, trace, stack, types);
     }
 
-    /** Fills dotted field paths with values (scalars) and JSON types. Returns PLAIN when the line is not a JSON object. */
+    /**
+     * Fills dotted field paths with values (scalars) and JSON types. Returns PLAIN when the line is not a JSON object.
+     */
     public Format parse(String line, Map<String, String> values, Map<String, String> types) {
         if (line.length() > PARSE_CHARACTERS || line.isEmpty() || line.charAt(0) != '{') return Format.PLAIN;
         JsonNode root;
-        try { root = MAPPER.readTree(line); } catch (Exception ignored) { return Format.PLAIN; }
+        try {
+            root = MAPPER.readTree(line);
+        } catch (Exception ignored) {
+            return Format.PLAIN;
+        }
         if (root == null || !root.isObject()) return Format.PLAIN;
         visit(root, "", 0, values, types);
         return Format.JSON;
@@ -83,7 +100,7 @@ public final class EventNormalizer {
                 else types.put(name, "object");
             } else {
                 types.put(name, value.isArray() ? "array" : value.isString() ? "string" : value.isNumber() ? "number"
-                        : value.isBoolean() ? "boolean" : "null");
+                                                                                          : value.isBoolean() ? "boolean" : "null");
                 if (value.isValueNode() && !value.isNull()) values.put(name, value.asString());
             }
         }
@@ -97,7 +114,9 @@ public final class EventNormalizer {
         return null;
     }
 
-    /** Field name as Loki's json parser exposes it after {@code | json}: nested keys joined and sanitized with underscores. */
+    /**
+     * Field name as Loki's json parser exposes it after {@code | json}: nested keys joined and sanitized with underscores.
+     */
     public static String lokiFieldName(String dottedPath) {
         String name = dottedPath.replaceAll("[^a-zA-Z0-9_]", "_");
         return Character.isDigit(name.charAt(0)) ? "_" + name : name;

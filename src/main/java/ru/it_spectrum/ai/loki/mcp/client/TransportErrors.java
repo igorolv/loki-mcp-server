@@ -3,11 +3,14 @@ package ru.it_spectrum.ai.loki.mcp.client;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
+
+import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_BAD_REQUEST;
 
 final class TransportErrors {
     private static final int QUERY_ERROR_CHARS = 400;
-    private TransportErrors() {}
+
+    private TransportErrors() {
+    }
 
     static LokiOperationException error(ErrorCode code) {
         String message = switch (code) {
@@ -34,12 +37,16 @@ final class TransportErrors {
         return new LokiOperationException(new ToolError(code, message, retryable));
     }
 
-    /** Loki's own wording of a query problem (HTTP 400 body). It describes the model's query, so it is passed on. */
+    /**
+     * Loki's own wording of a query problem (HTTP 400 body). It describes the model's query, so it is passed on.
+     */
     static LokiOperationException badRequest(String body) {
         return queryError(UPSTREAM_BAD_REQUEST, body);
     }
 
-    /** Bounded, control characters removed; a JSON body contributes only its "error" field. */
+    /**
+     * Bounded, control characters removed; a JSON body contributes only its "error" field.
+     */
     static LokiOperationException queryError(ErrorCode code, String upstreamText) {
         String text = upstreamText == null ? "" : upstreamText.strip();
         try {
@@ -49,7 +56,8 @@ final class TransportErrors {
         var clean = new StringBuilder();
         for (int i = 0; i < text.length() && clean.length() < QUERY_ERROR_CHARS; i++) {
             char c = text.charAt(i);
-            if (c == '\n' || c == '\t') clean.append(' '); else if (!Character.isISOControl(c)) clean.append(c);
+            if (c == '\n' || c == '\t') clean.append(' ');
+            else if (!Character.isISOControl(c)) clean.append(c);
         }
         String detail = clean.toString().strip();
         if (clean.length() >= QUERY_ERROR_CHARS) detail += "…";

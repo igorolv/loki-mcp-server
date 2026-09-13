@@ -6,9 +6,14 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 @Service
 public class ConnectionsService {
     private final ConnectionRegistry registry;
-    public ConnectionsService(ConnectionRegistry registry) { this.registry = registry; }
 
-    /** One line per connection: name, description and the operator's hint. Never URLs or credentials. */
+    public ConnectionsService(ConnectionRegistry registry) {
+        this.registry = registry;
+    }
+
+    /**
+     * One line per connection: name, description and the operator's hint. Never URLs or credentials.
+     */
     public String list() {
         var text = new StringBuilder();
         for (var connection : registry.list()) {

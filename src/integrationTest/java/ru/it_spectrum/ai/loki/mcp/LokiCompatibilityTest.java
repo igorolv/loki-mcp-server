@@ -1,10 +1,5 @@
 package ru.it_spectrum.ai.loki.mcp;
 
-import java.net.URI;
-import java.net.http.*;
-import java.nio.charset.StandardCharsets;
-import java.time.*;
-import java.util.List;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -12,12 +7,28 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
-import ru.it_spectrum.ai.loki.mcp.connection.*;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.service.*;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class LokiCompatibilityTest {
-    @ParameterizedTest @ValueSource(strings = {"2.6.1", "3.6.0"}) @Timeout(240)
+    @ParameterizedTest
+    @ValueSource(strings = {"2.6.1", "3.6.0"})
+    @Timeout(240)
     void logsCountsMetricsAndDiscoveryAgainstIsolatedLoki(String version) throws Exception {
         String config = """
                 auth_enabled: false

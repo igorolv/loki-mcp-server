@@ -3,7 +3,8 @@ package ru.it_spectrum.ai.loki.mcp.connection;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
 public record ConnectionAuth(Type type, String username, String password, String token) {
-    public enum Type { NONE, BASIC, BEARER }
+    public enum Type {NONE, BASIC, BEARER}
+
     public static final ConnectionAuth NONE = new ConnectionAuth(Type.NONE, null, null, null);
 
     public ConnectionAuth {
@@ -22,5 +23,8 @@ public record ConnectionAuth(Type type, String username, String password, String
         }
     }
 
-    @Override public String toString() { return "ConnectionAuth[redacted]"; }
+    @Override
+    public String toString() {
+        return "ConnectionAuth[redacted]";
+    }
 }

@@ -1,6 +1,5 @@
 package ru.it_spectrum.ai.loki.mcp.config;
 
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,7 +8,9 @@ import org.springframework.context.annotation.Configuration;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionsLoader;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
+
 import java.nio.file.Path;
+import java.util.stream.Collectors;
 
 @Configuration(proxyBeanMethods = false)
 public class ConnectionsConfig {

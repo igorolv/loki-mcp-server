@@ -1,13 +1,17 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
+import ru.it_spectrum.ai.loki.mcp.service.Errors;
+
 import java.net.URI;
 import java.time.ZoneId;
 import java.util.List;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
-/** hint is shown to the model by listConnections; serviceLabels are tried in order to name the service of a line. */
+/**
+ * hint is shown to the model by listConnections; serviceLabels are tried in order to name the service of a line.
+ */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
-                                   String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels) {
+                                   String tenant, ZoneId timezone, ConnectionLimits limits,
+                                   List<String> serviceLabels) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
             "applicationName", "service_name", "service", "app", "container", "job");
 
@@ -36,5 +40,8 @@ public record ConnectionDefinition(String name, String description, String hint,
         serviceLabels = List.copyOf(serviceLabels);
     }
 
-    @Override public String toString() { return "ConnectionDefinition[redacted]"; }
+    @Override
+    public String toString() {
+        return "ConnectionDefinition[redacted]";
+    }
 }

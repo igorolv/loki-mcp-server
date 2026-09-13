@@ -1,19 +1,24 @@
 package ru.it_spectrum.ai.loki.mcp.client;
 
+import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
-import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
 
-/** Strict about known data shapes; unknown object fields remain forward compatible. */
+import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
+import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_INVALID_RESPONSE;
+import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_QUERY_ERROR;
+
+/**
+ * Strict about known data shapes; unknown object fields remain forward compatible.
+ */
 final class LokiResponseDecoder {
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -134,14 +139,28 @@ final class LokiResponseDecoder {
     private List<String> warnings(JsonNode root) {
         return root.has("warnings") ? strings(root.path("warnings")) : List.of();
     }
+
     private List<String> strings(JsonNode node) {
         var values = new ArrayList<String>();
         for (JsonNode item : array(node)) values.add(string(item));
         return values;
     }
-    private JsonNode object(JsonNode node) { check(node != null && node.isObject()); return node; }
-    private JsonNode array(JsonNode node) { check(node != null && node.isArray()); return node; }
-    private String string(JsonNode node) { check(node != null && node.isString()); return node.stringValue(); }
+
+    private JsonNode object(JsonNode node) {
+        check(node != null && node.isObject());
+        return node;
+    }
+
+    private JsonNode array(JsonNode node) {
+        check(node != null && node.isArray());
+        return node;
+    }
+
+    private String string(JsonNode node) {
+        check(node != null && node.isString());
+        return node.stringValue();
+    }
+
     private void check(boolean condition) {
         if (!condition) throw TransportErrors.error(UPSTREAM_INVALID_RESPONSE);
     }

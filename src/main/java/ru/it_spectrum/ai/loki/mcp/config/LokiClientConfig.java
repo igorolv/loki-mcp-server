@@ -8,5 +8,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 @Configuration(proxyBeanMethods = false)
 public class LokiClientConfig {
     @Bean(destroyMethod = "close")
-    LokiHttpClient lokiHttpClient(ConnectionRegistry registry) { return new LokiHttpClient(registry); }
+    LokiHttpClient lokiHttpClient(ConnectionRegistry registry) {
+        return new LokiHttpClient(registry);
+    }
 }

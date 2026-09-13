@@ -1,19 +1,20 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
+import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.json.JsonMapper;
+
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.net.URI;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
 public final class ConnectionsLoader {
     private static final int MAX_FILE_BYTES = 1024 * 1024;
@@ -25,7 +26,8 @@ public final class ConnectionsLoader {
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
 
-    private ConnectionsLoader() {}
+    private ConnectionsLoader() {
+    }
 
     public static List<ConnectionDefinition> load(Path path, UnaryOperator<String> environment) {
         try (var input = Files.newInputStream(path)) {
@@ -61,7 +63,9 @@ public final class ConnectionsLoader {
         }
     }
 
-    private static int or(Integer value, int fallback) { return value == null ? fallback : value; }
+    private static int or(Integer value, int fallback) {
+        return value == null ? fallback : value;
+    }
 
     private static String resolve(String value, UnaryOperator<String> environment) {
         if (value == null) return null;
@@ -79,11 +83,18 @@ public final class ConnectionsLoader {
         return result.toString();
     }
 
-    private record FileConfig(Map<String, Entry> connections) {}
+    private record FileConfig(Map<String, Entry> connections) {
+    }
+
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
-                         Limits limits, List<String> serviceLabels) {}
-    private record Auth(ConnectionAuth.Type type, String username, String password, String token) {}
+                         Limits limits, List<String> serviceLabels) {
+    }
+
+    private record Auth(ConnectionAuth.Type type, String username, String password, String token) {
+    }
+
     private record Limits(Integer connectTimeoutMs, Integer requestTimeoutMs, Integer maxHttpResponseBytes,
                           Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,
-                          Integer maxMetricSeries, Integer maxMetricPoints) {}
+                          Integer maxMetricSeries, Integer maxMetricPoints) {
+    }
 }

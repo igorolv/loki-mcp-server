@@ -4,7 +4,8 @@ import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 
 public final class Errors {
-    private Errors() {}
+    private Errors() {
+    }
 
     public static LokiOperationException configuration() {
         return failure(ErrorCode.CONFIGURATION_ERROR,
@@ -15,8 +16,12 @@ public final class Errors {
         return new LokiOperationException(new ToolError(code, safeMessage, false));
     }
 
-    /** Argument problems say what to change; they never echo secrets, only the model's own values. */
-    public static LokiOperationException invalid(String whatToDo) { return failure(ErrorCode.INVALID_ARGUMENT, whatToDo); }
+    /**
+     * Argument problems say what to change; they never echo secrets, only the model's own values.
+     */
+    public static LokiOperationException invalid(String whatToDo) {
+        return failure(ErrorCode.INVALID_ARGUMENT, whatToDo);
+    }
 
     public static ToolError from(Exception exception) {
         if (exception instanceof LokiOperationException known) {

@@ -4,10 +4,15 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import ru.it_spectrum.ai.loki.mcp.service.DiscoveryService;
 
-/** Registered only through the safe QueryToolsConfig wrapper. */
+/**
+ * Registered only through the safe QueryToolsConfig wrapper.
+ */
 public class DiscoveryTools {
     private final DiscoveryService service;
-    public DiscoveryTools(DiscoveryService service) { this.service = service; }
+
+    public DiscoveryTools(DiscoveryService service) {
+        this.service = service;
+    }
 
     @McpTool(name = "discoverLogs",
             description = "See what logs exist before writing a query: label names and their values, whether lines are JSON or plain text, "

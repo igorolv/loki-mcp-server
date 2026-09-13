@@ -1,31 +1,39 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.*;
+import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.JSON;
+import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.PLAIN;
 
 class EventNormalizerTest {
-    @Test void detectedLevelUnknownIsNoLevel() {
+    @Test
+    void detectedLevelUnknownIsNoLevel() {
         var normalizer = new EventNormalizer();
         var unknown = new LogEvent("1", Map.of("app", "x"), "plain line without level", Map.of("detected_level", "unknown"));
         assertNull(normalizer.view(unknown, List.of("app")).level());
         var error = new LogEvent("1", Map.of("app", "x"), "plain line", Map.of("detected_level", "error"));
         assertEquals("ERROR", normalizer.view(error, List.of("app")).level());
     }
+
     private final EventNormalizer normalizer = new EventNormalizer();
+
     private static LogEvent event(Map<String, String> labels, String line, Map<String, String> metadata) {
         return new LogEvent("1700000000123456789", labels, line, metadata);
     }
+
     private EventNormalizer.View view(Map<String, String> labels, String line) {
         return normalizer.view(event(labels, line, Map.of()), ConnectionDefinition.DEFAULT_SERVICE_LABELS);
     }
 
-    @Test void ecsJsonYieldsLevelServiceMessageTraceAndStackWithLokiFieldNames() {
+    @Test
+    void ecsJsonYieldsLevelServiceMessageTraceAndStackWithLokiFieldNames() {
         var view = view(Map.of(), """
                 {"service":{"name":"backend"},"log":{"level":"error"},"@timestamp":"2026-01-01T00:00:00Z",
                  "message":"Ошибка 🐈","trace":{"id":"abc123"},"error":{"stack_trace":"java.io.IOException: x\\n\\tat a.b(C.java:1)"},
@@ -45,7 +53,9 @@ class EventNormalizerTest {
         assertEquals("_timestamp", EventNormalizer.lokiFieldName("@timestamp"));
         assertEquals("_1abc", EventNormalizer.lokiFieldName("1abc"));
     }
-    @Test void flatDottedKeysAndLabelsTakePriorityOverLineFields() {
+
+    @Test
+    void flatDottedKeysAndLabelsTakePriorityOverLineFields() {
         var view = view(Map.of("applicationName", "from-label", "level", "warn"),
                 "{\"service.name\":\"from-line\",\"log.level\":\"ERROR\",\"msg\":\"hello\"}");
         assertEquals("WARN", view.level());
@@ -57,7 +67,9 @@ class EventNormalizerTest {
         assertEquals("INFO", metadata.level());
         assertEquals("t-1", metadata.traceId());
     }
-    @Test void plainTextKeepsWholeLineDetectsLevelAndSplitsMultilineTraces() {
+
+    @Test
+    void plainTextKeepsWholeLineDetectsLevelAndSplitsMultilineTraces() {
         var plain = view(Map.of(), "2026-09-13 10:00:00 WARN  [main] Something happened");
         assertEquals(PLAIN, plain.format());
         assertEquals("WARN", plain.level());
@@ -74,16 +86,22 @@ class EventNormalizerTest {
             assertEquals(PLAIN, view(Map.of(), line).format(), line);
         assertEquals("{broken", view(Map.of(), "{broken").message());
     }
-    @Test void jsonWithoutKnownFieldsFallsBackToTheLineAndBudgetsAreApplied() {
+
+    @Test
+    void jsonWithoutKnownFieldsFallsBackToTheLineAndBudgetsAreApplied() {
         var view = view(Map.of(), "{\"foo\":\"bar\"}");
-        assertNull(view.level()); assertNull(view.service()); assertNull(view.traceId());
+        assertNull(view.level());
+        assertNull(view.service());
+        assertNull(view.traceId());
         assertEquals("{\"foo\":\"bar\"}", view.message());
         assertEquals(PLAIN, view(Map.of(), "{".repeat(DiscoveryLimits.PARSE_CHARACTERS + 1)).format());
-        var values = new LinkedHashMap<String, String>(); var types = new LinkedHashMap<String, String>();
+        var values = new LinkedHashMap<String, String>();
+        var types = new LinkedHashMap<String, String>();
         normalizer.parse("{\"x\":".repeat(25) + "1" + "}".repeat(25), values, types);
         assertTrue(types.containsKey("x".repeat(1) + ".x".repeat(DiscoveryLimits.JSON_DEPTH - 1)));
         String wide = java.util.stream.IntStream.range(0, 150).mapToObj(i -> "\"f" + i + "\":1").collect(java.util.stream.Collectors.joining(",", "{", "}"));
-        types.clear(); values.clear();
+        types.clear();
+        values.clear();
         normalizer.parse(wide, values, types);
         assertEquals(DiscoveryLimits.FIELDS, types.size());
     }

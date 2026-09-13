@@ -1,15 +1,23 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
-/** Central bounded discovery policy; HTTP bytes and interval remain connection-specific. */
+/**
+ * Central bounded discovery policy; HTTP bytes and interval remain connection-specific.
+ */
 public final class DiscoveryLimits {
-    private DiscoveryLimits() {}
+    private DiscoveryLimits() {
+    }
+
     public static final int SAMPLE_ENTRIES = 20;
     public static final int SERIES = 2000;
     public static final int LABELS = 30;
-    /** Above this many distinct values a label is reported as high cardinality without listing. */
+    /**
+     * Above this many distinct values a label is reported as high cardinality without listing.
+     */
     public static final int VALUES_PER_LABEL = 50;
     public static final int VALUES_LISTED = 10;
-    /** discoverLogs(label=...) lists this many values before asking for a narrower selector. */
+    /**
+     * discoverLogs(label=...) lists this many values before asking for a narrower selector.
+     */
     public static final int LABEL_VALUES = 200;
     public static final int FIELDS = 100;
     public static final int FIELDS_LISTED = 30;

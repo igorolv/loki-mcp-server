@@ -7,15 +7,18 @@ import org.junit.jupiter.params.provider.ValueSource;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConnectionsTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
     private List<ConnectionDefinition> load(String json) throws Exception {
         Path path = directory.resolve("connections.json");
@@ -28,7 +31,8 @@ class ConnectionsTest {
         });
     }
 
-    @Test void loadsIndependentDefinitionsAndDefaultsWithoutConnecting() throws Exception {
+    @Test
+    void loadsIndependentDefinitionsAndDefaultsWithoutConnecting() throws Exception {
         var entries = load("""
                 {"connections":{
                   "a":{"url":"${URL}","auth":{"type":"BEARER","token":"${TOKEN}"},
@@ -57,7 +61,8 @@ class ConnectionsTest {
         assertThrows(LokiOperationException.class, () -> new ConnectionRegistry(List.of(entries.getFirst(), entries.getFirst())));
     }
 
-    @Test void requiresExplicitExactNameEvenWithSingleConnection() throws Exception {
+    @Test
+    void requiresExplicitExactNameEvenWithSingleConnection() throws Exception {
         var registry = new ConnectionRegistry(load("""
                 {"connections":{"only":{"url":"http://localhost:1"}}}
                 """));
@@ -111,20 +116,23 @@ class ConnectionsTest {
                 "{\"connections\":{\"a\":{\"url\":\"" + url + "\"}}}")));
     }
 
-    @Test void rejectsMissingAndOversizedFiles() throws Exception {
+    @Test
+    void rejectsMissingAndOversizedFiles() throws Exception {
         assertSafeConfigurationError(assertThrows(LokiOperationException.class,
                 () -> ConnectionsLoader.load(directory.resolve("SECRET-missing"), key -> null)));
         assertSafeConfigurationError(assertThrows(LokiOperationException.class, () -> load(" ".repeat(1024 * 1024 + 1))));
     }
 
-    @Test void unexpectedErrorsHaveControlledPayload() {
+    @Test
+    void unexpectedErrorsHaveControlledPayload() {
         var error = Errors.from(new IllegalArgumentException("SECRET"));
         assertEquals(ErrorCode.INTERNAL_ERROR, error.code());
         assertFalse(error.message().contains("SECRET"));
         assertFalse(error.retryable());
     }
 
-    @ParameterizedTest @ValueSource(strings = {"\"maxMetricSeries\":0", "\"maxMetricPoints\":-1",
+    @ParameterizedTest
+    @ValueSource(strings = {"\"maxMetricSeries\":0", "\"maxMetricPoints\":-1",
             "\"maxMetricPoints\":1.5", "\"maxMetricSeries\":\"2\""})
     void rejectsInvalidMetricLimits(String limits) {
         assertSafeConfigurationError(assertThrows(LokiOperationException.class, () -> load(

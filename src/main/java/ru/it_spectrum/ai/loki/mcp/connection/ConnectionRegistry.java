@@ -2,12 +2,15 @@ package ru.it_spectrum.ai.loki.mcp.connection;
 
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Immutable startup snapshot. Resolving a connection never probes an endpoint. */
+/**
+ * Immutable startup snapshot. Resolving a connection never probes an endpoint.
+ */
 public final class ConnectionRegistry {
     private final Map<String, ConnectionDefinition> definitions;
 
@@ -20,7 +23,9 @@ public final class ConnectionRegistry {
         definitions = Collections.unmodifiableMap(index);
     }
 
-    public List<ConnectionDefinition> list() { return List.copyOf(definitions.values()); }
+    public List<ConnectionDefinition> list() {
+        return List.copyOf(definitions.values());
+    }
 
     public ConnectionDefinition require(String name) {
         if (name == null || name.isBlank()) {

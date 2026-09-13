@@ -10,10 +10,14 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import ru.it_spectrum.ai.loki.mcp.connection.*;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -31,8 +35,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
+import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.QueryResponse;
+import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.Streams;
 import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
 
 @Timeout(15)
@@ -47,7 +53,8 @@ class LokiHttpClientTest {
     private volatile HttpHandler handler;
     private final CountDownLatch release = new CountDownLatch(1);
 
-    @BeforeEach void start() throws IOException {
+    @BeforeEach
+    void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
@@ -64,7 +71,8 @@ class LokiHttpClientTest {
         server.start();
     }
 
-    @AfterEach void stop() {
+    @AfterEach
+    void stop() {
         release.countDown();
         clients.forEach(LokiHttpClient::close);
         server.stop(0);
@@ -77,19 +85,23 @@ class LokiHttpClientTest {
                 + server.getAddress().getPort() + prefix), auth, tenant, ZoneId.of("UTC"),
                 new ConnectionLimits(200, timeout, bodyLimit, 1024, 100, 3600));
     }
+
     private LokiHttpClient client(ConnectionDefinition... definitions) {
         var client = new LokiHttpClient(new ConnectionRegistry(List.of(definitions)));
         clients.add(client);
         return client;
     }
+
     private LokiHttpClient plain(int bodyLimit, int timeout) {
         return client(definition("local", "", ConnectionAuth.NONE, null, bodyLimit, timeout));
     }
+
     private QueryResponse range(LokiHttpClient client) {
         return client.queryRange("local", "{app=\"test\"}", START, END, 10, LokiHttpClient.Direction.BACKWARD, null);
     }
 
-    @Test void sendsEncodedReadOnlyRequestsWithPrefixAuthAndExactTimes() throws Exception {
+    @Test
+    void sendsEncodedReadOnlyRequestsWithPrefixAuthAndExactTimes() throws Exception {
         var client = client(definition("local", "/prefix%20space/", new ConnectionAuth(ConnectionAuth.Type.BASIC,
                 "reader", "secret-password", null), "tenant-a", 8192, 3000));
         String query = "{app=\"a+b & / ? # %\"} |= \"ошибка 😀\"";
@@ -115,7 +127,8 @@ class LokiHttpClientTest {
         assertNull(parameter(request, "start"));
     }
 
-    @Test void requestsMetadataWithExplicitWindowAndRepeatedSelectors() throws Exception {
+    @Test
+    void requestsMetadataWithExplicitWindowAndRepeatedSelectors() throws Exception {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, 200, "{\"status\":\"success\",\"data\":[\"pod\",\"app\"]}", false);
         assertEquals(List.of("pod", "app"), client.labels("local", START, END, null).values());
@@ -135,12 +148,14 @@ class LokiHttpClientTest {
         assertEquals(selectors, parameters(request, "match[]"));
     }
 
-    @Test void keepsAuthorizationTenantAndFailuresIsolatedAcrossConnections() throws Exception {
+    @Test
+    void keepsAuthorizationTenantAndFailuresIsolatedAcrossConnections() throws Exception {
         var client = client(
                 definition("a", "/a", new ConnectionAuth(ConnectionAuth.Type.BEARER, null, null, "secret-token"), "tenant-a", 8192, 3000),
                 definition("b", "/b", ConnectionAuth.NONE, null, 8192, 3000));
         handler = exchange -> {
-            if (exchange.getRequestURI().getPath().startsWith("/a")) respond(exchange, 401, "SECRET secret-token tenant-a", false);
+            if (exchange.getRequestURI().getPath().startsWith("/a"))
+                respond(exchange, 401, "SECRET secret-token tenant-a", false);
             else respond(exchange, 200, EMPTY, false);
         };
         var failed = executor.submit(() -> assertThrows(LokiOperationException.class, () -> client.queryInstant("a", "SECRET query", START)));
@@ -161,7 +176,8 @@ class LokiHttpClientTest {
         assertNotNull(client.queryInstant("a", "valid", START));
     }
 
-    @Test void badRequestBodyIsPassedOnAsTheQueryError() {
+    @Test
+    void badRequestBodyIsPassedOnAsTheQueryError() {
         handler = exchange -> respond(exchange, 400, "parse error at line 1, col 23: syntax error: unexpected IDENTIFIER\n\u0007", false);
         var error = assertThrows(LokiOperationException.class, () -> range(plain(256, 3000)));
         assertEquals(UPSTREAM_BAD_REQUEST, error.error().code());
@@ -189,20 +205,23 @@ class LokiHttpClientTest {
         assertEquals(1, requests.size(), "No redirect or retry request expected");
     }
 
-    @Test void unavailableMetadataEndpointDoesNotDisableQuery() {
+    @Test
+    void unavailableMetadataEndpointDoesNotDisableQuery() {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, exchange.getRequestURI().getPath().endsWith("labels") ? 404 : 200, EMPTY, false);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.labels("local", START, END, null)), ENDPOINT_UNAVAILABLE);
         assertNotNull(range(client));
     }
 
-    @ParameterizedTest @ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void enforcesBodyBudgetWithAndWithoutContentLength(boolean chunked) {
         handler = exchange -> respond(exchange, 200, "SECRET".repeat(1000), chunked);
         assertSafe(assertThrows(LokiOperationException.class, () -> range(plain(100, 3000))), UPSTREAM_RESPONSE_TOO_LARGE);
     }
 
-    @Test void measuresBudgetInUtf8BytesAndAcceptsExactBoundary() {
+    @Test
+    void measuresBudgetInUtf8BytesAndAcceptsExactBoundary() {
         String json = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{},\"values\":[[\"1\",\"😀漢字\"]]}]}}";
         handler = exchange -> respond(exchange, 200, json, true);
         int length = json.getBytes(StandardCharsets.UTF_8).length;
@@ -210,7 +229,8 @@ class LokiHttpClientTest {
         assertSafe(assertThrows(LokiOperationException.class, () -> range(plain(length - 1, 3000))), UPSTREAM_RESPONSE_TOO_LARGE);
     }
 
-    @ParameterizedTest @ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void deadlineCoversBothHeadersAndStalledBody(boolean sendHeaders) {
         handler = exchange -> {
             if (sendHeaders) {
@@ -225,10 +245,13 @@ class LokiHttpClientTest {
                 assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_TIMEOUT));
     }
 
-    @Test void connectTimeoutCoversStalledTlsHandshake() throws Exception {
+    @Test
+    void connectTimeoutCoversStalledTlsHandshake() throws Exception {
         try (var socket = new ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
             var accepted = executor.submit(() -> {
-                try (var peer = socket.accept()) { awaitRelease(); }
+                try (var peer = socket.accept()) {
+                    awaitRelease();
+                }
                 return null;
             });
             var connection = new ConnectionDefinition("local", null, URI.create("https://127.0.0.1:" + socket.getLocalPort()),
@@ -241,9 +264,13 @@ class LokiHttpClientTest {
         }
     }
 
-    @Test void interruptionCancelsRequestAndPreservesInterruptFlag() throws Exception {
+    @Test
+    void interruptionCancelsRequestAndPreservesInterruptFlag() throws Exception {
         var entered = new CountDownLatch(1);
-        handler = exchange -> { entered.countDown(); awaitRelease(); };
+        handler = exchange -> {
+            entered.countDown();
+            awaitRelease();
+        };
         var result = new CompletableFuture<Boolean>();
         var client = plain(8192, 6000);
         Thread worker = Thread.ofVirtual().start(() -> {
@@ -251,16 +278,21 @@ class LokiHttpClientTest {
                 var error = assertThrows(LokiOperationException.class, () -> range(client));
                 assertSafe(error, OPERATION_CANCELLED);
                 result.complete(Thread.currentThread().isInterrupted());
-            } catch (Throwable failure) { result.completeExceptionally(failure); }
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
         });
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             worker.interrupt();
             assertTrue(result.get(2, TimeUnit.SECONDS));
-        } finally { worker.interrupt(); }
+        } finally {
+            worker.interrupt();
+        }
     }
 
-    @Test void rejectsMalformedJsonApiErrorsAndUnexpectedCompression() {
+    @Test
+    void rejectsMalformedJsonApiErrorsAndUnexpectedCompression() {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, 200, "<html>SECRET</html>", false);
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_INVALID_RESPONSE);
@@ -275,7 +307,8 @@ class LokiHttpClientTest {
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_INVALID_RESPONSE);
     }
 
-    @Test void invalidArgumentsAndConnectionNamesDoNotSendRequests() {
+    @Test
+    void invalidArgumentsAndConnectionNamesDoNotSendRequests() {
         var client = plain(8192, 3000);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryInstant(null, "q", START)), CONNECTION_REQUIRED);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryInstant("unknown", "q", START)), UNKNOWN_CONNECTION);
@@ -293,7 +326,8 @@ class LokiHttpClientTest {
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), OPERATION_CANCELLED);
     }
 
-    @Test void connectionRefusalIsSafe() {
+    @Test
+    void connectionRefusalIsSafe() {
         var client = plain(8192, 3000);
         server.stop(0);
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_CONNECTION_ERROR);
@@ -302,14 +336,22 @@ class LokiHttpClientTest {
     private static void respond(HttpExchange exchange, int status, String body, boolean chunked) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
-        if (status == 204) { exchange.sendResponseHeaders(status, -1); return; }
+        if (status == 204) {
+            exchange.sendResponseHeaders(status, -1);
+            return;
+        }
         exchange.sendResponseHeaders(status, chunked ? 0 : bytes.length);
         exchange.getResponseBody().write(bytes);
     }
+
     private void awaitRelease() {
-        try { release.await(10, TimeUnit.SECONDS); }
-        catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        try {
+            release.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
     }
+
     private List<String> parameters(Captured request, String key) {
         var values = new ArrayList<String>();
         for (String pair : request.uri().getRawQuery().split("&")) {
@@ -320,9 +362,11 @@ class LokiHttpClientTest {
         }
         return values;
     }
+
     private String parameter(Captured request, String key) {
         return parameters(request, key).stream().findFirst().orElse(null);
     }
+
     private void assertSafe(LokiOperationException error, ErrorCode code) {
         assertEquals(code, error.error().code());
         assertEquals(error.error(), Errors.from(error));
@@ -333,5 +377,7 @@ class LokiHttpClientTest {
             assertFalse(stack.toString().contains(secret), "Sensitive data in exception");
         }
     }
-    private record Captured(String method, URI uri, String auth, String tenant, String accept) {}
+
+    private record Captured(String method, URI uri, String auth, String tenant, String accept) {
+    }
 }

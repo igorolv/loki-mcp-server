@@ -1,5 +1,8 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -10,19 +13,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Function;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
-/** Renders log lines as text a small model reads directly: time, level, service, message, compact stack trace. */
+/**
+ * Renders log lines as text a small model reads directly: time, level, service, message, compact stack trace.
+ */
 public final class LogText {
     public static final int MESSAGE_CHARS = 400;
     public static final int RAW_CHARS = 4000;
     public static final int FRAMES = 5;
-    /** Reserved for the JSON-RPC envelope, escaping and the request id around the text payload. */
+    /**
+     * Reserved for the JSON-RPC envelope, escaping and the request id around the text payload.
+     */
     public static final int ENVELOPE_BYTES = 512;
     public static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
     public static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private LogText() {}
+
+    private LogText() {
+    }
 
     /**
      * One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines.
@@ -30,7 +37,8 @@ public final class LogText {
      */
     public static String line(LogEvent event, EventNormalizer.View view, ZoneId zone, boolean raw) {
         var text = new StringBuilder(TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone)));
-        if (raw) return text.append(' ').append(labels(event.labels())).append("  ").append(truncate(event.line(), RAW_CHARS)).toString();
+        if (raw)
+            return text.append(' ').append(labels(event.labels())).append("  ").append(truncate(event.line(), RAW_CHARS)).toString();
         text.append(' ').append(String.format("%-5s", view.level() == null ? "-" : view.level()));
         text.append(' ').append(view.service() == null ? "-" : view.service()).append("  ");
         text.append(truncate(view.message().replace('\n', ' ').replace("\r", ""), MESSAGE_CHARS));
@@ -41,7 +49,9 @@ public final class LogText {
         return text.toString();
     }
 
-    /** Keeps each exception header, its first frames and every "Caused by" with one frame; drops the rest with a count. */
+    /**
+     * Keeps each exception header, its first frames and every "Caused by" with one frame; drops the rest with a count.
+     */
     public static List<String> compactStackTrace(String stack) {
         var result = new ArrayList<String>();
         int kept = 0, skipped = 0, allowed = FRAMES;
@@ -51,12 +61,15 @@ public final class LogText {
             boolean frame = line.startsWith("at ");
             if (!frame) {
                 if (skipped > 0) result.add("... (" + skipped + " frames skipped)");
-                skipped = 0; kept = 0;
+                skipped = 0;
+                kept = 0;
                 boolean cause = line.startsWith("Caused by:") || line.startsWith("Suppressed:");
                 allowed = cause ? 1 : FRAMES;
                 result.add(truncate(line, MESSAGE_CHARS));
-            } else if (kept < allowed) { result.add(line); kept++; }
-            else skipped++;
+            } else if (kept < allowed) {
+                result.add(line);
+                kept++;
+            } else skipped++;
         }
         if (skipped > 0) result.add("... (" + skipped + " frames skipped)");
         return result;
@@ -81,7 +94,9 @@ public final class LogText {
         return start.format(DATE_TIME) + "–" + endText + " (" + start.getOffset() + ")";
     }
 
-    /** Inserts a date marker where consecutive chronological events cross midnight. */
+    /**
+     * Inserts a date marker where consecutive chronological events cross midnight.
+     */
     public static List<String> withDateMarkers(List<LogEvent> events, List<String> lines, ZoneId zone) {
         var result = new ArrayList<String>(lines.size());
         LocalDate previous = null;
@@ -94,9 +109,13 @@ public final class LogText {
         return result;
     }
 
-    public static int bytes(CharSequence text) { return text.toString().getBytes(StandardCharsets.UTF_8).length; }
+    public static int bytes(CharSequence text) {
+        return text.toString().getBytes(StandardCharsets.UTF_8).length;
+    }
 
-    /** Drops the oldest lines (front of the list) until header + lines + footer fit the byte budget. */
+    /**
+     * Drops the oldest lines (front of the list) until header + lines + footer fit the byte budget.
+     */
     public static String fit(String header, List<String> lines, Function<Integer, String> footerForDropped, int budgetBytes) {
         var kept = new ArrayList<>(lines);
         int dropped = 0;
@@ -118,5 +137,7 @@ public final class LogText {
         return text.toString();
     }
 
-    public static String iso(Instant time, ZoneId zone) { return QueryTime.iso(time, zone); }
+    public static String iso(Instant time, ZoneId zone) {
+        return QueryTime.iso(time, zone);
+    }
 }

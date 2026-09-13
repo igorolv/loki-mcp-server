@@ -2,24 +2,24 @@ package ru.it_spectrum.ai.loki.mcp;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import java.util.Map;
-import java.util.List;
-import java.util.stream.StreamSupport;
 
 import java.io.BufferedWriter;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,7 +40,7 @@ class StdioSmokeTest {
                 String path = exchange.getRequestURI().getPath();
                 String query = java.net.URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
                 int status = query.contains("fail") ? 403 : query.contains("broken") ? 400
-                        : path.endsWith("/series") && query.contains("blocked") ? 404 : 200;
+                                                            : path.endsWith("/series") && query.contains("blocked") ? 404 : 200;
                 String body;
                 if (status == 403) body = "SECRET_TOKEN upstream error";
                 else if (status == 400) body = "parse error at line 1, col 9: syntax error";
@@ -48,13 +48,16 @@ class StdioSmokeTest {
                 else if (path.endsWith("/series")) body = "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
                 else if (path.endsWith("/labels")) body = "{\"status\":\"success\",\"data\":[\"kind\"]}";
                 else if (path.endsWith("/values")) body = "{\"status\":\"success\",\"data\":[\"test\"]}";
-                else if (path.endsWith("/query")) body = "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"3\"]}]}}";
-                else if (query.contains("step=")) body = "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}";
+                else if (path.endsWith("/query"))
+                    body = "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"3\"]}]}}";
+                else if (query.contains("step="))
+                    body = "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"values\":[[1700000000.125,\"NaN\"]]}],\"stats\":{\"summary\":{\"totalLinesProcessed\":200}}}}";
                 else if (query.contains("large")) body = mapper.writeValueAsString(Map.of("status", "success", "data",
                         Map.of("resultType", "streams", "result", List.of(Map.of("stream", Map.of("kind", "test"),
                                 "values", java.util.stream.IntStream.range(0, 12).mapToObj(i -> List.of("170000000012345678" + (i % 10),
                                         mapper.writeValueAsString(Map.of("message", "Ошибка 🐈\"\\\n".repeat(1000))))).toList())))));
-                else body = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\",\"level\":\"error\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
+                else
+                    body = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\",\"level\":\"error\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(status, bytes.length);
                 exchange.getResponseBody().write(bytes);
@@ -166,10 +169,14 @@ class StdioSmokeTest {
                 String name = i % 4 == 2 ? "queryMetrics" : i % 4 == 3 ? "discoverLogs" : "queryLogs";
                 var args = new HashMap<String, Object>();
                 args.put("connection", i % 4 == 0 ? "tiny" : "test");
-                args.put("start", "1700000000000000000"); args.put("end", "1700000001000000000");
+                args.put("start", "1700000000000000000");
+                args.put("end", "1700000001000000000");
                 if (name.equals("queryMetrics")) args.put("query", "sum(rate({kind=\"large\"}[1m]))");
                 else if (name.equals("discoverLogs")) args.put("selector", "{kind=\"large\"}");
-                else { args.put("query", "{kind=\"large\"}"); args.put("limit", 12); }
+                else {
+                    args.put("query", "{kind=\"large\"}");
+                    args.put("limit", 12);
+                }
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", "budget🐈\"\\" + i,
                         "method", "tools/call", "params", Map.of("name", name, "arguments", args))));
             }
@@ -193,14 +200,17 @@ class StdioSmokeTest {
                         assertFalse(text.contains("\"message\""), text);
                     }
                     if (index % 4 == 2) assertTrue(text.contains("{kind=\"test\"}\n  ") && text.contains("NaN"), text);
-                    if (index % 4 == 3) assertTrue(text.startsWith("Streams matching {kind=\"large\"} in 2023-11-14") && text.contains("Next: use countLogs"), text);
+                    if (index % 4 == 3)
+                        assertTrue(text.startsWith("Streams matching {kind=\"large\"} in 2023-11-14") && text.contains("Next: use countLogs"), text);
                 }
             }
             for (int id = 35; id < 51; id++) {
                 String name = id % 4 == 0 ? "queryLogs" : id % 4 == 1 ? "countLogs" : id % 4 == 2 ? "queryMetrics" : "queryLogs";
                 var arguments = new HashMap<String, Object>(Map.of("connection", "test", "start", "1700000000000000000", "end", "1700000001000000000"));
-                if (name.equals("queryMetrics")) { arguments.put("query", "count_over_time({kind=\"test\"}[1s])"); arguments.put("step", "1s"); }
-                else arguments.put("query", "{kind=\"test\"}");
+                if (name.equals("queryMetrics")) {
+                    arguments.put("query", "count_over_time({kind=\"test\"}[1s])");
+                    arguments.put("step", "1s");
+                } else arguments.put("query", "{kind=\"test\"}");
                 if (id % 8 == 1) arguments.put("groupBy", "kind");
                 if (id % 8 == 7) arguments.put("raw", true);
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",

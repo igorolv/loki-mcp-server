@@ -4,12 +4,17 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import ru.it_spectrum.ai.loki.mcp.service.QueryService;
 
-/** Registered through QueryToolsConfig, which turns every failure into a short safe text error. */
+/**
+ * Registered through QueryToolsConfig, which turns every failure into a short safe text error.
+ */
 public class QueryTools {
     static final String START = "Window start. Default \"now-1h\". Examples: \"now-15m\", \"now-2d\", \"2026-09-13T10:00:00+03:00\".";
     static final String END = "Window end. Default \"now\". Same formats as start; use the value from a previous footer to read older lines.";
     private final QueryService service;
-    public QueryTools(QueryService service) { this.service = service; }
+
+    public QueryTools(QueryService service) {
+        this.service = service;
+    }
 
     @McpTool(name = "queryLogs",
             description = "Read log lines matching a LogQL log query, newest first within the window. Each line is printed as "
