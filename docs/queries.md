@@ -1,19 +1,20 @@
-# Чтение логов, подсчёт и метрики
+# Reading logs, counting, summaries and metrics
 
-Контракт S09: все инструменты возвращают один текстовый `content`. Output schemas,
-`structuredContent`, курсоры и проекция полей S06/S08 удалены. Целевой потребитель —
-модель класса DeepSeek Flash (целевая — DeepSeek 4.1 Flash), которая видит только описания инструментов,
-`instructions` сервера и текст ответа.
+Every tool returns a single text `content`. There are no output schemas, no
+`structuredContent`, no cursors and no field projections. The consumer is a small model
+(target: DeepSeek 4.1 Flash) that sees only the tool descriptions, the server
+`instructions` and the response text.
 
-Общие параметры: `connection` обязателен (имя из `listConnections`); `start`
-по умолчанию `now-1h`, `end` — `now`. Форматы времени: `now`, `now-15m` (ns/ms/s/m/h/d,
-допустима краткая форма `15m`), RFC3339 с offset, локальное время в timezone подключения
-или epoch nanoseconds. Окно ограничено `maxIntervalSeconds` подключения.
+Common parameters: `connection` is required (a name from `listConnections`); `start`
+defaults to `now-1h`, `end` to `now`. Time formats: `now`, `now-15m` (`ns/ms/s/m/h/d`, the
+short form `15m` is accepted), RFC3339 with an offset, local time in the connection's
+timezone, or epoch nanoseconds. The window is limited by the connection's
+`maxIntervalSeconds`.
 
 ## queryLogs(connection, query, start, end, limit = 50, raw = false)
 
-Один backward-запрос `query_range` с `limit` (не больше `maxEntries`). Строки печатаются
-в хронологическом порядке:
+One backward `query_range` request with `limit` (at most `maxEntries`). Lines are printed
+in chronological order:
 
 ```
 {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), newest 50 of more:
@@ -26,46 +27,48 @@
 Shown 50 newest lines; oldest shown 2026-09-13T10:12:03.123+03:00. Older: repeat with end="2026-09-13T10:12:03.124+03:00". Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.
 ```
 
-Строка: `HH:mm:ss.SSS LEVEL service  message [trace=…]`, время — в timezone подключения.
-Дата указана в заголовке; при смене дня внутри страницы вставляется строка `--- yyyy-MM-dd ---`.
-Правила извлечения полей — [discovery.md](discovery.md#нормализация-строки). Отсутствующее
-значение печатается как `-`; строка не скрывается.
+A line is `HH:mm:ss.SSS LEVEL service  message [trace=…]` in the connection's timezone.
+The date is in the header; when the day changes inside a page a `--- yyyy-MM-dd ---`
+marker is inserted. Field extraction rules are in
+[discovery.md](discovery.md#line-normalization). A missing value is printed as `-`; the
+line is never hidden.
 
-Stack trace (`error.stack_trace`, `stack_trace`, `stacktrace`, `exception` или
-многострочный plain text с `at `): первая строка исключения, до 5 frames,
-`... (N frames skipped)`, каждый `Caused by:`/`Suppressed:` с одним frame;
-строки `... N more` опускаются. Сообщение обрезается до 400 code points с `…`;
-переводы строк заменяются пробелами. `raw=true` печатает `HH:mm:ss.SSS {метки потока}  <строка Loki>`
-без разбора, предел 4 000 code points — это путь к полной исходной строке. Метки печатаются
-по алфавиту в виде `{app="x", pod="y"}` (S10): в режиме «покажи всё» модель видит pod/instance,
-которые обычный режим прячет за именем сервиса.
+Stack traces (`error.stack_trace`, `stack_trace`, `stacktrace`, `exception`, or multi-line
+plain text with `at `): the first exception line, up to 5 frames, `... (N frames skipped)`,
+every `Caused by:`/`Suppressed:` with one frame; `... N more` lines are dropped. The message
+is cut at 400 code points with `…`; line breaks become spaces. `raw=true` prints
+`HH:mm:ss.SSS {stream labels}  <Loki line>` without any parsing, limited to 4 000 code
+points — this is the way to the full original line. Labels are printed alphabetically as
+`{app="x", pod="y"}`: in "show everything" mode the model sees pod/instance, which the
+normal mode hides behind the service name.
 
-Заголовок: `newest N of more:` если Loki вернул ровно `limit` строк, `all N lines:` если
-меньше, `no matching lines.` если ноль. Футер: `Shown all N matching lines.`,
-либо подсказка с готовым `end`. Значение `end` — самый старый показанный timestamp,
-округлённый **вверх** до миллисекунды: Loki принимает `end` исключающим, поэтому
-граница перечитывается (возможен один повтор), но строки с тем же миллисекундным
-timestamp не теряются. Курсоров и хранения между вызовами нет; snapshot не обещается.
-При пустом результате футер предлагает расширить окно, проверить метки через `discoverLogs`
-или упростить фильтр.
+Header: `newest N of more:` when Loki returned exactly `limit` lines, `all N lines:` when
+fewer, `no matching lines.` when none. Footer: `Shown all N matching lines.`, or a hint with
+a ready-made `end`. That `end` is the oldest shown timestamp rounded **up** to the next
+millisecond: Loki treats `end` as exclusive, so the boundary is re-read (one duplicate is
+possible) but lines with the same millisecond are never lost. Nothing is stored between
+calls; no snapshot is promised. An empty result suggests widening the window, checking
+labels with `discoverLogs` or simplifying the filter.
 
 ## getLogContext(connection, selector, time, before = 20, after = 20)
 
-Строки одного stream selector вокруг момента: `before` строк до него включительно и `after`
-после. Контекст считается по числу строк, а не по времени, поэтому не зависит от плотности
-потока. Два запроса `query_range`: backward с `end` = конец момента и `limit = before + 1`
-(одна строка — сама цель), forward с `start` = конец момента и `limit = after`. Окно каждого
-запроса — `maxIntervalSeconds` подключения в соответствующую сторону.
+Lines of one stream selector around a moment: `before` lines up to and including it and
+`after` lines past it. Context is counted in lines, not time, so it does not depend on how
+busy the stream is. Two `query_range` requests: backward with `end` = end of the moment and
+`limit = before + 1` (one line is the target itself), forward with `start` = end of the
+moment and `limit = after`. Each request's window is the connection's `maxIntervalSeconds`
+in that direction.
 
-`selector` — только stream selector (та же проверка, что в `discoverLogs`); `|=` и `| json`
-отклоняются с объяснением: строки-продолжения stack trace без фильтруемого текста должны быть
-видны. `time` — любой формат `start`/`end` плюс голое время суток `10:12:03.123`, `10:12:03`,
-`10:12` из строки страницы: оно берётся в timezone подключения как ближайшее такое время в
-прошлом (сегодня, иначе вчера). Момент имеет точность текста: `10:12:03.123` покрывает
-миллисекунду, `10:12:03` — секунду, RFC3339 без дробной части — секунду, epoch nanoseconds —
-наносекунду. Строки внутри момента отмечены `>>>`; если таких нет, на их месте строка
-`>>> (no line at exactly this time in {...}; lines before and after it follow)`, а лишняя
-строка из запасного слота не показывается.
+`selector` must be a stream selector only (the same check as in `discoverLogs`); `|=` and
+`| json` are rejected with an explanation: stack trace continuation lines that do not
+contain the filtered text must stay visible. `time` accepts every `start`/`end` format plus
+a bare time of day from the page — `10:12:03.123`, `10:12:03`, `10:12` — resolved in the
+connection's timezone to the nearest such moment in the past (today, otherwise yesterday).
+The moment has the precision of the text: `10:12:03.123` covers one millisecond,
+`10:12:03` one second, RFC3339 without a fraction one second, epoch nanoseconds one
+nanosecond. Lines inside the moment are marked with `>>>`; when there are none, the line
+`>>> (no line at exactly this time in {...}; lines before and after it follow)` takes their
+place and the spare slot is not shown as an extra "before" line.
 
 ```
 Context in {app="backend"} around 2026-09-13 10:12:03.123 (+03:00) — dev, lines: 20 before, 1 at that time, 20 after:
@@ -78,23 +81,25 @@ Context in {app="backend"} around 2026-09-13 10:12:03.123 (+03:00) — dev, line
 Earlier: repeat with time="2026-09-13T10:11:58.001+03:00", after=0. Later: repeat with time="2026-09-13T10:12:09.870+03:00", before=0. Full original line: queryLogs with raw=true and a narrow filter.
 ```
 
-Футер: если строк до/после меньше запрошенного — `No earlier/later lines within 24h ...`
-(это предел окна, не доказательство отсутствия вообще); иначе готовые `time` для
-продолжения в каждую сторону. Если все `before + 1` строк попали в момент (например,
-секунда точности в нагруженном сервисе) — совет передать время с миллисекундами или
-сузить selector. При нехватке бюджета строки отбрасываются с более длинной стороны,
-отмеченные строки не отбрасываются: `Output limit reached: showing N before and M after of K fetched lines.`
+Footer: when fewer lines than asked were found on a side — `No earlier/later lines within
+24h ...` (the reach of the request, not proof that nothing exists); otherwise ready-made
+`time` values to continue in each direction. When all `before + 1` lines fall inside the
+moment (second precision in a busy service) the advice is to pass the time with
+milliseconds; when they really share one millisecond (a plain-text stack trace printed line
+by line) the advice is a larger `before`. Under the budget lines are dropped from the longer
+side and the marked lines are never dropped: `Output limit reached: showing N before and
+M after of K fetched lines.`
 
 ## summarizeLogs(connection, query, start, end, sample = 500)
 
-Сводка вместо чтения: один backward-запрос `query_range` на `sample` самых новых строк
-(не больше `maxEntries`), группировка локально по шаблону сообщения — Loki patterns API
-не используется, поэтому работает и на 2.6.1. Шаблон: сообщение, в котором UUID, даты и
-время, hex-идентификаторы и числа (в том числе с единицей — `15ms`, `42MB`; `v1.2` и
-`asva2` сохраняются) заменены на `*`, плюс до трёх заголовков исключений из stack trace
-(первая строка и `Caused by:`), чтобы разные ошибки с одинаковым сообщением не склеивались.
-Строки-фреймы (`at ...`, `... N more`) сервисов, пишущих stack trace построчно, сворачиваются
-в одну группу с пояснением вместо примера.
+A summary instead of reading: one backward `query_range` for the `sample` newest lines
+(at most `maxEntries`), grouped locally by message template — Loki's pattern API is not
+used, so it works on 2.6.1 too. The template is the message with UUIDs, dates and times,
+hex identifiers and numbers (including ones with a unit — `15ms`, `42MB`; `v1.2` and
+`asva2` are kept) replaced by `*`, plus up to three exception headers from the stack trace
+(the first line and `Caused by:` lines) so that different errors with the same message do
+not merge. Frame lines (`at ...`, `... N more`) of services that log stack traces one line
+per frame collapse into one group with an explanation instead of an example.
 
 ```
 Summary of {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00): newest 500 lines sampled (more exist), spanning 10:03:12.001–10:59:58.120, 12 distinct messages.
@@ -109,38 +114,39 @@ Rare (1–2 lines each, easy to miss):
 Counts are for the 500 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= "<distinctive part of its message>".
 ```
 
-Группы сортируются по числу строк в выборке, затем по новизне; показываются первые 20.
-Группы из 1–2 строк, не попавшие в топ, перечисляются отдельно (до 20, новые первыми) —
-редкая отличающаяся ошибка не должна пропасть. Остаток считается строкой `(+N more groups,
-M lines)`. Пример группы — самая новая строка с идентификаторами как есть; для группы с
-одной строкой время одно. Заголовок называет реальный охват выборки (`spanning`): 500
-новых строк могут покрывать лишь часть окна, поэтому частота в выборке не выдаётся за
-статистику интервала — футер отсылает к `countLogs`. При нехватке бюджета сначала
-отбрасываются редкие группы, затем группы с конца списка: `Output limit reached: showing
-N of M groups.` Пустой результат — тот же совет, что у `queryLogs`.
+Groups are sorted by count in the sample, then by recency; the first 20 are shown. Groups
+of 1–2 lines outside the top list are printed separately (up to 20, newest first) — a rare,
+different error must not disappear. The rest is counted in `(+N more groups, M lines)`.
+The example of a group is its newest line with identifiers as they are; a single-line group
+prints one time. The header names the real span of the sample (`spanning`): 500 newest
+lines may cover only part of the window, so the frequency in the sample is never presented
+as a statistic of the interval — the footer points to `countLogs`. Under the budget rare
+groups are dropped first, then groups from the end of the list: `Output limit reached:
+showing N of M groups.` An empty result gives the same advice as `queryLogs`.
 
 ## countLogs(connection, query, start, end, groupBy)
 
-Сервер сам строит metric LogQL; `query` — обычный log query, начинающийся с `{`.
+The server builds the metric LogQL; `query` is an ordinary log query starting with `{`.
 
-- Без `groupBy`: instant query `sum(count_over_time(<query> [<окно>]))` на `end`:
+- Without `groupBy`: an instant query `sum(count_over_time(<query> [<window>]))` at `end`:
   `1 523 lines match {app="backend"} |= "ERROR" in 2026-09-13 10:00:00–11:00:00 (+03:00) (dev).`
-- `groupBy="<label>"`: `sum by (<label>) (count_over_time(...))`, таблица по убыванию,
-  до 50 значений, пустая метка — `(none)`.
-- `groupBy="time"`: range query с «круглым» шагом не меньше `окно/12` (1s … 1d: 1m, 2m, 5m,
-  15m, 30m, 1h, 2h…), бакеты выровнены по часам — оценки идут по кратным шагу от epoch,
-  как их выравнивает сам Loki при split by interval (запрос на другие моменты давал бы
-  удвоенные бакеты; найдено на живом DEV, S11). Крайние бакеты могут выходить за окно,
-  поэтому заголовок называет выровненный интервал. Каждая строка — начало бакета.
-  Отметка `<- spike` ставится, когда бакет ≥ 5 и ≥ 3 × медиана бакетов (при нулевой
-  медиане — 3 × среднее). Это простое правило, не анализ.
+- `groupBy="<label>"`: `sum by (<label>) (count_over_time(...))`, a table in descending
+  order, up to 50 values, an empty label prints as `(none)`.
+- `groupBy="time"`: a range query with a "nice" step not smaller than `window/12`
+  (1s … 1d: 1m, 2m, 5m, 15m, 30m, 1h, 2h…), buckets aligned to the clock — evaluations are
+  at multiples of the step from the epoch, the way Loki itself aligns them when splitting by
+  interval (asking for other moments produced doubled buckets on a live stand). The edge
+  buckets may extend past the window, so the header names the aligned interval. Each row is
+  a bucket start. `<- spike` marks a bucket that is ≥ 5 and ≥ 3 × the median bucket (3 × the
+  mean when the median is zero). This is a simple rule, not analysis.
 
-Метрический вход (`sum(...)`, `rate(...)`) отклоняется с советом использовать `queryMetrics`.
+A metric expression (`sum(...)`, `rate(...)`) is rejected with the advice to use `queryMetrics`.
 
 ## queryMetrics(connection, query, start, end, step)
 
-Всегда range query. `step` — `30s`, `5m`, `1h`; по умолчанию ближайший «круглый» шаг
-не меньше `окно/20` (1s … 1d). Число оценок на ряд не должно превышать `maxMetricPoints`.
+Always a range query. `step` is `30s`, `5m`, `1h`; the default is the nearest "nice" step
+not smaller than `window/20` (1s … 1d). The number of evaluations per series must not
+exceed `maxMetricPoints`.
 
 ```
 sum by (level) (rate({app="backend"}[5m])) — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), step 5m, 2 series:
@@ -152,37 +158,36 @@ sum by (level) (rate({app="backend"}[5m])) — dev, 2026-09-13 10:00:00–11:00:
 Output trimmed to 2 series / 40 points (connection limits). Aggregate with sum by (...) or use a larger step.
 ```
 
-Значения печатаются строками Loki (`NaN`, `+Inf` сохраняются). Время точек —
-`HH:mm:ss` при шаге меньше минуты, иначе `MM-dd HH:mm`. Log query на входе отклоняется
-с советом использовать `queryLogs`/`countLogs`; instant-режима нет.
+Values are printed as Loki strings (`NaN`, `+Inf` are kept). Point times are `HH:mm:ss` for
+steps under a minute, otherwise `MM-dd HH:mm`. A log query is rejected with the advice to
+use `queryLogs`/`countLogs`; there is no instant mode.
 
-## Ошибки
+## Errors
 
-Ошибка — текст `Error <CODE>: <что не так и что сделать>` с `isError=true`.
-HTTP 400 и `status=error` от Loki передаются как `Loki rejected the query: <текст Loki>`
-(до 400 символов, без управляющих символов): по нему модель чинит LogQL.
-Остальные статусы (401/403/404/429/5xx) и тексты upstream по-прежнему скрываются.
-Ошибки аргументов могут повторять значение аргумента модели (например, непонятное время),
-но никогда — credentials, URL или тексты других статусов.
+An error is the text `Error <CODE>: <what is wrong and what to do>` with `isError=true`.
+HTTP 400 and `status=error` from Loki are passed on as `Loki rejected the query: <Loki
+text>` (up to 400 characters, control characters removed): the model fixes its LogQL from
+it. Other statuses (401/403/404/429/5xx) and upstream texts stay hidden. Argument errors may
+repeat the model's argument (an unparseable time, for example) but never credentials, URLs
+or texts of other statuses.
 
-## Предел размера
+## Size limit
 
-`maxResponseBytes` подключения минус 512 байт на JSON-RPC envelope — бюджет текста.
-`queryLogs` отбрасывает самые старые строки, пока страница не поместится, и пишет
-`Output limit reached: showing N newest of M fetched lines.`; если не помещается даже одна
-строка — `Error RESPONSE_BUDGET_EXCEEDED`. `discoverLogs` сначала укорачивает пример,
-затем убирает его. Обёртка `QueryToolsConfig` дополнительно проверяет фактический размер
-текста как последнюю защиту.
+The connection's `maxResponseBytes` minus 512 bytes for the JSON-RPC envelope is the text
+budget. `queryLogs` drops the oldest lines until the page fits and writes `Output limit
+reached: showing N newest of M fetched lines.`; when not even one line fits —
+`Error RESPONSE_BUDGET_EXCEEDED`. `discoverLogs` first shortens the example, then removes
+it. The `QueryToolsConfig` wrapper checks the actual text size as the last guard.
 
-## Проверки
+## Verification
 
-`gradlew.bat build --console=plain` — unit-тесты формата строки, сжатия stack trace,
-футера, бюджета, countLogs/queryMetrics, getLogContext (два запроса, отметка, точность
-времени, обрезка вокруг цели), summarizeLogs (шаблоны, редкие группы, бюджет) и stdio smoke на реальном jar
-(`instructions`, tools/list без output schema, 16 outstanding вызовов с разными бюджетами,
-ошибки без секретов, текст ошибки Loki 400). `gradlew.bat integrationTest --console=plain`
-— Loki 2.6.1/3.6.0: страница, продолжение по `end`, raw с метками, контекст
-(строки в момент, точное время, момент без строк, отказ pipeline), count/groupBy/time,
-сводка, метрики, ошибка парсера, discovery и значения метки.
-`python scripts/live_smoke/run_smoke.py --connection <имя>` — read-only прогон собранного jar
-по stdio на живом стенде (см. README, раздел «Разработка»).
+`gradlew.bat build --console=plain` — unit tests for the line format, stack trace
+compaction, footer, budget, countLogs/queryMetrics, getLogContext (two requests, marker,
+time precision, trimming around the target), summarizeLogs (templates, rare groups, budget)
+and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
+16 outstanding calls with different budgets, errors without secrets, Loki 400 text).
+`gradlew.bat integrationTest --console=plain` — Loki 2.6.1/3.6.0: page, continuation by
+`end`, raw with labels, context (lines at the moment, exact time, a moment without lines,
+pipeline rejection), count/groupBy/time, summary, metrics, parser error, discovery and label
+values. `python scripts/live_smoke/run_smoke.py --connection <name>` — a read-only run of
+the packaged jar over stdio against a live stand (see README, "Development").

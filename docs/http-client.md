@@ -1,13 +1,15 @@
-# HTTP-клиент S03
+# HTTP client
 
-`LokiHttpClient` — внутренний транспортный слой. В S04 поверх него добавлены
-[queryLogs, countLogs и queryMetrics](queries.md); `listConnections` не использует HTTP.
-Клиент создаётся Spring как bean; создание не выполняет сетевых запросов.
+`LokiHttpClient` is the internal transport layer under [queryLogs, countLogs,
+summarizeLogs, getLogContext, queryMetrics](queries.md) and [discoverLogs](discovery.md);
+`listConnections` does not use HTTP. Spring creates the client as a bean; creation makes no
+network requests.
 
-Контракт транспорта основан на [Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/).
-Доступны только GET-запросы к фиксированным endpoint:
+The transport contract follows the
+[Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/). Only GET
+requests to fixed endpoints are available:
 
-| Метод Java | Endpoint | Обязательные аргументы |
+| Java method | Endpoint | Required arguments |
 |---|---|---|
 | `queryRange` | `/loki/api/v1/query_range` | connection, query, start/end, limit, direction |
 | `queryInstant` | `/loki/api/v1/query` | connection, query, time |
@@ -15,128 +17,121 @@
 | `labelValues` | `/loki/api/v1/label/<name>/values` | connection, label, start/end |
 | `series` | `/loki/api/v1/series` | connection, selectors, start/end |
 
-В `queryRange` необязательный `stepSeconds` задаётся положительным `BigDecimal`.
-У `labels`/`labelValues` необязательный selector передаётся как `query`.
-`series` отправляет каждый selector отдельным `match[]`.
-Имя label проверяется по базовому синтаксису `[a-zA-Z_][a-zA-Z0-9_]*`.
-Произвольного URL/path, write endpoints и чтения `/config` нет.
+In `queryRange` the optional `stepSeconds` is a positive `BigDecimal`. In
+`labels`/`labelValues` the optional selector is passed as `query`. `series` sends every
+selector as a separate `match[]`. Label names are checked against the basic
+`[a-zA-Z_][a-zA-Z0-9_]*` syntax. There is no arbitrary URL/path, no write endpoint and no
+`/config` read.
 
-Время принимается как абсолютный `Instant` и отправляется строкой epoch nanoseconds
-в диапазоне signed int64, без округления. Интервал требует `start < end`.
-Относительное время и timezone обрабатываются прикладным слоем S04.
-Клиент не рассчитывает `now` и не подставляет временные границы самостоятельно.
-LogQL кодируется как единый query parameter; его содержимое не исполняется локально.
-Префикс пути из базового URL сохраняется, завершающие `/` нормализуются.
+Time is accepted as an absolute `Instant` and sent as an epoch-nanosecond string within
+signed int64, without rounding. An interval requires `start < end`. Relative time and
+timezones are handled by the service layer; the client neither computes `now` nor
+substitutes time bounds. LogQL is encoded as a single query parameter and never executed
+locally. The path prefix of the base URL is kept, trailing `/` are normalized.
 
-Каждый запрос пишет одну строку в лог сервера: `GET /loki/api/v1/query_range
-{start=…, end=…, query=…, limit=…, direction=…} -> 200, 1586 bytes, 397 ms` или
-`-> UPSTREAM_BAD_REQUEST, 44 ms`. Логируются только API-path и параметры (текст
-LogQL модели, обрезанный до 200 символов); базовый URL с host и префиксом, заголовки
-авторизации, tenant и тело ответа не логируются.
+Every request writes one line to the server log: `GET /loki/api/v1/query_range {start=…,
+end=…, query=…, limit=…, direction=…} -> 200, 1586 bytes, 397 ms` or
+`-> UPSTREAM_BAD_REQUEST, 44 ms`. Only the API path and the parameters (the model's LogQL,
+trimmed to 200 characters) are logged; the base URL with host and prefix, authorization
+headers, tenant and response bodies are not.
 
-Для каждого registry name лениво создаётся отдельный Java 21 `HttpClient`.
-Basic передаёт Base64 от UTF-8 `username:password`, Bearer — отдельный Authorization,
-tenant — `X-Scope-OrgID`. Redirects отключены, cookies и authenticator не настроены.
-Вызовы одного клиента могут выполняться одновременно; транспорт не изменяет registry
-и не блокирует другие подключения после ошибки. При закрытии bean клиенты получают
-`shutdownNow`; последующие вызовы завершаются контролируемой отменой.
+A separate Java 21 `HttpClient` is created lazily per registry name. Basic sends Base64 of
+UTF-8 `username:password`, Bearer a separate Authorization header, tenant `X-Scope-OrgID`.
+Redirects are disabled, no cookies or authenticator are configured. Calls on one client may
+run concurrently; the transport never modifies the registry and never blocks other
+connections after a failure. On bean close the clients get `shutdownNow`; later calls end
+in a controlled cancellation.
 
-Применяются `connectTimeoutMs`, `requestTimeoutMs`, `maxHttpResponseBytes`:
+`connectTimeoutMs`, `requestTimeoutMs` and `maxHttpResponseBytes` apply:
 
-- Connect timeout ограничивает установку нового соединения, включая TLS handshake.
-- Request timeout ограничивает ожидание полного ответа, включая body после заголовков.
-  При таймауте или прерывании чтение отменяется; interrupt flag сохраняется.
-- BodySubscriber считает фактически полученные байты и отменяет чтение до копирования
-  порции, превышающей бюджет. Проверяется также заявленный Content-Length.
-  Chunked-ответы проходят тот же контроль. Лимит относится к body, а не суммарной
-  памяти JVM, заголовкам или будущему MCP-ответу.
-- Запрашиваются JSON и `Accept-Encoding: identity`. Неожиданное сжатие отклоняется,
-  чтобы не принимать неограниченно распакованный body. Поддержки gzip пока нет.
+- The connect timeout bounds establishing a new connection, including the TLS handshake.
+- The request timeout bounds waiting for the complete response, including the body after
+  the headers. On timeout or interruption the read is cancelled; the interrupt flag is kept.
+- The body subscriber counts the bytes actually received and cancels the read before
+  copying a chunk that would exceed the budget. The declared Content-Length is checked too.
+  Chunked responses go through the same control. The limit is on the body, not on total JVM
+  memory, headers or the future MCP response.
+- JSON and `Accept-Encoding: identity` are requested. Unexpected compression is rejected
+  so that an unbounded decompressed body is never accepted. gzip is not supported yet.
 
-`maxEntries`, `maxIntervalSeconds` и `maxResponseBytes` в транспортном слое не
-применяются: проверка пользовательских лимитов и фактического окна относится к S04,
-бюджет всего MCP-ответа реализован в S06 декоратором stdio-транспорта.
-`queryRange` передаёт явно полученный `limit`
-без молчаливого изменения. Сервис обязан проверить его относительно настроек.
-Прикладных повторов запросов, обязательных probes и проверки версии нет.
+`maxEntries`, `maxIntervalSeconds` and `maxResponseBytes` are not applied in the transport
+layer: the services check the user limits and the window, the services and the
+`QueryToolsConfig` wrapper enforce the text budget (see
+[queries.md](queries.md#size-limit)). `queryRange` forwards the `limit` it received without
+silent changes; the service must validate it against the configuration. There are no
+application-level retries, mandatory probes or version checks.
 
-## Декодирование
+## Decoding
 
-`LokiResponses` содержит transport records; они не являются output schemas MCP.
-Поддерживаются `streams`, `vector`, `matrix`, списки labels/values и series.
-Неизвестный resultType или неверная форма известных данных — ошибка, а не пустая выборка.
-Новые неизвестные поля объектов допускаются. Повторяющиеся JSON-ключи и trailing JSON
-запрещены. Пустые массивы результата допустимы.
+`LokiResponses` holds transport records; they are not MCP output schemas. `streams`,
+`vector`, `matrix`, label/value lists and series are supported. An unknown resultType or a
+malformed known shape is an error, not an empty sample. New unknown object fields are
+allowed. Duplicate JSON keys and trailing JSON are rejected. Empty result arrays are fine;
+so is a `{"status":"success"}` without `data` for `/series` and `/label/<name>/values`,
+which Loki 2.6.1 sends for an empty result — decoded as an empty list.
 
-Для логов сохраняются порядок upstream, каждый повтор, исходная строка, строковый
-nanosecond timestamp и явно переданная плоская string-to-string metadata в третьем
-элементе tuple. Клиент не сортирует и не дедуплицирует события. Отсутствующая отдельная
-metadata даёт пустую map: это не доказательство отсутствия metadata у исходной записи.
+For logs the upstream order, every repetition, the original line, the string nanosecond
+timestamp and the explicitly passed flat string-to-string metadata in the third tuple
+element are kept. The client neither sorts nor deduplicates events. Missing separate
+metadata yields an empty map: that is not proof that the original entry had none.
 
-Метки `LogStream.labels` — метки **результата**. Loki может добавлять к ним
-structured metadata и поля pipeline. Нельзя считать их доказанным исходным stream scope
-или восстанавливать происхождение по именам. Это ограничение описано в
-[документации structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/).
-Неподдерживаемая вложенная форма третьего элемента отклоняется, а не теряется молча.
+`LogStream.labels` are the labels of the **result**. Loki may add structured metadata and
+pipeline fields to them. They must not be treated as the proven original stream scope, and
+provenance must not be reconstructed from names; see the
+[structured metadata documentation](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/).
+An unsupported nested form of the third element is rejected rather than lost silently.
 
-Metric timestamps должны быть JSON-числами в секундах и разбираются в `BigDecimal`.
-Metric values сохраняются строками, включая `NaN`, `+Inf`, `-Inf` и экспоненциальную
-запись. Строковые log timestamps и числовое время метрик намеренно не взаимозаменяемы.
+Metric timestamps must be JSON numbers in seconds and are parsed into `BigDecimal`. Metric
+values are kept as strings, including `NaN`, `+Inf`, `-Inf` and exponent notation. String
+log timestamps and numeric metric time are deliberately not interchangeable.
 
-`QueryStats.totalLinesProcessed` — nullable число обработанных Loki строк;
-оно не является количеством совпадений или событий. Из остальных stats пока ничего
-не публикуется. Отсутствующий показатель остаётся неизвестным. `warnings` сохраняются
-как данные upstream; будущие сервисы должны учитывать их при оценке полноты и бюджете,
-не использовать как инструкции и не писать их в диагностические логи.
-S04 публикует только факт наличия warnings без исходного текста и ставит UNKNOWN
-(либо PARTIAL при локальном сокращении).
+`QueryStats.totalLinesProcessed` is the nullable number of lines Loki processed; it is not
+the number of matches or events. Nothing else from stats is published. A missing figure
+stays unknown. `warnings` are kept as upstream data: they are never echoed to the model,
+used as instructions or written to diagnostic logs.
 
-## Ошибки
+## Errors
 
-Ошибки используют существующий `ToolError` через `LokiOperationException`.
-В сообщения не включаются URL, credentials, tenant или исходная цепочка исключений.
-Исключение S09 — ошибки запроса, которые описывают LogQL самой модели: тело HTTP 400
-и поле `error` при HTTP 200 `status:error` передаются как `Loki rejected the query: <текст>`
-(до 400 символов, управляющие символы удалены, JSON-тело даёт только `error`).
-Остальные неуспешные статусы обрабатываются по заголовкам: их body не сохраняется,
-поэтому HTML/plain text от ingress не попадают в диагностику.
+Errors use `ToolError` through `LokiOperationException`. Messages never include URLs,
+credentials, tenant or the original exception chain. The exception is query errors, which
+describe the model's own LogQL: the HTTP 400 body and the `error` field of an HTTP 200
+`status:error` are passed on as `Loki rejected the query: <text>` (up to 400 characters,
+control characters removed, a JSON body contributes only `error`). Other unsuccessful
+statuses are handled from the headers: their body is not kept, so HTML or plain text from
+an ingress never reaches diagnostics.
 
-| Условие | Code | retryable |
+| Condition | Code | retryable |
 |---|---|---|
-| Неверные локальные аргументы | `INVALID_ARGUMENT` | false |
+| Invalid local arguments | `INVALID_ARGUMENT` | false |
 | HTTP 400 | `UPSTREAM_BAD_REQUEST` | false |
 | HTTP 401 / 403 | `UPSTREAM_UNAUTHORIZED` / `UPSTREAM_FORBIDDEN` | false |
 | HTTP 404 | `ENDPOINT_UNAVAILABLE` | false |
 | HTTP 429 | `UPSTREAM_RATE_LIMITED` | true |
 | HTTP 408 / 504, timeout | `UPSTREAM_TIMEOUT` | true |
-| Остальные HTTP 5xx | `UPSTREAM_UNAVAILABLE` | true |
-| Другой status, включая redirects | `UPSTREAM_HTTP_ERROR` | false |
-| Сетевая/TLS ошибка | `UPSTREAM_CONNECTION_ERROR` | true |
-| Превышение body budget | `UPSTREAM_RESPONSE_TOO_LARGE` | false |
-| Неверный JSON/shape/encoding | `UPSTREAM_INVALID_RESPONSE` | false |
-| JSON `status:error` при HTTP 200 | `UPSTREAM_QUERY_ERROR` | false |
-| Прерывание / вызов после close | `OPERATION_CANCELLED` | false |
+| Other HTTP 5xx | `UPSTREAM_UNAVAILABLE` | true |
+| Any other status, including redirects | `UPSTREAM_HTTP_ERROR` | false |
+| Network / TLS failure | `UPSTREAM_CONNECTION_ERROR` | true |
+| Body budget exceeded | `UPSTREAM_RESPONSE_TOO_LARGE` | false |
+| Invalid JSON / shape / encoding | `UPSTREAM_INVALID_RESPONSE` | false |
+| JSON `status:error` with HTTP 200 | `UPSTREAM_QUERY_ERROR` | false |
+| Interruption / call after close | `OPERATION_CANCELLED` | false |
 
-`retryable` — подсказка, автоматического повторения в клиенте нет.
-404 относится только к вызванному endpoint: клиент не помечает всё подключение
-недоступным. MCP-обёртка этих ошибок проверена с data tools в S04.
+`retryable` is a hint; the client never retries by itself. A 404 concerns only the called
+endpoint: the client does not mark the whole connection unavailable.
 
-## Проверки
+## Verification
 
 ```powershell
 .\gradlew.bat test --tests 'ru.it_spectrum.ai.loki.mcp.client.*' --console=plain
 .\gradlew.bat build --console=plain
 ```
 
-`LokiHttpClientTest` использует только loopback HTTP server и локальный TCP socket
-для зависшего TLS handshake. HTTP listener существует исключительно в тестах.
-`LokiResponseDecoderTest` проверяет JSON fixtures без сети. Новых зависимостей нет.
-
-Проверены URL/параметры/заголовки, точность времени, stream/metric/metadata DTO,
-пустые и неверные ответы, auth/tenant isolation, ошибки, запрет redirects,
-байтовые бюджеты с Content-Length и chunked, Unicode, таймауты заголовков/body/TLS,
-отмена и отсутствие секретов в exceptions.
-Контейнерная совместимость Loki 2.6.1 и 3.6.0 проверена в S04 отдельной задачей
-`integrationTest` (см. [queries.md](queries.md)); live-проверки не запускались.
-S05 расширяет эту задачу проверками `/series` и [discoverLogs](discovery.md),
-включая метки/значения, ограниченную выборку и смешанные JSON/ECS/plain text.
+`LokiHttpClientTest` uses only a loopback HTTP server and a local TCP socket for a hanging
+TLS handshake; the HTTP listener exists in tests only. `LokiResponseDecoderTest` checks
+JSON fixtures without a network. Covered: URL/parameters/headers, time precision,
+stream/metric/metadata DTOs, empty and malformed responses, auth/tenant isolation, errors,
+redirect refusal, byte budgets with Content-Length and chunked, Unicode, header/body/TLS
+timeouts, cancellation and the absence of secrets in exceptions. Compatibility with Loki
+2.6.1 and 3.6.0 is checked by the separate `integrationTest` task (see
+[queries.md](queries.md)), including `/series` and [discoverLogs](discovery.md); the live
+check is `scripts/live_smoke/run_smoke.py`.

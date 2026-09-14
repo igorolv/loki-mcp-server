@@ -1,36 +1,37 @@
-# Политика безопасности
+# Security policy
 
-## Поддерживаемые версии
+## Supported versions
 
-Поддерживается текущее состояние ветки `main` и последний релиз.
+The current state of the `main` branch and the latest release are supported.
 
-## Как сообщить об уязвимости
+## Reporting a vulnerability
 
-Не публикуйте детали уязвимости в открытом issue.
+Do not publish vulnerability details in an open issue.
 
-Если для репозитория включён GitHub private vulnerability reporting, используйте его.
-Иначе создайте issue без технических подробностей и попросите у сопровождающего
-приватный канал.
+If GitHub private vulnerability reporting is enabled for this repository, use it.
+Otherwise open an issue without technical details and ask the maintainer for a private
+channel.
 
-Укажите:
+Include:
 
-- версию или коммит;
-- краткое описание риска;
-- минимальные шаги воспроизведения, если их можно передать безопасно;
-- ожидаемое влияние;
-- известный обходной путь, если есть.
+- the affected version or commit;
+- a brief risk summary;
+- minimal reproduction steps, if they can be shared safely;
+- the expected impact;
+- a known workaround, if any.
 
-## Что важно для этого проекта
+## What matters for this project
 
-Сервер читает реальные Loki по credentials из `connections.json` и отдаёт содержимое
-логов модели. Особенно важны сообщения о:
+The server reads real Loki instances with credentials from `connections.json` and hands
+log contents to a model. Reports about the following are especially important:
 
-- обходе read-only контракта (любой путь к push, delete, `tail`, `/config` или произвольному URL);
-- утечке `url`, credentials, `tenant` или тела ответа Loki в ответы инструментов,
-  сообщения об ошибках, stderr или файл лога;
-- выходе за пределы `maxResponseBytes`, `maxHttpResponseBytes`, `maxIntervalSeconds`,
-  `maxEntries` — возможности исчерпать память или заставить стенд выполнять тяжёлые запросы;
-- исполнении содержимого логов как инструкций (сервер считает строки данными и повторяет
-  это в `instructions`).
+- bypassing the read-only contract (any path to push, delete, `tail`, `/config` or an
+  arbitrary URL);
+- leaking `url`, credentials, `tenant` or Loki response bodies into tool responses, error
+  messages, stderr or the log file;
+- escaping `maxResponseBytes`, `maxHttpResponseBytes`, `maxIntervalSeconds`,
+  `maxEntries` — a way to exhaust memory or make a stand execute heavy queries;
+- executing log contents as instructions (the server treats lines as data and repeats
+  this in `instructions`).
 
-Реальные адреса стендов и credentials не должны попадать ни в репозиторий, ни в issue.
+Real stand addresses and credentials must never appear in the repository or in issues.

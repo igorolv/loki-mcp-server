@@ -1,39 +1,40 @@
 # Loki MCP Server
 
-Локальный MCP-сервер (stdio) для чтения логов из Grafana Loki агентом: обзор стенда →
-подсчёт → сводка → строки → окружение события → полная строка. Семь инструментов, все ответы —
-читаемый текст; рассчитан на небольшие модели (целевая — DeepSeek 4.1 Flash).
-Только чтение: push, delete, `/config` и другие управляющие endpoint не открываются.
+A local MCP server (stdio) that lets an agent read logs from Grafana Loki: overview of the
+stand → count → summary → lines → context around an event → the full original line. Seven
+tools, every response is readable text; built for small models (target: DeepSeek 4.1
+Flash). Read-only: push, delete, `/config` and other management endpoints are never exposed.
 
-| Инструмент | Что делает |
+| Tool | What it does |
 |---|---|
-| `listConnections` | Список стендов из конфигурации с подсказками оператора |
-| `discoverLogs` | Метки и значения, формат строк, JSON-поля, готовый selector; `label="..."` — все значения одной метки |
-| `countLogs` | Сколько строк подходит; `groupBy` по метке или `"time"` с отметкой всплеска |
-| `queryLogs` | Строки в хронологическом порядке: `время LEVEL сервис сообщение`, stack trace сжат; `raw=true` — строка как есть с метками |
-| `summarizeLogs` | Группы повторяющихся сообщений в выборке новых строк: число, первое/последнее время, пример; редкие — отдельно |
-| `getLogContext` | N строк до и после момента в потоке, целевые строки отмечены `>>>` |
-| `queryMetrics` | Метрический LogQL таблицей (продвинутое) |
+| `listConnections` | The stands from the configuration with the operator's hints |
+| `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
+| `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
+| `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
+| `summarizeLogs` | Groups of repeated messages in a sample of the newest lines: count, first/last time, example; rare ones listed separately |
+| `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
+| `queryMetrics` | Metric LogQL as a table (advanced) |
 
-Поддерживаются Loki 2.6.1 и 3.x. Контракт ответов — [docs/queries.md](docs/queries.md),
-[docs/discovery.md](docs/discovery.md); подключения — [docs/connections.md](docs/connections.md).
+Loki 2.6.1 and 3.x are supported. The response contract is in
+[docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md);
+connections in [docs/connections.md](docs/connections.md).
 
-## Сборка
+## Build
 
-Нужен JDK 21+ (используется Java 21 toolchain).
+JDK 21+ is required (a Java 21 toolchain is used).
 
 ```powershell
 .\gradlew.bat bootJar
 ```
 
-Jar: `build/libs/loki-mcp-server.jar`. Linux/macOS — `./gradlew bootJar`.
+The jar is `build/libs/loki-mcp-server.jar`. On Linux/macOS use `./gradlew bootJar`.
 
-## Конфигурация подключений
+## Connection configuration
 
-Сервер читает `~/.loki-mcp-server/connections.json` (или файл из переменной
-`LOKI_MCP_CONNECTIONS_FILE`). Пример с подсказками для стендов asva2 —
-[examples/connections.json](examples/connections.json); URL стендов там берутся из
-переменных окружения `LOKI_DEV_URL` и `LOKI_TST_URL`. Минимум:
+The server reads `~/.loki-mcp-server/connections.json` (or the file named by
+`LOKI_MCP_CONNECTIONS_FILE`). An example with hints for the asva2 stands is
+[examples/connections.json](examples/connections.json); the stand URLs there come from the
+environment variables `LOKI_DEV_URL` and `LOKI_TST_URL`. The minimum:
 
 ```json
 {
@@ -49,44 +50,44 @@ Jar: `build/libs/loki-mcp-server.jar`. Linux/macOS — `./gradlew bootJar`.
 }
 ```
 
-`hint` — короткая карта стенда для модели (какие метки есть, как выбирать сервис,
-известные ловушки); `serviceLabels` — по каким меткам называть сервис в строке.
-Credentials задаются через `auth` (`BASIC` или `BEARER`) и `${ПЕРЕМЕННЫЕ}`, `tenant` уходит
-в `X-Scope-OrgID`; ничего из этого не выводится в ответах и логах. Полный формат, defaults
-и ошибки загрузки — [docs/connections.md](docs/connections.md).
+`hint` is a short map of the stand for the model (which labels exist, how to pick a
+service, known traps); `serviceLabels` says which labels name the service on a line.
+Credentials go through `auth` (`BASIC` or `BEARER`) and `${VARIABLES}`, `tenant` becomes
+`X-Scope-OrgID`; none of it is ever printed in responses or logs. The full format, defaults
+and loading errors are in [docs/connections.md](docs/connections.md).
 
-### Выбор подключения
+### Choosing a connection
 
-Каждый инструмент, кроме `listConnections`, требует явный `connection`; стенд по умолчанию
-не подставляется даже при единственной записи. Модель выбирает имя из `listConnections`,
-поэтому `description` и `hint` должны отвечать на вопрос «какой это стенд и как здесь
-искать сервис»: имя метки сервиса, selector всего окружения, что делать, если метки
-`level` нет. Для нескольких похожих стендов (DEV/TST/PROD одной системы) держите
-подключения в одном файле с говорящими именами; для разных систем — отдельные файлы через
-`LOKI_MCP_CONNECTIONS_FILE` и отдельные записи MCP-клиента.
+Every tool except `listConnections` requires an explicit `connection`; no default stand is
+substituted, even with a single entry. The model picks the name from `listConnections`, so
+`description` and `hint` should answer "which stand is this and how do I find a service
+here": the name of the service label, the selector of the whole environment, what to do
+when the `level` label is missing. Keep similar stands of one system (DEV/TST/PROD) in one
+file with telling names; keep different systems in separate files via
+`LOKI_MCP_CONNECTIONS_FILE` and separate MCP client entries.
 
-### Лимиты и время
+### Limits and time
 
-Объект `limits` подключения (все поля необязательны): `maxEntries` (1000) — предел `limit`
-и `sample`; `maxIntervalSeconds` (86400) — самое длинное окно `start`–`end`;
-`maxResponseBytes` (65536) — предел текста одного ответа, при превышении `queryLogs`
-отбрасывает самые старые строки, `summarizeLogs` — редкие группы, и говорит об этом в
-футере; `requestTimeoutMs` (30000) и `maxHttpResponseBytes` (8 MiB) — предел одного запроса
-к Loki. Время: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 с offset
-(`2026-09-13T10:00:00+03:00`), локальное время в `timezone` подключения или epoch
-nanoseconds; `getLogContext` дополнительно принимает время суток из строки страницы
-(`10:12:03.123`). Ответы печатают время в `timezone` подключения.
+The connection's `limits` object (all fields optional): `maxEntries` (1000) — the cap of
+`limit` and `sample`; `maxIntervalSeconds` (86400) — the longest `start`–`end` window;
+`maxResponseBytes` (65536) — the limit of one response text; when exceeded, `queryLogs`
+drops the oldest lines and `summarizeLogs` drops rare groups, and the footer says so;
+`requestTimeoutMs` (30000) and `maxHttpResponseBytes` (8 MiB) — the limit of one request
+to Loki. Time: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 with an offset
+(`2026-09-13T10:00:00+03:00`), local time in the connection's `timezone`, or epoch
+nanoseconds; `getLogContext` additionally accepts a time of day from a page
+(`10:12:03.123`). Responses print time in the connection's `timezone`.
 
-### Совместимость с Loki
+### Loki compatibility
 
-Проверено контейнерными тестами на Loki 2.6.1 и 3.6.0 и на живых стендах 2.6.1 (k8s)
-и 3.5 (docker). Используются только `query_range`, `query`, `labels`, `label/<name>/values`
-и `series`. На Loki 2.6.1 пустой результат `/series` и `/label/<name>/values` без поля
-`data` принимается как пустой список; на 3.x `detected_level` из structured metadata
-считается уровнем строки (`unknown` — отсутствием уровня). Loki patterns API не нужен:
-`summarizeLogs` группирует локально.
+Verified by container tests on Loki 2.6.1 and 3.6.0 and on live stands running 2.6.1
+(k8s) and 3.5 (docker). Only `query_range`, `query`, `labels`, `label/<name>/values` and
+`series` are used. On Loki 2.6.1 an empty `/series` or `/label/<name>/values` result
+without a `data` field is accepted as an empty list; on 3.x `detected_level` from
+structured metadata counts as the line's level (`unknown` as no level). Loki's pattern API
+is not needed: `summarizeLogs` groups locally.
 
-## Подключение к MCP-клиенту
+## Connecting an MCP client
 
 Claude Code:
 
@@ -103,88 +104,91 @@ args = ["-jar", "C:/path/loki-mcp-server.jar"]
 env = { LOKI_MCP_CONNECTIONS_FILE = "C:/path/connections.json" }
 ```
 
-Любой другой клиент — команда `java -jar loki-mcp-server.jar`, транспорт stdio.
-stdout занят JSON-RPC; собственные логи сервера пишутся в stderr и в
-`~/.loki-mcp-server/logs`. В логе — подключения при старте, строка на каждый вызов
-инструмента (аргументы, результат, размер, время) и на каждый запрос к Loki (path,
-параметры, статус, время); URL, credentials и содержимое строк логов туда не попадают.
+Any other client: the command `java -jar loki-mcp-server.jar`, transport stdio. stdout
+belongs to JSON-RPC; the server's own logs go to stderr and to `~/.loki-mcp-server/logs`.
+The log has the connections at start-up, one line per tool call (arguments, result, size,
+time) and one per Loki request (path, parameters, status, time); URLs, credentials and log
+line contents never appear there.
 
-## Как спрашивать
+## How to ask
 
-Называйте стенд, сервис и период: «покажи ошибки ssj-ui-backend на DEV за час»,
-«стенд DEV не работает, разберись», «какие значения у метки applicationName на TST».
-Типичный ход расследования, который сервер подсказывает модели через `instructions`:
+Name the stand, the service and the period: "show errors of ssj-ui-backend on DEV for the
+last hour", "the DEV stand is broken, find out why", "what values does the label
+applicationName have on TST". The typical investigation the server suggests to the model
+through `instructions`:
 `listConnections → discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext → queryLogs raw=true`.
 
-## Формат ошибок
+## Error format
 
-Ошибка — текст `Error <CODE>: <что не так и что сделать>` с `isError=true`, никогда не
-исключение транспорта. Примеры:
+An error is the text `Error <CODE>: <what is wrong and what to do>` with `isError=true`,
+never a transport exception. Examples:
 
-| Код | Когда | Что делать |
+| Code | When | What to do |
 |---|---|---|
-| `CONNECTION_REQUIRED`, `UNKNOWN_CONNECTION` | нет или неверное имя `connection` | взять имя из `listConnections` |
-| `INVALID_ARGUMENT` | непонятное время, `limit` вне предела, окно длиннее `maxIntervalSeconds`, метрический запрос в `queryLogs`, pipeline в `getLogContext` | текст ошибки называет допустимый формат или другой инструмент |
-| `UPSTREAM_BAD_REQUEST` | Loki отверг LogQL | текст Loki передаётся как есть (`Loki rejected the query: parse error at line 1, col 23: …`) — по нему исправляется запрос |
-| `UPSTREAM_TIMEOUT`, `UPSTREAM_UNAVAILABLE`, `UPSTREAM_RATE_LIMITED` | стенд не ответил за `requestTimeoutMs`, 5xx, 429 | сузить окно или запрос, повторить позже |
-| `UPSTREAM_UNAUTHORIZED`, `UPSTREAM_FORBIDDEN`, `ENDPOINT_UNAVAILABLE` | 401/403/404 от Loki или ingress | проверить `auth`/`tenant`; 404 на одном endpoint не означает недоступность остальных |
-| `RESPONSE_BUDGET_EXCEEDED` | даже минимальный ответ не помещается в `maxResponseBytes` | сузить запрос или поднять лимит подключения |
+| `CONNECTION_REQUIRED`, `UNKNOWN_CONNECTION` | missing or wrong `connection` name | take the name from `listConnections` |
+| `INVALID_ARGUMENT` | unparseable time, `limit` out of range, window longer than `maxIntervalSeconds`, a metric query in `queryLogs`, a pipeline in `getLogContext` | the message names the accepted format or the right tool |
+| `UPSTREAM_BAD_REQUEST` | Loki rejected the LogQL | Loki's text is passed on (`Loki rejected the query: parse error at line 1, col 23: …`) — fix the query from it |
+| `UPSTREAM_TIMEOUT`, `UPSTREAM_UNAVAILABLE`, `UPSTREAM_RATE_LIMITED` | no answer within `requestTimeoutMs`, 5xx, 429 | narrow the window or the query, retry later |
+| `UPSTREAM_UNAUTHORIZED`, `UPSTREAM_FORBIDDEN`, `ENDPOINT_UNAVAILABLE` | 401/403/404 from Loki or an ingress | check `auth`/`tenant`; a 404 on one endpoint does not mean the others are unavailable |
+| `RESPONSE_BUDGET_EXCEEDED` | not even a minimal response fits `maxResponseBytes` | narrow the query or raise the connection limit |
 
-URL, credentials, tenant и тексты Loki кроме ошибок запроса в сообщения не попадают.
-Полный список кодов — [docs/queries.md](docs/queries.md#ошибки), [docs/http-client.md](docs/http-client.md).
+URLs, credentials, tenant and Loki texts other than query errors never appear in messages.
+The full list of codes is in [docs/queries.md](docs/queries.md#errors) and
+[docs/http-client.md](docs/http-client.md).
 
 ## Troubleshooting
 
-- **Сервер не стартует / клиент показывает «failed».** Смотрите stderr клиента или
-  `~/.loki-mcp-server/logs/loki-mcp-server.log`: невалидный `connections.json` (лишнее поле,
-  дубликат ключа, незаданная `${ПЕРЕМЕННАЯ}`) завершает запуск с сообщением без исходного
-  текста и credentials. Нужна Java 21+ в `PATH` клиента.
-- **`ENDPOINT_UNAVAILABLE` (404).** Ingress может закрывать часть путей Loki (на DEV asva2
-  наружу открыты только read-пути `query`, `query_range`, `labels`, `label/<name>/values`,
-  `series`; `/config`, `tail`, `push` отвечают 404). Сервер ходит только по read-путям, так что
-  404 на живом стенде обычно означает неверный префикс пути в `url` или закрытый ingress для
-  одного endpoint; остальные инструменты при этом продолжают работать.
-- **`UPSTREAM_TIMEOUT`.** Фильтр по structured metadata или `| json` на сутках нагруженного
-  стенда может не уложиться в `requestTimeoutMs`: сузьте окно (`start="now-3h"`), добавьте
-  метку в selector или уменьшите `limit`/`sample`.
-- **Пустой ответ.** `no matching lines` в последний час — не доказательство, что ошибок
-  нет: тихие стенды (TST asva2) требуют `start="now-6h"`/`"now-24h"`; проверьте метки через
-  `discoverLogs` — например, у сервиса может не быть метки `level`, если он не
-  перезапускался после изменения логирования, тогда фильтруйте по тексту (`|= "ERROR"`) или
-  по `detected_level` на Loki 3.x.
-- **Метка отсутствует у сервиса.** `applicationName` ≠ имя контейнера, часть потоков идёт
-  без неё; `hint` подключения должен называть запасные метки (`instance`, `container`), а
-  `discoverLogs` с `label="applicationName"` покажет, кто её имеет.
-- **Строки без уровня (`-` во втором столбце).** Продолжения stack trace сервисов с
-  построчным логированием не имеют `level`; они не скрываются, а `getLogContext` по selector
-  без `level` показывает их вокруг ошибки.
-- **Ответ обрезан.** `Output limit reached` в футере означает предел `maxResponseBytes`:
-  сузьте запрос, используйте `countLogs`/`summarizeLogs` или поднимите лимит подключения.
-- **Что именно ушло в Loki.** В логе сервера — строка на каждый запрос с path и параметрами
-  (`GET /loki/api/v1/query_range {start=…, query=…} -> 200, 1586 bytes, 397 ms`) и на каждый
-  вызов инструмента; host, auth и содержимое строк туда не пишутся.
+- **The server does not start / the client shows "failed".** Check the client's stderr or
+  `~/.loki-mcp-server/logs/loki-mcp-server.log`: an invalid `connections.json` (unknown
+  field, duplicate key, unset `${VARIABLE}`) stops the start-up with a message that carries
+  neither the original text nor credentials. Java 21+ must be on the client's `PATH`.
+- **`ENDPOINT_UNAVAILABLE` (404).** An ingress may close part of Loki's paths (on the asva2
+  DEV stand only the read paths `query`, `query_range`, `labels`, `label/<name>/values`,
+  `series` are exposed; `/config`, `tail`, `push` answer 404). The server uses read paths
+  only, so a 404 on a live stand usually means a wrong path prefix in `url` or an ingress
+  closed for one endpoint; the other tools keep working.
+- **`UPSTREAM_TIMEOUT`.** A structured-metadata or `| json` filter over a day of a busy
+  stand may not fit into `requestTimeoutMs`: narrow the window (`start="now-3h"`), add a
+  label to the selector or lower `limit`/`sample`.
+- **Empty response.** `no matching lines` in the last hour is not proof that there are no
+  errors: quiet stands (asva2 TST) need `start="now-6h"`/`"now-24h"`; check the labels with
+  `discoverLogs` — a service may have no `level` label if it was not restarted after the
+  logging change; then filter by text (`|= "ERROR"`) or by `detected_level` on Loki 3.x.
+- **A label is missing for a service.** `applicationName` ≠ container name and some streams
+  lack it; the connection's `hint` should name fallback labels (`instance`, `container`),
+  and `discoverLogs` with `label="applicationName"` shows who has it.
+- **Lines without a level (`-` in the second column).** Stack trace continuation lines of
+  services that log line by line have no `level`; they are not hidden, and `getLogContext`
+  by a selector without `level` shows them around the error.
+- **Truncated response.** `Output limit reached` in the footer means the `maxResponseBytes`
+  limit: narrow the query, use `countLogs`/`summarizeLogs` or raise the connection limit.
+- **What exactly went to Loki.** The server log has one line per request with the path and
+  parameters (`GET /loki/api/v1/query_range {start=…, query=…} -> 200, 1586 bytes, 397 ms`)
+  and one per tool call; host, auth and line contents are never written there.
 
-## Миграция с mcp-loki
+## Migrating from mcp-loki
 
-Соответствие инструментов и настроек — [docs/migration-from-mcp-loki.md](docs/migration-from-mcp-loki.md).
+Tool and setting mapping: [docs/migration-from-mcp-loki.md](docs/migration-from-mcp-loki.md).
 
-## Разработка
+## Development
 
 ```powershell
-.\gradlew.bat build              # unit-тесты и stdio smoke на собранном jar
-.\gradlew.bat integrationTest    # Loki 2.6.1 и 3.6.0 в Testcontainers (нужен Docker)
-python scripts/live_smoke/run_smoke.py --connection dev   # read-only прогон jar на живом стенде
+.\gradlew.bat build              # unit tests and the stdio smoke on the packaged jar
+.\gradlew.bat integrationTest    # Loki 2.6.1 and 3.6.0 in Testcontainers (needs Docker)
+python scripts/live_smoke/run_smoke.py --connection dev   # read-only run of the jar against a live stand
 ```
 
-Live smoke берёт профили из [examples/connections.json](examples/connections.json)
-(URL — из `LOKI_DEV_URL`/`LOKI_TST_URL`), запускает jar по stdio как настоящий клиент и
-проходит `listConnections → discoverLogs → countLogs → queryLogs → summarizeLogs →
-getLogContext → raw`, плюс отказ pipeline, ошибку парсера Loki и `queryMetrics`; selector
-берётся из ответа `discoverLogs`, поэтому скрипт не зависит от конкретного стенда.
-`--verbose` печатает ответы целиком, `--window now-24h` расширяет окно. Ничего не пишет в Loki.
+The live smoke takes profiles from [examples/connections.json](examples/connections.json)
+(URLs from `LOKI_DEV_URL`/`LOKI_TST_URL`), starts the jar over stdio like a real client and
+walks `listConnections → discoverLogs → countLogs → queryLogs → summarizeLogs →
+getLogContext → raw`, plus pipeline rejection, a Loki parser error and `queryMetrics`; the
+selector is taken from the `discoverLogs` response, so the script does not depend on a
+particular stand. `--verbose` prints full responses, `--window now-24h` widens the window.
+Nothing is written to Loki.
 
-CI ([.github/workflows/build.yml](.github/workflows/build.yml)): `gradlew build` и
-`integrationTest` на каждый push/PR, на тег `v*` — GitHub Release с jar.
-Правила для участников — [CONTRIBUTING.md](CONTRIBUTING.md), безопасность — [SECURITY.md](SECURITY.md).
+CI ([.github/workflows/build.yml](.github/workflows/build.yml)): `gradlew build` and
+`integrationTest` on every push/PR, a GitHub Release with the jar on a `v*` tag.
+Contributor rules: [CONTRIBUTING.md](CONTRIBUTING.md), security: [SECURITY.md](SECURITY.md).
 
-План и журнал работ — [plan.md](plan.md), правила для агентов — [AGENTS.md](AGENTS.md).
+Design decisions and open items: [docs/decisions.md](docs/decisions.md); agent rules:
+[AGENTS.md](AGENTS.md).

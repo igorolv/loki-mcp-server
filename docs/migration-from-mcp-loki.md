@@ -1,70 +1,72 @@
-# Миграция с mcp-loki
+# Migrating from mcp-loki
 
-`mcp-loki` (lexfrei) — один процесс на один Loki, настройка через переменные окружения,
-ответы — сырой JSON Loki. Этот сервер — один процесс на несколько стендов из
-`connections.json`, ответы — текст для небольшой модели. Ниже — что чему соответствует
-и что придётся изменить в конфигурации клиента и в привычках модели.
+`mcp-loki` (lexfrei) is one process per Loki, configured through environment variables,
+answering with Loki's raw JSON. This server is one process for several stands from
+`connections.json`, answering with text for a small model. Below is what maps to what and
+what changes in the client configuration and in the model's habits.
 
-## Конфигурация
+## Configuration
 
 | mcp-loki | loki-mcp-server |
 |---|---|
-| `LOKI_URL` | `connections.<имя>.url` (можно `${LOKI_DEV_URL}`) |
+| `LOKI_URL` | `connections.<name>.url` (`${LOKI_DEV_URL}` is fine) |
 | `LOKI_USERNAME` / `LOKI_PASSWORD` | `auth: {"type":"BASIC","username":…,"password":"${…}"}` |
 | `LOKI_TOKEN` | `auth: {"type":"BEARER","token":"${…}"}` |
 | `LOKI_ORG_ID` | `tenant` |
-| `MCP_HTTP_PORT` (SSE) | нет: только stdio |
-| один сервер на стенд | один сервер, несколько подключений; у каждого инструмента параметр `connection` |
-| — | `timezone`, `hint`, `serviceLabels`, `limits` — см. [connections.md](connections.md) |
+| `MCP_HTTP_PORT` (SSE) | none: stdio only |
+| one server per stand | one server, several connections; every tool takes `connection` |
+| — | `timezone`, `hint`, `serviceLabels`, `limits` — see [connections.md](connections.md) |
 
-Запись MCP-клиента меняется с `podman run … ghcr.io/lexfrei/mcp-loki` на
-`java -jar loki-mcp-server.jar` с `LOKI_MCP_CONNECTIONS_FILE` (README, «Подключение к
-MCP-клиенту»). Если стендов несколько, вместо нескольких серверов `loki-dev`, `loki-tst`
-остаётся один `loki`, а стенд выбирается именем подключения.
+The MCP client entry changes from `podman run … ghcr.io/lexfrei/mcp-loki` to
+`java -jar loki-mcp-server.jar` with `LOKI_MCP_CONNECTIONS_FILE` (README, "Connecting an
+MCP client"). With several stands the separate `loki-dev`, `loki-tst` servers become one
+`loki`, and the stand is chosen by connection name.
 
-## Инструменты
+## Tools
 
-| mcp-loki | loki-mcp-server | Отличия |
+| mcp-loki | loki-mcp-server | Differences |
 |---|---|---|
-| `loki_query` (log query) | `queryLogs(connection, query, start, end, limit, raw)` | строки печатаются в хронологическом порядке как `HH:mm:ss.SSS LEVEL service message` в timezone подключения; stack trace сжат; `raw=true` даёт исходную строку с метками потока. `direction` нет: всегда самые новые строки окна, старее — повтор с `end` из футера |
-| `loki_query` (metric query) | `queryMetrics(connection, query, start, end, step)` | таблица по сериям; instant-режима нет |
-| `loki_query` для подсчёта | `countLogs(connection, query, start, end, groupBy)` | метрическое выражение строит сервер; `groupBy="time"` даёт бакеты с отметкой всплеска |
-| `loki_labels` (без `name`) | `discoverLogs(connection)` | имена меток вместе со значениями, форматом строк, JSON-полями и готовым selector |
-| `loki_labels` (`name=app`) | `discoverLogs(connection, label="app")` | до 200 значений по алфавиту |
-| `loki_series` | `discoverLogs(connection, selector=…)` | метки и значения потоков по selector; сами потоки не перечисляются |
-| `loki_stats` | нет | `countLogs` даёт число строк; объём чанков не нужен для расследования |
-| `loki_ready`, `loki_config` | нет | сервер не открывает `/ready` и `/config`; ошибка транспорта приходит текстом при первом вызове |
-| — | `summarizeLogs(connection, query, start, end, sample)` | группы повторяющихся сообщений в выборке |
-| — | `getLogContext(connection, selector, time, before, after)` | строки вокруг момента в потоке |
+| `loki_query` (log query) | `queryLogs(connection, query, start, end, limit, raw)` | lines print in chronological order as `HH:mm:ss.SSS LEVEL service message` in the connection's timezone; stack traces are compacted; `raw=true` gives the original line with stream labels. No `direction`: always the newest lines of the window; older ones by repeating with `end` from the footer |
+| `loki_query` (metric query) | `queryMetrics(connection, query, start, end, step)` | a table per series; no instant mode |
+| `loki_query` used for counting | `countLogs(connection, query, start, end, groupBy)` | the server builds the metric expression; `groupBy="time"` gives buckets with spike markers |
+| `loki_labels` (no `name`) | `discoverLogs(connection)` | label names together with values, line format, JSON fields and a ready-made selector |
+| `loki_labels` (`name=app`) | `discoverLogs(connection, label="app")` | up to 200 values, alphabetically |
+| `loki_series` | `discoverLogs(connection, selector=…)` | labels and values of the streams matching the selector; the streams themselves are not listed |
+| `loki_stats` | none | `countLogs` gives the line count; chunk volume is not needed for an investigation |
+| `loki_ready`, `loki_config` | none | the server does not expose `/ready` or `/config`; a transport error arrives as text on the first call |
+| — | `summarizeLogs(connection, query, start, end, sample)` | groups of repeated messages in a sample |
+| — | `getLogContext(connection, selector, time, before, after)` | lines around a moment in a stream |
 
-Форматы времени совместимы: `now`, относительное `1h`/`now-1h`, RFC3339; добавлены локальное
-время в timezone подключения и epoch nanoseconds. Предел `limit` — `maxEntries` подключения
-(по умолчанию 1000), окно — `maxIntervalSeconds` (24h).
+Time formats are compatible: `now`, relative `1h`/`now-1h`, RFC3339; local time in the
+connection's timezone and epoch nanoseconds are added. The `limit` cap is the connection's
+`maxEntries` (default 1000), the window cap is `maxIntervalSeconds` (24h).
 
 ## Prompts
 
-`error_logs`, `rate_query`, `top_label_values` не переносились: их роль выполняют описания
-инструментов и `instructions` сервера (сценарий `listConnections → discoverLogs → countLogs
-→ summarizeLogs → queryLogs → getLogContext → raw`). `error_logs(app)` — это
-`countLogs {applicationName="app", level="error"}` затем `queryLogs`; `top_label_values` —
-`countLogs` с `groupBy="<label>"`; `rate_query` — `queryMetrics` с `sum(rate(...))`.
+`error_logs`, `rate_query` and `top_label_values` were not carried over: the tool
+descriptions and the server `instructions` play their role (the flow `listConnections →
+discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext → raw`).
+`error_logs(app)` is `countLogs {applicationName="app", level="error"}` followed by
+`queryLogs`; `top_label_values` is `countLogs` with `groupBy="<label>"`; `rate_query` is
+`queryMetrics` with `sum(rate(...))`.
 
-## Что меняется для модели
+## What changes for the model
 
-- Ответы — текст, а не JSON: не нужно разбирать `data.result[].values` и наносекунды.
-- `count` в `mcp-loki` считал потоки; `countLogs` считает строки.
-- Неполнота видна одной фразой (`newest 50 of more`, `Output limit reached`), продолжение —
-  повтор с `end`, курсоров нет.
-- Ошибка LogQL приходит текстом Loki (`Loki rejected the query: parse error …`), остальные
-  ошибки — коротким кодом с советом; URL и credentials в них не попадают.
-- Инструкции по стенду (`hint`) читаются из `listConnections`, а не из отдельного документа.
+- Responses are text, not JSON: no parsing of `data.result[].values` and nanoseconds.
+- `count` in `mcp-loki` counted streams; `countLogs` counts lines.
+- Incompleteness is visible as one phrase (`newest 50 of more`, `Output limit reached`);
+  continuation is a repeat with `end`, there are no cursors.
+- A LogQL error arrives as Loki's text (`Loki rejected the query: parse error …`); other
+  errors as a short code with advice; URLs and credentials never appear in them.
+- Stand instructions (`hint`) are read from `listConnections`, not from a separate document.
 
-## Порядок перехода
+## Migration steps
 
-1. Собрать jar (`gradlew bootJar`) и подготовить `connections.json` по
-   [examples/connections.json](../examples/connections.json); URL и credentials — через
-   переменные окружения.
-2. Проверить стенд read-only прогоном: `python scripts/live_smoke/run_smoke.py --connection <имя>`.
-3. Заменить запись `mcp-loki` в конфигурации клиента на `loki-mcp-server`.
-4. Обновить проектные инструкции модели: вместо LogQL-рецептов под `loki_query` — имя
-   подключения и сценарий из README «Как спрашивать». Изменения документов asva2 — отдельный шаг.
+1. Build the jar (`gradlew bootJar`) and prepare `connections.json` after
+   [examples/connections.json](../examples/connections.json); URLs and credentials through
+   environment variables.
+2. Check the stand with the read-only run: `python scripts/live_smoke/run_smoke.py --connection <name>`.
+3. Replace the `mcp-loki` entry in the client configuration with `loki-mcp-server`.
+4. Update the project instructions for the model: a connection name and the flow from
+   README "How to ask" instead of LogQL recipes for `loki_query`. Changing the asva2
+   documents is a separate step.
