@@ -33,6 +33,22 @@ public class QueryTools {
         return service.logs(connection, query, start, end, limit, raw);
     }
 
+    @McpTool(name = "summarizeLogs",
+            description = "Summarize many matching log lines instead of reading them: groups of repeated messages with their count "
+                    + "in the sample, first and last time and the newest example; rare one-off messages are listed separately. "
+                    + "Use it when countLogs shows hundreds of lines. Example query: {app=\"backend\"} |= \"ERROR\". "
+                    + "Counts refer to the sampled newest lines only, not the whole window. "
+                    + "Then read one group with queryLogs |= \"<part of its message>\" or use getLogContext around its time.",
+            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
+    public String summarizeLogs(
+            @McpToolParam(description = "Connection name from listConnections") String connection,
+            @McpToolParam(description = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\"") String query,
+            @McpToolParam(description = START, required = false) String start,
+            @McpToolParam(description = END, required = false) String end,
+            @McpToolParam(description = "How many newest lines to sample, default 500", required = false) Integer sample) {
+        return service.summarize(connection, query, start, end, sample);
+    }
+
     @McpTool(name = "getLogContext",
             description = "Read what happened around one log line in its stream: a number of lines before it and after it, "
                     + "regardless of how busy the service is. Use it after queryLogs found an interesting line: pass the stream selector "

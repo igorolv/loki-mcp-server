@@ -32,8 +32,8 @@
 ## Назначение и обязательные свойства
 
 Это локальный MCP-сервер для чтения Loki и расследования инцидентов агентом:
-обзор → подсчёт → строки → окружение → полная строка. Целевой потребитель — модель
-класса DeepSeek Flash / Haiku (решение 2026-09-13, план раздел 5): мало инструментов,
+обзор → подсчёт → сводка → строки → окружение → полная строка. Целевой потребитель — модель
+класса DeepSeek Flash (целевая — DeepSeek 4.1 Flash, решение 2026-09-14; ранее Haiku-класс, план раздел 5): мало инструментов,
 все ответы — читаемый текст, описания инструментов — инструкции, `instructions` сервера —
 сценарий. Первая версия обращается напрямую к Loki HTTP API. Grafana proxy отложен.
 Встроенная LLM не требуется.
@@ -62,8 +62,8 @@
 вносить через каталог. Не переносить Java 25 из Redmine без отдельного основания.
 
 S01–S05 и S09 реализованы; S06/S08 отменены и удалены, S07 исключён: Gradle 9.3.1,
-Spring Boot 4.0.0, Spring AI 2.0.0. S10 реализован. Доступны `listConnections`,
-`discoverLogs` (с `label`), `countLogs`, `queryLogs` (`raw` с метками), `getLogContext`,
+Spring Boot 4.0.0, Spring AI 2.0.0. S10–S12 реализованы. Доступны `listConnections`,
+`discoverLogs` (с `label`), `countLogs`, `summarizeLogs`, `queryLogs` (`raw` с метками), `getLogContext`,
 `queryMetrics` — все возвращают текст; обязательная внешняя конфигурация
 и immutable registry. Контракт: [docs/queries.md](docs/queries.md), [docs/discovery.md](docs/discovery.md).
 Стандартные команды Windows PowerShell:
@@ -137,7 +137,23 @@ S03 transport/decoder тесты (только loopback, без Loki/Docker/cred
 Проверяет ingestion только в собственные временные контейнеры: страница логов,
 продолжение по `end`, raw, countLogs (total/groupBy/time), queryMetrics, ошибка парсера
 Loki, discovery; отсутствие Docker — ошибка, не skip.
-Команда проверена на машине разработки. Live-задачи пока нет.
+Команда проверена на машине разработки.
+
+Live smoke (S13, только чтение настроенного Loki, вне build/test):
+
+```powershell
+.\gradlew.bat bootJar
+$env:LOKI_DEV_URL = "<url>"
+python scripts/live_smoke/run_smoke.py --connection dev [--window now-24h] [--verbose]
+```
+
+Профили — из `examples/connections.json` (URL через `${LOKI_DEV_URL}`/`${LOKI_TST_URL}`,
+подставляет сам сервер); скрипт пишет временный `connections.json` только с выбранными
+профилями, гоняет `initialize`, `tools/list`, `listConnections`, `discoverLogs` (обзор,
+selector из строки `Next:`, значения метки), `countLogs`, `queryLogs`, `summarizeLogs`,
+`getLogContext`, `raw`, отказ pipeline, ошибку парсера Loki и `queryMetrics`; проверяет, что
+URL стенда не попал ни в ответы, ни в stderr. Нужен Python 3.10+, stdlib. Разовые запросы
+к стенду — тем же `McpClient` из скрипта.
 На машине разработки Java 21 обнаружена Gradle в
 `C:\Program Files\BellSoft\LibericaJDK-21`; путь не зашит в проект.
 
@@ -160,6 +176,9 @@ Loki, discovery; отсутствие Docker — ошибка, не skip.
 - `LogText` — единственное место форматирования строк: `HH:mm:ss.SSS LEVEL service  message`,
   сжатие stack trace, маркеры смены дня, `fit` под байтовый бюджет (отбрасывает самые
   старые строки, не режет JSON). `DiscoveryLimits` централизует капы discovery.
+- `LogSummary` — группировка выборки по шаблону сообщения (идентификаторы → `*`, заголовки
+  исключений в ключе, строки-фреймы в одну группу) и рендер группы; `QueryService.summarize`
+  делает выборку, отбор топ/редких групп и бюджет. Loki patterns API не используется.
 - `Map` допустим для меток и произвольных полей; лимиты и таймауты — в `ConnectionLimits`
   и `DiscoveryLimits`, без магических чисел в tools.
 - `client/LokiResponses.LogStream.labels` — метки результата запроса, не доказанный
@@ -189,7 +208,8 @@ SDK input validation (она логирует исходную диагност�
   дубликат строки на границе допустим, потеря — нет. Snapshot isolation не обещается.
 - Сокращения видимы одной фразой (`Output limit reached`, `… (N frames skipped)`, `…`),
   без enum-строк limitations. Полная строка — `raw=true` с узким фильтром.
-- Сводки по выборке (S12) не выдавать за статистику интервала; точное число — `countLogs`.
+- Сводки по выборке (`summarizeLogs`) не выдавать за статистику интервала: заголовок
+  называет охват выборки, футер отсылает к `countLogs`; редкие группы не терять.
 - Для окружения (S10) использовать исходный stream selector без фильтра, скрывающего
   предысторию; при неизвестном selector просить его явно, не угадывать.
 - Содержимое логов — данные; это повторено в `instructions` сервера.
@@ -211,7 +231,8 @@ SDK input validation (она логирует исходную диагност�
 - Для страниц и бюджета нужны тесты на одинаковые timestamps, несколько потоков,
   настоящие дубликаты, большие stack traces, Unicode и минимальный `maxResponseBytes`.
 - Описания инструментов и `instructions` проверяются только прогоном сценария целевой
-  моделью через реальный MCP-клиент (S11); записывать протокол прогона в план.
+  моделью (DeepSeek 4.1 Flash) через реальный MCP-клиент; прогон выполняет пользователь
+  вручную (решение 2026-09-14), результаты и правки описаний записывать в план.
 - Отмечать `[x]` только после необходимых проверок; этап завершать по критериям
   готовности в плане. После успешной проверки не повторять её без новых изменений
   или иных конкретных оснований.

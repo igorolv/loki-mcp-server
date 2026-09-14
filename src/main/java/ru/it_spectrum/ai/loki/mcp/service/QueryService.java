@@ -85,9 +85,68 @@ public class QueryService {
         if (more || dropped > 0) {
             text.append("Shown ").append(shown).append(" newest lines; oldest shown ").append(iso(oldest, zone)).append(". ");
             text.append("Older: repeat with end=\"").append(iso(QueryTime.ceilMillis(oldest), zone)).append("\". ");
-            text.append("Too many lines? Narrow the query (add a filter or level) or use countLogs.");
+            text.append("Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.");
         } else text.append("Shown all ").append(shown).append(" matching lines.");
         return text.toString();
+    }
+
+    /**
+     * Groups of repeated messages in the newest {@code sample} lines: count, first/last time and the newest example.
+     * The numbers describe the sample, never the window; the footer says so and names countLogs for the total.
+     */
+    public String summarize(String connection, String query, String start, String end, Integer sample) {
+        var definition = registry.require(connection);
+        requireLogQuery(query);
+        var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        int maximum = definition.limits().maxEntries();
+        int usedSample = sample == null ? Math.min(LogSummary.DEFAULT_SAMPLE, maximum) : sample;
+        if (usedSample <= 0 || usedSample > maximum)
+            throw Errors.invalid("sample must be between 1 and " + maximum + " for this connection.");
+        var events = fetch(connection, query, window, usedSample, LokiHttpClient.Direction.BACKWARD);
+        ZoneId zone = definition.timezone();
+        String where = query.strip() + " — " + connection + ", " + window(window, zone);
+        if (events.isEmpty()) return "Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
+                + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.";
+        boolean more = events.size() >= usedSample;
+        var groups = LogSummary.group(events, normalizer, definition.serviceLabels());
+        String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
+                + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
+        String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist), "
+                : "all " + events.size() + " lines, ") + "spanning " + span + ", " + groups.size()
+                + (groups.size() == 1 ? " distinct message." : " distinct messages.");
+        var top = groups.subList(0, Math.min(LogSummary.TOP_GROUPS, groups.size()));
+        var rare = new ArrayList<LogSummary.Group>();
+        for (var group : groups.subList(top.size(), groups.size()))
+            if (group.count <= LogSummary.RARE_LINES) rare.add(group);
+        rare.sort(Comparator.comparing((LogSummary.Group g) -> g.last.nanos()).reversed());
+        int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
+        int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size());
+        while (true) {
+            var lines = new ArrayList<String>();
+            lines.add("Groups by count in the sample (first–last time, level, service, newest example):");
+            for (var group : top.subList(0, keepTop)) lines.addAll(LogSummary.render(group, zone));
+            int hiddenGroups = groups.size() - keepTop, hiddenLines = 0;
+            for (var group : groups.subList(keepTop, groups.size())) hiddenLines += group.count;
+            if (keepRare > 0) {
+                lines.add("Rare (" + (LogSummary.RARE_LINES == 1 ? "1 line" : "1–" + LogSummary.RARE_LINES + " lines") + " each, easy to miss):");
+                for (var group : rare.subList(0, keepRare)) lines.addAll(LogSummary.render(group, zone));
+                hiddenGroups -= keepRare;
+                for (var group : rare.subList(0, keepRare)) hiddenLines -= group.count;
+            }
+            if (hiddenGroups > 0)
+                lines.add("  (+" + hiddenGroups + " more groups, " + hiddenLines + " lines: narrow the query to see them)");
+            var footer = new StringBuilder();
+            if (keepTop < top.size() || keepRare < Math.min(LogSummary.RARE_GROUPS, rare.size()))
+                footer.append("Output limit reached: showing ").append(keepTop + keepRare).append(" of ").append(groups.size()).append(" groups. ");
+            footer.append("Counts are for the ").append(events.size()).append(" sampled lines only; countLogs gives the number for the whole window. ")
+                    .append("To read one group: queryLogs with |= \"<distinctive part of its message>\".");
+            String text = assemble(header, lines, footer.toString());
+            if (bytes(text) <= budget) return text;
+            if (keepRare > 0) keepRare--;
+            else if (keepTop > 1) keepTop--;
+            else throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                        "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the query or raise the limit.");
+        }
     }
 
     /**

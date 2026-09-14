@@ -125,6 +125,12 @@ class LokiCompatibilityTest {
                 assertTrue(metrics.contains("step 1s, 1 series:\n{}\n"), metrics);
                 assertTrue(metrics.lines().anyMatch(l -> l.matches("  \\d\\d:\\d\\d:\\d\\d  2")), metrics);
                 assertTrue(service.metrics("fixture", "sum(count_over_time({fixture=\"absent\"}[1s]))", start, end, "1s").endsWith("matched no data in this window."));
+                var summary = service.summarize("fixture", selector, start, end, null);
+                assertTrue(summary.contains(": all 3 lines, spanning " + time + "–"), summary);
+                assertTrue(summary.contains(", 3 distinct messages.\n"), summary);
+                assertTrue(summary.contains("\n    1×  " + time + "  INFO  a  Ошибка 🐈\n         java.io.IOException: x\n"), summary);
+                assertTrue(summary.contains("\n    1×  " + time + "  -     b  same timestamp other stream\n"), summary);
+                assertTrue(summary.endsWith("Counts are for the 3 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= \"<distinctive part of its message>\"."), summary);
                 var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
                 assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
                 var discovery = new DiscoveryService(registry, client);

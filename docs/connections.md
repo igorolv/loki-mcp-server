@@ -3,7 +3,7 @@
 Сервер загружает конфигурацию один раз при запуске.
 `listConnections` возвращает текст — по строке на подключение: имя, описание и
 подсказку оператора — и не обращается к Loki. Для чтения доступны
-[queryLogs, countLogs, queryMetrics](queries.md) и [discoverLogs](discovery.md).
+[queryLogs, countLogs, summarizeLogs, getLogContext, queryMetrics](queries.md) и [discoverLogs](discovery.md).
 Наличие подключения в списке не подтверждает доступность endpoint.
 
 По умолчанию файл — `~/.loki-mcp-server/connections.json`.

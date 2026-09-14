@@ -2,7 +2,7 @@
 
 Контракт S09: все инструменты возвращают один текстовый `content`. Output schemas,
 `structuredContent`, курсоры и проекция полей S06/S08 удалены. Целевой потребитель —
-модель класса DeepSeek Flash / Haiku, которая видит только описания инструментов,
+модель класса DeepSeek Flash (целевая — DeepSeek 4.1 Flash), которая видит только описания инструментов,
 `instructions` сервера и текст ответа.
 
 Общие параметры: `connection` обязателен (имя из `listConnections`); `start`
@@ -23,7 +23,7 @@
     ... (37 frames skipped)
     Caused by: java.io.IOException: inner
     at x.Y.z(Y.java:9)
-Shown 50 newest lines; oldest shown 2026-09-13T10:12:03.123+03:00. Older: repeat with end="2026-09-13T10:12:03.124+03:00". Too many lines? Narrow the query (add a filter or level) or use countLogs.
+Shown 50 newest lines; oldest shown 2026-09-13T10:12:03.123+03:00. Older: repeat with end="2026-09-13T10:12:03.124+03:00". Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.
 ```
 
 Строка: `HH:mm:ss.SSS LEVEL service  message [trace=…]`, время — в timezone подключения.
@@ -85,6 +85,40 @@ Earlier: repeat with time="2026-09-13T10:11:58.001+03:00", after=0. Later: repea
 сузить selector. При нехватке бюджета строки отбрасываются с более длинной стороны,
 отмеченные строки не отбрасываются: `Output limit reached: showing N before and M after of K fetched lines.`
 
+## summarizeLogs(connection, query, start, end, sample = 500)
+
+Сводка вместо чтения: один backward-запрос `query_range` на `sample` самых новых строк
+(не больше `maxEntries`), группировка локально по шаблону сообщения — Loki patterns API
+не используется, поэтому работает и на 2.6.1. Шаблон: сообщение, в котором UUID, даты и
+время, hex-идентификаторы и числа (в том числе с единицей — `15ms`, `42MB`; `v1.2` и
+`asva2` сохраняются) заменены на `*`, плюс до трёх заголовков исключений из stack trace
+(первая строка и `Caused by:`), чтобы разные ошибки с одинаковым сообщением не склеивались.
+Строки-фреймы (`at ...`, `... N more`) сервисов, пишущих stack trace построчно, сворачиваются
+в одну группу с пояснением вместо примера.
+
+```
+Summary of {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00): newest 500 lines sampled (more exist), spanning 10:03:12.001–10:59:58.120, 12 distinct messages.
+Groups by count in the sample (first–last time, level, service, newest example):
+  340×  10:03:12.001–10:59:58.120  ERROR backend  Connection refused to nsi-backend:8080 request 1039
+         java.net.ConnectException: Connection refused
+         Caused by: java.io.IOException: port 39
+   57×  10:10:00.000–10:58:00.000  -     backend  stack trace frame lines (at ...); read them with getLogContext around an error line
+Rare (1–2 lines each, easy to miss):
+    1×  10:12:03.123  ERROR backend  NullPointerException in OrderService id=42
+  (+3 more groups, 5 lines: narrow the query to see them)
+Counts are for the 500 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= "<distinctive part of its message>".
+```
+
+Группы сортируются по числу строк в выборке, затем по новизне; показываются первые 20.
+Группы из 1–2 строк, не попавшие в топ, перечисляются отдельно (до 20, новые первыми) —
+редкая отличающаяся ошибка не должна пропасть. Остаток считается строкой `(+N more groups,
+M lines)`. Пример группы — самая новая строка с идентификаторами как есть; для группы с
+одной строкой время одно. Заголовок называет реальный охват выборки (`spanning`): 500
+новых строк могут покрывать лишь часть окна, поэтому частота в выборке не выдаётся за
+статистику интервала — футер отсылает к `countLogs`. При нехватке бюджета сначала
+отбрасываются редкие группы, затем группы с конца списка: `Output limit reached: showing
+N of M groups.` Пустой результат — тот же совет, что у `queryLogs`.
+
 ## countLogs(connection, query, start, end, groupBy)
 
 Сервер сам строит metric LogQL; `query` — обычный log query, начинающийся с `{`.
@@ -144,9 +178,11 @@ HTTP 400 и `status=error` от Loki передаются как `Loki rejected 
 
 `gradlew.bat build --console=plain` — unit-тесты формата строки, сжатия stack trace,
 футера, бюджета, countLogs/queryMetrics, getLogContext (два запроса, отметка, точность
-времени, обрезка вокруг цели) и stdio smoke на реальном jar
+времени, обрезка вокруг цели), summarizeLogs (шаблоны, редкие группы, бюджет) и stdio smoke на реальном jar
 (`instructions`, tools/list без output schema, 16 outstanding вызовов с разными бюджетами,
 ошибки без секретов, текст ошибки Loki 400). `gradlew.bat integrationTest --console=plain`
 — Loki 2.6.1/3.6.0: страница, продолжение по `end`, raw с метками, контекст
 (строки в момент, точное время, момент без строк, отказ pipeline), count/groupBy/time,
-метрики, ошибка парсера, discovery и значения метки.
+сводка, метрики, ошибка парсера, discovery и значения метки.
+`python scripts/live_smoke/run_smoke.py --connection <имя>` — read-only прогон собранного jar
+по stdio на живом стенде (см. README, раздел «Разработка»).

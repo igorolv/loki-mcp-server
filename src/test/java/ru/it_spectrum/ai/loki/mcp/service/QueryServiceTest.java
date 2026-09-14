@@ -24,7 +24,11 @@ class QueryServiceTest {
             new ConnectionDefinition("one", null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null,
                     ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 4096, 3, 7200, 2, 25)),
             new ConnectionDefinition("two", null, URI.create("http://localhost:2"), ConnectionAuth.NONE, null,
-                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 1024, 100, 86400, 100, 1000))));
+                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 1024, 100, 86400, 100, 1000)),
+            new ConnectionDefinition("three", null, URI.create("http://localhost:3"), ConnectionAuth.NONE, null,
+                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 65536, 1000, 86400, 100, 1000)),
+            new ConnectionDefinition("tight", null, URI.create("http://localhost:4"), ConnectionAuth.NONE, null,
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 2048, 1000, 86400, 100, 1000))));
     private final QueryService service = new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
 
     private void range(QueryData data, List<String> warnings) {
@@ -47,7 +51,7 @@ class QueryServiceTest {
                 11:59:59.123 -     y  dup
                 11:59:59.123 -     y  dup
                 12:00:00.123 INFO  x  newest
-                Shown 3 newest lines; oldest shown 2026-09-13T11:59:59.123+00:00. Older: repeat with end="2026-09-13T11:59:59.124+00:00". Too many lines? Narrow the query (add a filter or level) or use countLogs.""", text);
+                Shown 3 newest lines; oldest shown 2026-09-13T11:59:59.123+00:00. Older: repeat with end="2026-09-13T11:59:59.124+00:00". Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.""", text);
         verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(1), now, 3, LokiHttpClient.Direction.BACKWARD, null);
         range(new Streams(List.of(new LogStream(Map.of("app", "y"), List.of(entry(a, "dup"), entry(a, "dup"))))), List.of());
         var fewer = service.logs("one", "{app=~\".+\"}", null, null, null, null);
@@ -282,5 +286,79 @@ class QueryServiceTest {
         assertTrue(text.contains("before 1 ") && text.contains("after 1 ") && !text.contains("before 20 ") && !text.contains("after 20 "), text);
         assertTrue(text.contains("Output limit reached: showing "), text);
         assertTrue(text.contains("Earlier: repeat with time=\"2026-09-13T11:59:5") && text.contains("Later: repeat with time=\"2026-09-13T12:00:0"), text);
+    }
+    @Test
+    void summaryGroupsRepeatedMessagesKeepsRareOnesAndDescribesTheSample() {
+        var lines = new java.util.ArrayList<LogEntry>();
+        Instant base = now.minusSeconds(100);
+        for (int i = 0; i < 40; i++)
+            lines.add(entry(QueryTime.nanos(base.plusSeconds(i)), "{\"message\":\"Connection refused to nsi-backend:8080 request " + (1000 + i)
+                    + " user 7f3a9c2e-1b4d-4e5f-8a6b-9c0d1e2f3a4b\",\"log.level\":\"ERROR\",\"error.stack_trace\":\"java.net.ConnectException: Connection refused\\n\\tat a.B(B.java:" + i + ")\\nCaused by: java.io.IOException: port " + i + "\\n\\tat c.D(D.java:1)\"}"));
+        for (int i = 0; i < 3; i++)
+            lines.add(entry(QueryTime.nanos(base.plusSeconds(50 + i)), "\tat com.example.Foo.bar(Foo.java:" + (10 + i) + ")"));
+        lines.add(entry(QueryTime.nanos(base.plusSeconds(60)), "NullPointerException in OrderService id=42"));
+        lines.add(entry(QueryTime.nanos(base.plusSeconds(61)), "Timeout after 30000 ms calling 10.0.0.7:8443"));
+        lines.add(entry(QueryTime.nanos(base.plusSeconds(62)), "Timeout after 45000 ms calling 10.0.0.9:8443"));
+        range(new Streams(List.of(new LogStream(Map.of("app", "x"), lines))), List.of());
+        var text = service.summarize("three", "{app=\"x\"}", "now-2m", "now", 100);
+        verify(client).queryRange("three", "{app=\"x\"}", now.minusSeconds(120), now, 100, LokiHttpClient.Direction.BACKWARD, null);
+        assertTrue(text.startsWith("Summary of {app=\"x\"} — three, 2026-09-13 14:58:00–15:00:00 (+03:00): all 46 lines, spanning 14:58:20.123–14:59:22.123, 4 distinct messages.\n"), text);
+        assertTrue(text.contains("\nGroups by count in the sample (first–last time, level, service, newest example):\n"), text);
+        assertTrue(text.contains("\n   40×  14:58:20.123–14:58:59.123  ERROR x  Connection refused to nsi-backend:8080 request 1039 user 7f3a9c2e-1b4d-4e5f-8a6b-9c0d1e2f3a4b\n"
+                + "         java.net.ConnectException: Connection refused\n         Caused by: java.io.IOException: port 39\n"), text);
+        assertTrue(text.contains("\n    3×  14:59:10.123–14:59:12.123  -     x  stack trace frame lines (at ...); read them with getLogContext around an error line\n"), text);
+        assertTrue(text.contains("\n    2×  14:59:21.123–14:59:22.123  -     x  Timeout after 45000 ms calling 10.0.0.9:8443\n"), text);
+        assertTrue(text.contains("\n    1×  14:59:20.123  -     x  NullPointerException in OrderService id=42\n"), text);
+        assertFalse(text.contains("Rare ("), text);
+        assertTrue(text.endsWith("\nCounts are for the 46 sampled lines only; countLogs gives the number for the whole window. "
+                + "To read one group: queryLogs with |= \"<distinctive part of its message>\"."), text);
+        // A page as large as the sample means more lines may exist.
+        var full = service.summarize("one", "{app=\"x\"}", "now-2m", "now", null);
+        verify(client).queryRange("one", "{app=\"x\"}", now.minusSeconds(120), now, 3, LokiHttpClient.Direction.BACKWARD, null);
+        assertTrue(full.contains(": newest 3 lines sampled (more exist), "), full);
+    }
+
+    @Test
+    void summaryOfManyGroupsListsRareOnesAndFitsTheBudget() {
+        Instant base = now.minusSeconds(2000);
+        var many = new java.util.ArrayList<LogEntry>();
+        for (int g = 0; g < 25; g++)
+            for (int i = 0; i < 25 - g; i++) many.add(entry(QueryTime.nanos(base.plusSeconds(g * 30L + i)), "group " + (char) ('a' + g) + " line " + i));
+        for (int r = 0; r < 25; r++) many.add(entry(QueryTime.nanos(base.plusSeconds(1000 + r)), "rare " + (char) ('a' + r) + " once"));
+        range(new Streams(List.of(new LogStream(Map.of("app", "x"), many))), List.of());
+        var text = service.summarize("three", "{app=\"x\"}", "now-1h", "now", null);
+        assertTrue(text.contains("all " + many.size() + " lines, "), text);
+        assertTrue(text.contains(", 50 distinct messages.\n"), text);
+        assertTrue(text.contains("\n   25×  ") && text.contains("group a line 24\n"), text);
+        assertTrue(text.contains("\n    6×  ") && !text.contains("\n    5×  "), text); // the top 20 groups end at group t (6 lines)
+        assertTrue(text.contains("\nRare (1–2 lines each, easy to miss):\n    1×  "), text);
+        assertTrue(text.contains("rare y once\n") && !text.contains("rare e once"), text); // the 20 newest rare groups
+        assertTrue(text.contains("\n  (+10 more groups, 20 lines: narrow the query to see them)\n"), text);
+        // A 2048-byte budget: rare groups go first, then top groups, and the footer says so.
+        text = service.summarize("tight", "{app=\"x\"}", "now-1h", "now", null);
+        assertTrue(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 2048 - LogText.ENVELOPE_BYTES, text);
+        assertFalse(text.contains("Rare ("), text);
+        assertTrue(text.contains("Output limit reached: showing ") && text.contains(" of 50 groups. "), text);
+        assertTrue(text.contains("\n   25×  "), text);
+        range(new Streams(List.of()), List.of());
+        var empty = service.summarize("two", "{app=\"x\"}", null, null, null);
+        assertTrue(empty.startsWith("Summary of {app=\"x\"} — two, ") && empty.contains("no matching lines.\nNo lines match in this window."), empty);
+        assertTrue(assertThrows(LokiOperationException.class, () -> service.summarize("one", "{app=\"x\"}", null, null, 4)).getMessage().contains("between 1 and 3"));
+        assertTrue(assertThrows(LokiOperationException.class, () -> service.summarize("one", "sum(rate({a=\"b\"}[1m]))", null, null, null)).getMessage().contains("queryMetrics"));
+    }
+
+    @Test
+    void summaryTemplatesReplaceIdentifiersAndFoldFrameLines() {
+        assertEquals("Order * for user * failed at * (*) hash * ip *:*",
+                LogSummary.normalize("Order 12345 for user 7f3a9c2e-1b4d-4e5f-8a6b-9c0d1e2f3a4b failed at 2026-09-13T10:12:03.123+03:00 (10:12:03) hash 0xdeadbeef ip 10.0.0.7:8080"));
+        assertEquals("asva2 v1.2 ssj-pr-* took *? no: took * ms", LogSummary.normalize("asva2  v1.2 ssj-pr-1285 took 15ms? no: took 15 ms"));
+        assertEquals("Retry * of *", LogSummary.normalize("Retry 3 of 5"));
+        var normalizer = new EventNormalizer();
+        var plain = new ru.it_spectrum.ai.loki.mcp.model.LogEvent("1", Map.of(), "\tat com.example.Foo.bar(Foo.java:12)", Map.of());
+        assertEquals(LogSummary.FRAMES_TEMPLATE, LogSummary.template(normalizer.view(plain, List.of())));
+        var more = new ru.it_spectrum.ai.loki.mcp.model.LogEvent("1", Map.of(), "... 12 more", Map.of());
+        assertEquals(LogSummary.FRAMES_TEMPLATE, LogSummary.template(normalizer.view(more, List.of())));
+        var json = new ru.it_spectrum.ai.loki.mcp.model.LogEvent("1", Map.of(), "{\"message\":\"Failed 7\",\"error.stack_trace\":\"java.io.IOException: x 9\\n\\tat a.B(B.java:1)\\n\\tat a.C(C.java:2)\\nCaused by: java.net.SocketException: y\\n\\tat d.E(E.java:3)\"}", Map.of());
+        assertEquals("Failed *\njava.io.IOException: x *\nCaused by: java.net.SocketException: y", LogSummary.template(normalizer.view(json, List.of())));
     }
 }
