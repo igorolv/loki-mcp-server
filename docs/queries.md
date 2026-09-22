@@ -50,6 +50,46 @@ possible) but lines with the same millisecond are never lost. Nothing is stored 
 calls; no snapshot is promised. An empty result suggests widening the window, checking
 labels with `discoverLogs` or simplifying the filter.
 
+## followKey(connection, selector, key, start, end, limit = 100)
+
+Every line of a stream selector that holds one identifier, oldest first, across services:
+what happened to one task, request or message on a stand without tracing. `key` is
+`name=value` or `name: value` as `summarizeLogs` prints it (`taskExecutionId=13548`), or a
+bare value (`ERR-5ced1eb2-849d-478d-8cbe-31ad23a1f88a`); the value must be 3–200
+characters without quotes or backslashes. `selector` is a plain stream selector covering
+every service to search (`{namespace="dev"}`); the server adds the filter itself:
+one forward `query_range` of `selector |= "value"`, `limit` lines. The value is then matched
+as a whole token (`13548` is not found in `135480` or `ERR-13548x`); lines that held it only
+inside a longer word are counted in the header and left out.
+
+```
+Lines with taskExecutionId=13548 in {namespace=~"dev|asv-dev"} — dev, 2026-09-22 00:29:32–2026-09-23 00:29:32 (+03:00): all 12 lines in 2 services (scheduler-main, ssj-main); first error 00:00:13.689 ssj-main. 6 lines holding 13548 only inside a longer word were left out.
+00:00:13.293 INFO  scheduler-main  [TASK_DB_CREATE] Создана запись о выполнении: taskExecutionId=13548, taskName=ssd-load, …
+00:00:13.665 INFO  scheduler-main  [TASK_DISPATCH] Отправка задачи на выполнение: taskExecutionId=13548, taskClass=…UploadInsuranceCompany, worker=ssj-service, …
+00:00:13.682 INFO  ssj-main  [TASK_ACCEPT] Принята задача (sync): taskExecutionId=13548, …
+00:00:13.689 ERROR ssj-main  [TASK_EXECUTE_ERROR] Ошибка при выполнении задачи: taskExecutionId=13548, …
+         SpectrumException: Не найдена доступная задача с классом ru.it_spectrum.asv.ssj.bc.tasks.UploadInsuranceCompany
+         at ru.it_spectrum.asv.bc.task.runtime.TaskServiceImpl.findDelegate(TaskServiceImpl.java:321)
+         [configuration: task worker] The service the scheduler sent the task to has no worker for …
+00:00:13.762 ERROR ssj-main  [TASK_EXECUTION_ERROR] Ошибка при выполнении задачи: taskExecutionId=13548
+         SpectrumException: …  ← wrapped in ExecutionException, SpectrumException
+         at ru.it_spectrum.asv.bc.task.runtime.TaskServiceImpl.findDelegate(TaskServiceImpl.java:321)
+         [configuration: task worker]
+00:00:13.777 WARN  scheduler-main  [TASK_FAILED_STATUS] Задача вернула ошибочный статус: taskExecutionId=13548, status=FAILED, …
+         [configuration: task worker]
+Shown every line of the window with this key.
+```
+
+The header names the services in the order they appear and the first error (a line with
+level `ERROR`/`FATAL` or a stack trace). A line prints as in `queryLogs` (message cut at
+400 characters) followed by the root cause, the application frame and the rule tag as in
+`summarizeLogs`; the advice of a rule is printed at its first line only. Lines are
+chronological with date markers; the budget cuts the newest lines, since the story of a key
+starts at its first one: `Output limit reached: showing the oldest N of M lines.` When
+lines were cut or `limit` was reached, the footer says `Newer: repeat with start="<time of
+the last shown line>"` — the boundary millisecond is read again rather than lost. An empty
+result advises a window around the time the key was seen or a wider selector.
+
 ## getLogContext(connection, selector, time, before = 20, after = 20)
 
 Lines of one stream selector around a moment: `before` lines up to and including it and
@@ -92,37 +132,89 @@ M after of K fetched lines.`
 
 ## summarizeLogs(connection, query, start, end, sample = 500)
 
-A summary instead of reading: one backward `query_range` for the `sample` newest lines
-(at most `maxEntries`), grouped locally by message template — Loki's pattern API is not
-used, so it works on 2.6.1 too. The template is the message with UUIDs, dates and times,
-hex identifiers and numbers (including ones with a unit — `15ms`, `42MB`; `v1.2` and
-`asva2` are kept) replaced by `*`, plus up to three exception headers from the stack trace
-(the first line and `Caused by:` lines) so that different errors with the same message do
-not merge. Frame lines (`at ...`, `... N more`) of services that log stack traces one line
-per frame collapse into one group with an explanation instead of an example.
+A summary instead of reading: the `sample` newest lines of the window, grouped locally —
+Loki's pattern API is not used, so it works on 2.6.1 too.
+
+**Grouping.** A line with a stack trace (`error.stack_trace` and the other stack fields
+of a JSON line, or the frames after the first line of a plain one) is grouped by its root
+cause: the last `Caused by:` of the trace (the first section of a root-first `Wrapped by:`
+trace; `Suppressed:` never counts), the first line of its message with identifiers
+replaced by `*`, and the application frame — the first frame under the root section whose
+class starts with one of the connection's `applicationPackages`, else the first such frame
+of the wrapper nearest to the root. Servlet filter methods (`doFilter`,
+`doFilterInternal`) are never the application frame; lambda and CGLIB decorations are
+removed (`lambda$findDelegate$1` → `findDelegate`, `Service$$SpringCGLIB$$0` → `Service`)
+and the line number is not part of the key. The wrappers are shown, not grouped by, so the
+lines one failure produces through different wrappers fall into one group. Any other line
+is grouped by its message template: UUIDs, dates and times, hex identifiers and numbers
+(including ones with a unit — `15ms`, `42MB` — and space-grouped thousands — `6 029`;
+`v1.2` and `asva2` are kept) replaced by `*`. Frame lines (`at ...`, `... N more`) of
+services that log stack traces one line per frame collapse into one group with an
+explanation instead of an example.
 
 ```
-Summary of {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00): newest 500 lines sampled (more exist), spanning 10:03:12.001–10:59:58.120, 12 distinct messages.
+Summary of {namespace="dev"} |= "ERROR" — dev, 2026-09-21 00:00:00–21:00:00 (+03:00): newest 500 lines sampled (more exist), spanning 08:15:06.757–20:33:46.059, 33 distinct messages.
 Groups by count in the sample (first–last time, level, service, newest example):
-  340×  10:03:12.001–10:59:58.120  ERROR backend  Connection refused to nsi-backend:8080 request 1039
-         java.net.ConnectException: Connection refused
-         Caused by: java.io.IOException: port 39
-   57×  10:10:00.000–10:58:00.000  -     backend  stack trace frame lines (at ...); read them with getLogContext around an error line
+    2×  19:00:09.753–19:00:09.846  ERROR nsi-backend  [TASK_EXECUTION_ERROR] Ошибка при выполнении задачи: taskExecutionId=500004
+         NullPointerException: Cannot invoke "String.contains(java.lang.CharSequence)" because "filePath" is null  ← wrapped in ExecutionException, SpectrumException
+         at ru.it_spectrum.asv.nsi.tasks.UploadInsuranceCompanyTask.getFile(UploadInsuranceCompanyTask.java:197)
+    2×  09:15:48.800–09:15:49.684  ERROR sec-ui-backend  ErrorID: ERR-… | Path: /api/systemGrid/getByCurrentUser | Exception: org.springframework.http.converter.HttpMessageNotWritableException
+         IOException: Обрыв канала  ← wrapped in HttpMessageNotWritableException, …, AsyncRequestNotUsableException, ClientAbortException
+    1×  20:14:45.483  ERROR sbp-ui-backend  Schema "sbp" has version 1.7, but no migration could be resolved in the configured locations !
 Rare (1–2 lines each, easy to miss):
-    1×  10:12:03.123  ERROR backend  NullPointerException in OrderService id=42
-  (+3 more groups, 5 lines: narrow the query to see them)
+  …
 Counts are for the 500 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= "<distinctive part of its message>".
 ```
+
+**Rules.** When the connection has a rules catalogue (`rulesFile`,
+[connections.md](connections.md#rules-catalogue)), every line is matched against it and a
+group takes the match of its lines. A matched group prints one more line,
+`[category: subject] advice`. Above the groups, `Known causes by the rules of this
+connection` sums the matched lines by category and subject (up to 10 entries). Noise groups
+are not listed among the groups: a block `Noise by the rules of this connection (N of M
+sampled lines, not listed above)` prints one line each (count, span, service, rule id, the
+root cause or message cut at 120 characters; up to 10 groups). When the sample was cut and
+noise holds at least a third of it, the block ends with the filters of the noise rules that
+hold at least a tenth of the sample — `Noise takes 475 of 500 sampled lines; to sample past
+it, add != "NoResourceFoundException" to the query.` Under the budget noise groups are
+dropped after the rare ones and before the top list. Without a catalogue the output is as
+below.
+
+**Linked keys.** Every line's identifiers are collected: `name=value` or `name: value`
+pairs of the message whose name ends in `Id`, `ID` or `_id` (the value 3–64 letters,
+digits, `_` or `-`), and the trace id. When a key of a group's newest line is carried by
+lines of other groups, the group prints `linked: taskExecutionId=13548 → scheduler-main 2
+lines` (up to two keys, counted by the service of those groups) and the footer adds
+`Groups with the same 'linked:' key are one failure seen by several services; followKey
+with that key shows its lines in order.` A key carried by one line only (the `ErrorID` of a
+single request) is not printed.
+
+A group prints its newest line (level, service, the message cut at 200 characters), then
+for a root-cause group the root type, its message when the logged message does not already
+contain it (cut at 160 characters) and the wrappers outermost first — repeats collapsed, a
+chain longer than three shown as the outermost, `…` and the two nearest to the root — and
+the application frame with its line number. A group without a root cause prints up to three
+exception headers of its stack trace instead.
 
 Groups are sorted by count in the sample, then by recency; the first 20 are shown. Groups
 of 1–2 lines outside the top list are printed separately (up to 20, newest first) — a rare,
 different error must not disappear. The rest is counted in `(+N more groups, M lines)`.
-The example of a group is its newest line with identifiers as they are; a single-line group
-prints one time. The header names the real span of the sample (`spanning`): 500 newest
-lines may cover only part of the window, so the frequency in the sample is never presented
-as a statistic of the interval — the footer points to `countLogs`. Under the budget rare
-groups are dropped first, then groups from the end of the list: `Output limit reached:
-showing N of M groups.` An empty result gives the same advice as `queryLogs`.
+A single-line group prints one time. The header names the real span of the sample
+(`spanning`): 500 newest lines may cover only part of the window, so the frequency in the
+sample is never presented as a statistic of the interval — the footer points to
+`countLogs`. Under the budget rare groups are dropped first, then groups from the end of
+the list: `Output limit reached: showing N of M groups.` An empty result gives the same
+advice as `queryLogs`.
+
+**Reading the sample.** An error line of a Spring Boot ECS service is 16 KB on average
+(up to 30 KB), so the sample is read backwards in pages: the first asks for 50 lines, the
+next ones for as many as fit half of `maxHttpResponseBytes` at the average line length seen
+so far. Each next page ends 1 ns after the oldest line read, because Loki's `end` is
+exclusive; the lines of that instant come back and are dropped, and the page asks for that
+many more, so an instant holding more lines than a page is read through. Reading stops at
+`sample` lines, at the start of the window, or when the lines read reach
+`maxHttpResponseBytes`; the header then says `newest N lines sampled (more exist; stopped
+at X MB of log text)`.
 
 ## countLogs(connection, query, start, end, groupBy)
 

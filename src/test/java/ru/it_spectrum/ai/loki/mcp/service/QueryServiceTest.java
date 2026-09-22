@@ -13,6 +13,8 @@ import java.time.*;
 import java.util.List;
 import java.util.Map;
 
+import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
@@ -28,16 +30,33 @@ class QueryServiceTest {
             new ConnectionDefinition("three", null, URI.create("http://localhost:3"), ConnectionAuth.NONE, null,
                     ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 65536, 1000, 86400, 100, 1000)),
             new ConnectionDefinition("tight", null, URI.create("http://localhost:4"), ConnectionAuth.NONE, null,
-                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 2048, 1000, 86400, 100, 1000))));
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 2048, 1000, 86400, 100, 1000)),
+            new ConnectionDefinition("paged", null, URI.create("http://localhost:5"), ConnectionAuth.NONE, null,
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 200000, 65536, 1000, 86400, 100, 1000))));
     private final QueryService service = new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
 
     private void range(QueryData data, List<String> warnings) {
-        when(client.queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any()))
-                .thenReturn(new QueryResponse(data, new QueryStats(999L), warnings));
+        doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
+                .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
     }
 
     private static LogEntry entry(String nanos, String line) {
         return new LogEntry(nanos, line, Map.of());
+    }
+
+    /**
+     * A mock Loki that honours end (exclusive) and limit with backward direction, as the paged sample relies on.
+     */
+    private void pagedRange(Map<String, String> labels, List<LogEntry> entries) {
+        doAnswer(invocation -> {
+            Instant end = invocation.getArgument(3);
+            int limit = invocation.getArgument(4);
+            var page = new java.util.ArrayList<LogEntry>();
+            for (var e : entries) if (QueryTime.fromNanos(e.timestampNanos()).isBefore(end)) page.add(e);
+            page.sort(java.util.Comparator.comparing((LogEntry e) -> Long.parseLong(e.timestampNanos())).reversed());
+            if (page.size() > limit) page = new java.util.ArrayList<>(page.subList(0, limit));
+            return new QueryResponse(new Streams(List.of(new LogStream(labels, page))), new QueryStats(999L), List.of());
+        }).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -299,13 +318,13 @@ class QueryServiceTest {
         lines.add(entry(QueryTime.nanos(base.plusSeconds(60)), "NullPointerException in OrderService id=42"));
         lines.add(entry(QueryTime.nanos(base.plusSeconds(61)), "Timeout after 30000 ms calling 10.0.0.7:8443"));
         lines.add(entry(QueryTime.nanos(base.plusSeconds(62)), "Timeout after 45000 ms calling 10.0.0.9:8443"));
-        range(new Streams(List.of(new LogStream(Map.of("app", "x"), lines))), List.of());
+        pagedRange(Map.of("app", "x"), lines);
         var text = service.summarize("three", "{app=\"x\"}", "now-2m", "now", 100);
-        verify(client).queryRange("three", "{app=\"x\"}", now.minusSeconds(120), now, 100, LokiHttpClient.Direction.BACKWARD, null);
+        verify(client).queryRange("three", "{app=\"x\"}", now.minusSeconds(120), now, QueryService.FIRST_PAGE, LokiHttpClient.Direction.BACKWARD, null);
         assertTrue(text.startsWith("Summary of {app=\"x\"} — three, 2026-09-13 14:58:00–15:00:00 (+03:00): all 46 lines, spanning 14:58:20.123–14:59:22.123, 4 distinct messages.\n"), text);
         assertTrue(text.contains("\nGroups by count in the sample (first–last time, level, service, newest example):\n"), text);
         assertTrue(text.contains("\n   40×  14:58:20.123–14:58:59.123  ERROR x  Connection refused to nsi-backend:8080 request 1039 user 7f3a9c2e-1b4d-4e5f-8a6b-9c0d1e2f3a4b\n"
-                + "         java.net.ConnectException: Connection refused\n         Caused by: java.io.IOException: port 39\n"), text);
+                + "         IOException: port 39  ← wrapped in ConnectException\n"), text);
         assertTrue(text.contains("\n    3×  14:59:10.123–14:59:12.123  -     x  stack trace frame lines (at ...); read them with getLogContext around an error line\n"), text);
         assertTrue(text.contains("\n    2×  14:59:21.123–14:59:22.123  -     x  Timeout after 45000 ms calling 10.0.0.9:8443\n"), text);
         assertTrue(text.contains("\n    1×  14:59:20.123  -     x  NullPointerException in OrderService id=42\n"), text);
@@ -319,13 +338,39 @@ class QueryServiceTest {
     }
 
     @Test
+    void summarySampleIsReadInPagesSizedByLineLengthAndStopsAtTheHttpByteLimit() {
+        // 300 lines of about 1 KB against maxHttpResponseBytes 200000: a small first page, then pages sized to half the
+        // limit, and reading stops once the lines read reach the limit.
+        Instant base = now.minusSeconds(600);
+        var big = new java.util.ArrayList<LogEntry>();
+        for (int i = 0; i < 300; i++) big.add(entry(QueryTime.nanos(base.plusSeconds(i)), "big line " + i + " " + "z".repeat(1000)));
+        pagedRange(Map.of("app", "x"), big);
+        var text = service.summarize("paged", "{app=\"x\"}", "now-1h", "now", 500);
+        var limits = org.mockito.ArgumentCaptor.forClass(Integer.class);
+        verify(client, times(3)).queryRange(eq("paged"), anyString(), any(), any(), limits.capture(), any(), any());
+        assertEquals(QueryService.FIRST_PAGE, limits.getAllValues().getFirst());
+        assertTrue(limits.getAllValues().get(1) < 100 && limits.getAllValues().get(2) < 100, limits.getAllValues().toString());
+        assertTrue(text.matches("(?s).*: newest \\d+ lines sampled \\(more exist; stopped at 0\\.2 MB of log text\\), .*"), text);
+        assertTrue(text.contains("big line 299 "), text);
+        // Lines at the page boundary instant are neither lost nor doubled.
+        var same = new java.util.ArrayList<LogEntry>();
+        for (int i = 0; i < 60; i++) same.add(entry(QueryTime.nanos(base), "same " + i));
+        for (int i = 0; i < 3; i++) same.add(entry(QueryTime.nanos(base.plusSeconds(1)), "later " + i));
+        pagedRange(Map.of("app", "x"), same);
+        var sample = service.sample("three", "{app=\"x\"}", new QueryTime.Range(now.minusSeconds(3600), now), 63, 1_000_000);
+        assertEquals(63, sample.events().size());
+        assertEquals(63, sample.events().stream().map(LogEvent::line).distinct().count());
+        assertFalse(sample.cutByBytes());
+    }
+
+    @Test
     void summaryOfManyGroupsListsRareOnesAndFitsTheBudget() {
         Instant base = now.minusSeconds(2000);
         var many = new java.util.ArrayList<LogEntry>();
         for (int g = 0; g < 25; g++)
             for (int i = 0; i < 25 - g; i++) many.add(entry(QueryTime.nanos(base.plusSeconds(g * 30L + i)), "group " + (char) ('a' + g) + " line " + i));
         for (int r = 0; r < 25; r++) many.add(entry(QueryTime.nanos(base.plusSeconds(1000 + r)), "rare " + (char) ('a' + r) + " once"));
-        range(new Streams(List.of(new LogStream(Map.of("app", "x"), many))), List.of());
+        pagedRange(Map.of("app", "x"), many);
         var text = service.summarize("three", "{app=\"x\"}", "now-1h", "now", null);
         assertTrue(text.contains("all " + many.size() + " lines, "), text);
         assertTrue(text.contains(", 50 distinct messages.\n"), text);

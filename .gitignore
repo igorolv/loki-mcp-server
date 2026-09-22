@@ -5,3 +5,4 @@ build/
 .local/
 connections.json
 !examples/connections.json
+__pycache__/

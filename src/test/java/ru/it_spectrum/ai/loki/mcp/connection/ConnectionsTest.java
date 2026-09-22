@@ -39,7 +39,7 @@ class ConnectionsTest {
                        "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7,"maxMetricSeries":2,"maxMetricPoints":9}},
                   "b":{"url":"http://localhost:1","description":"Test", "auth":{
                        "type":"BASIC","username":"reader","password":"${PASSWORD}"}},
-                  "c":{"url":"http://localhost:2"}
+                  "c":{"url":"http://localhost:2","applicationPackages":["ru.it_spectrum.asv","com.example"]}
                 }}
                 """);
         var registry = new ConnectionRegistry(entries);
@@ -55,10 +55,61 @@ class ConnectionsTest {
         assertEquals("p$ass\\word", registry.require("b").auth().password());
         assertEquals(ConnectionAuth.NONE, registry.require("c").auth());
         assertEquals("UTC", registry.require("c").timezone().getId());
+        assertEquals(List.of("ru.it_spectrum.asv", "com.example"), registry.require("c").applicationPackages());
+        assertEquals(List.of(), registry.require("a").applicationPackages());
         assertThrows(UnsupportedOperationException.class, () -> registry.list().clear());
         assertFalse(entries.toString().contains("private-token"));
         assertFalse(entries.getFirst().auth().toString().contains("private-token"));
         assertThrows(LokiOperationException.class, () -> new ConnectionRegistry(List.of(entries.getFirst(), entries.getFirst())));
+    }
+
+    private static final String RULE = """
+            {"id":"flyway","category":"startup","match":{"message":"Schema \\"(?<schema>[^\\"]+)\\""},
+             "subject":"schema ${schema}","advice":"Schema ${schema} is ahead.","filter":"!= \\"x\\""}""";
+
+    @Test
+    void loadsRulesFileRelativeToTheConnectionsFileOnceForSeveralConnections() throws Exception {
+        Files.createDirectories(directory.resolve("rules"));
+        Files.writeString(directory.resolve("rules/stand.json"), "{\"rules\":[" + RULE + "]}");
+        var entries = load("""
+                {"connections":{
+                  "a":{"url":"http://localhost:1","rulesFile":"rules/stand.json"},
+                  "b":{"url":"http://localhost:2","rulesFile":"rules/../rules/stand.json"},
+                  "c":{"url":"http://localhost:3"}
+                }}
+                """);
+        var rule = entries.getFirst().rules().getFirst();
+        assertEquals("flyway", rule.id());
+        assertEquals(LogRule.Category.STARTUP, rule.category());
+        assertEquals("schema ${schema}", rule.subject());
+        assertSame(entries.get(0).rules(), entries.get(1).rules());
+        assertEquals(List.of(), entries.get(2).rules());
+        var matcher = rule.message().matcher("Schema \"sbp\" has version 1.7");
+        assertTrue(matcher.find());
+        assertEquals("Schema sbp is ahead.", LogRule.expand(rule.advice(), matcher));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"weather\",\"match\":{\"message\":\"x\"},\"advice\":\"SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"SECRET(\"},\"advice\":\"a\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{},\"advice\":\"SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"x\"}}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"dependency\",\"match\":{\"message\":\"x\"},\"advice\":\"SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"x\"},\"advice\":\"${host} SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"x\"},\"advice\":\"a\",\"filter\":\"| json SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"A b\",\"category\":\"noise\",\"match\":{\"message\":\"x\"},\"advice\":\"SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"x\"},\"advice\":\"a\"},"
+                    + "{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"y\"},\"advice\":\"SECRET\"}]}",
+            "{\"rules\":[{\"id\":\"a\",\"category\":\"noise\",\"match\":{\"message\":\"x\",\"SECRET\":\"y\"},\"advice\":\"a\"}]}",
+            "{\"SECRET\":[]}"
+    })
+    void rejectsInvalidRulesWithoutLeakingSource(String rules) throws Exception {
+        Files.writeString(directory.resolve("rules.json"), rules);
+        assertSafeConfigurationError(assertThrows(LokiOperationException.class,
+                () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":\"rules.json\"}}}")));
+        assertSafeConfigurationError(assertThrows(LokiOperationException.class,
+                () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":\"SECRET-missing.json\"}}}")));
     }
 
     @Test
@@ -101,6 +152,10 @@ class ConnectionsTest {
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"auth\":{\"type\":\"NONE\",\"token\":\"SECRET\"}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"auth\":{\"type\":\"BEARER\",\"token\":\"SECRET\\n\"}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"auth\":{\"type\":\"BEARER\",\"token\":\"${BROKEN\"}}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":[\"ru.SECRET*\"]}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":[\"ru..x\"]}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":[null]}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":\"ru.x\"}}}",
             "SECRET malformed json"
     })
     void rejectsInvalidConfigurationWithoutLeakingSource(String json) {

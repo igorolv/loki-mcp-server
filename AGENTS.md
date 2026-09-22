@@ -55,7 +55,7 @@ from the Redmine donor without a separate reason.
 
 Current stack: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0. Tools: `listConnections`,
 `discoverLogs` (with `label`), `countLogs`, `summarizeLogs`, `queryLogs` (`raw` with
-labels), `getLogContext`, `queryMetrics` — all return text; external configuration is
+labels), `getLogContext`, `followKey`, `queryMetrics` — all return text; external configuration is
 mandatory, the registry is immutable. Contract: [docs/queries.md](docs/queries.md),
 [docs/discovery.md](docs/discovery.md). Standard Windows PowerShell commands:
 

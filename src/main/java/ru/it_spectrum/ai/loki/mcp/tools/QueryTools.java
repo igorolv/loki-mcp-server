@@ -34,7 +34,8 @@ public class QueryTools {
     }
 
     @McpTool(name = "summarizeLogs",
-            description = "Summarize many matching log lines instead of reading them: groups of repeated messages with their count "
+            description = "Summarize many matching log lines instead of reading them: errors are grouped by root cause (the exception, "
+                    + "what wrapped it, the line of our code where it happened), other lines by repeated message, each group with its count "
                     + "in the sample, first and last time and the newest example; rare one-off messages are listed separately. "
                     + "Use it when countLogs shows hundreds of lines. Example query: {app=\"backend\"} |= \"ERROR\". "
                     + "Counts refer to the sampled newest lines only, not the whole window. "
@@ -47,6 +48,22 @@ public class QueryTools {
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "How many newest lines to sample, default 500", required = false) Integer sample) {
         return service.summarize(connection, query, start, end, sample);
+    }
+
+    @McpTool(name = "followKey",
+            description = "Follow one identifier across services: every line of the selector that holds the key, oldest first, "
+                    + "with the root cause of errors. Use it for a key that summarizeLogs prints after 'linked:', or an id you were given "
+                    + "(taskExecutionId=13548, ErrorID ERR-..., a trace id). Pass the selector of the whole environment, e.g. {namespace=\"dev\"}, "
+                    + "and a window around the time the key was seen. The value is matched as a whole word, so 13548 does not match 135480.",
+            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
+    public String followKey(
+            @McpToolParam(description = "Connection name from listConnections") String connection,
+            @McpToolParam(description = "Stream selector only, covering every service to search, e.g. {namespace=\"dev\"}") String selector,
+            @McpToolParam(description = "The key as printed, e.g. \"taskExecutionId=13548\", or a bare value, e.g. \"ERR-5ced1eb2-849d-478d-8cbe-31ad23a1f88a\"") String key,
+            @McpToolParam(description = START, required = false) String start,
+            @McpToolParam(description = END, required = false) String end,
+            @McpToolParam(description = "Maximum lines to return, oldest first, default 100", required = false) Integer limit) {
+        return service.followKey(connection, selector, key, start, end, limit);
     }
 
     @McpTool(name = "getLogContext",

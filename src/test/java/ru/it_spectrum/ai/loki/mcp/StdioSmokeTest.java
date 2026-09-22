@@ -133,7 +133,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(7, catalog.size());
+            assertEquals(8, catalog.size());
             var names = new HashSet<String>();
             for (var declaration : catalog) {
                 names.add(declaration.path("name").asText());
@@ -145,7 +145,7 @@ class StdioSmokeTest {
                         declaration.path("annotations").path("openWorldHint").asBoolean());
                 assertEquals("object", declaration.path("inputSchema").path("type").asText());
             }
-            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "queryMetrics")), names);
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
             assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));

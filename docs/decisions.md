@@ -132,6 +132,130 @@ docker) is almost silent, so an empty hour must lead to widening the window, not
 errors"; `detected_level` covers more lines than the `level` label; a 24-hour query with a
 structured-metadata filter can exceed the 30 s request timeout.
 
+## Analysis inside the server (2026-09-21)
+
+The next direction: move the analysis a model would otherwise do by reading pages of lines
+into Java, so that a tool answers an investigator's question (what fails, where in our
+code, since when, because of which dependency, was there a restart) and prints evidence
+pointers (time, selector, key) for drilling down with the existing tools. The principle
+stays: no asva2 names in code; stand knowledge lives in the connection profile.
+
+### What the asva2 DEV stand showed (2026-09-21)
+
+Measured on 171 error lines of the Java services over 24 hours (`{namespace="dev",
+app=~"asv-app|sp-app"} |~ "ERROR|Exception|Caused by"`); an anonymised sample is in
+`src/test/resources/fixtures/asva2-dev-errors.jsonl` (one shortest line per group plus
+the correlated lines of one task failure; UUIDs, user ids, business ids, git commits,
+e-mails and hosts replaced with stable substitutes, so equal ids stay equal).
+
+- The services write Spring Boot ECS JSON: `@timestamp`, `log.level`, `log.logger`,
+  `process.thread.name`, `service.name`, `service.version` (`main`, `development`,
+  `PR-1365`), `message`, `error.type`, `error.message`, `error.stack_trace`, MDC fields
+  `applicationName`, `userId`, plus `build.version` and `git.commit`. `error.type` is the
+  outermost exception; the root cause is the last `Caused by:` of the stack trace.
+- An error line is 16 KB on average and up to 30 KB: 140–230 frames, 2–4 `Caused by:`
+  sections, none shortened. 171 lines are 2.7 MB; 50 raw lines are a 800 KB page before
+  compaction. Grouping the same lines by root cause and application frame gives 35 groups
+  in 7.8 KB — the whole day's picture in one response.
+- Root messages are multi-line (`PSQLException: … / Подробности: … / Позиция: …`,
+  `ConstraintViolationException` with a list of violations). The application frame must be
+  taken under the root cause section: the first application frame of the whole trace is a
+  servlet filter (`SpRequestContextFilter.doFilter`) for every HTTP error.
+- One failure produces several lines in several services with no trace id: `ssj-backend`
+  logs `[TASK_EXECUTE_ERROR]` and `[TASK_EXECUTION_ERROR]`, `scheduler-backend` logs
+  `[TASK_DB_FAILED]`, all within one second with the same `taskExecutionId=`. Other keys
+  in message text: `ErrorID: ERR-<uuid>` and `Path: /api/…` from `GlobalExceptionHandler`,
+  `fedExecCommId=`, `userId` in the JSON. There is no Micrometer tracing; `traceId` exists
+  only in Kafka consumers.
+- Noise is in Russian: `java.io.IOException: Обрыв канала` (broken pipe) behind
+  `ClientAbortException`, `NoResourceFoundException` for a missing endpoint polled by a
+  frontend (104 of 171 lines), `Invalid character found in the request target` from
+  scanners. Numbers use a space as thousands separator (`ФОИВ 6 029`).
+- Dependencies are named in root messages: `WebServiceTransportException: Service
+  Temporarily Unavailable [503]` with the SMEV recipient in the wrapper, `PSQLException`,
+  Flyway `Schema "sbp" has version 1.7, but no migration could be resolved` on three
+  services within three minutes (a redeploy against a schema migrated by a newer branch).
+- Not everything is ECS: `address` writes its own one-line format, `ais-service` (another
+  repository) the plain Spring pattern. The plain branch of the normalizer stays.
+- The DEV promtail had no `applicationName` / `level` labels on these streams: the JSON
+  stage from `k8s/monitoring/loki-values.yaml` is not applied there. JSON parsing in the
+  server does not depend on promtail, which is one more reason to do it here.
+
+### Decisions
+
+- **Root-cause signature.** A line with a stack trace is grouped by its root cause: the
+  simple name of the last `Caused by:` type, the first line of its message normalized as
+  today, and the application frame — the first `at` frame under the root section whose
+  class starts with one of the connection's `applicationPackages` (else the first
+  application frame of the trace, else none). Wrapper types are shown, not used for
+  grouping. A line without a stack trace keeps the message template. Lines of one failure
+  logged twice by the same service therefore fall into one group.
+- **`applicationPackages` on the connection** (optional list of package prefixes). Empty
+  means no application frame; nothing is guessed from class names.
+- **Stack trace parser is our own.** It parses Java traces in the Logback/Log4j2 form
+  (`Type: message` headers, `Caused by:`, `Suppressed:`, `... N more`, `... N common frames
+  omitted`, tab or four-space indentation, `module/` prefixes, `Unknown Source`,
+  `$$SpringCGLIB$$` proxies) and tolerates the logstash root-cause-first form
+  (`Wrapped by:`). No library: nothing on Maven Central does this without dragging a
+  platform along, and the format is stable.
+- **Correlation keys from message text** (`taskExecutionId=`, `ErrorID:`, `Path:`,
+  `fedExecCommId=`, `userId`) are extracted by generic `name=value` / `name: value`
+  patterns and shown with a group; the names come from the line, not from code. A tool
+  that collects every line of one key in a window replaces trace lookup on a stand without
+  tracing.
+- **Rules are data.** A catalogue per connection (`rulesFile`) maps a root cause or
+  message pattern to a category (dependency, startup, configuration, noise), a subject and
+  one sentence of advice. JSON, not YAML as first written: the same strict Jackson loading
+  and safe errors as `connections.json`, no new dependency. The starting set is written from the sample above, in the language
+  of the stand's messages; the code knows only the rule engine.
+- **Byte-aware sampling.** 500 error lines × 16 KB exceed `maxHttpResponseBytes`; the
+  summary sample is fetched in pages by moving `end` back and stops at `sample` lines or a
+  byte budget, and the header says how many lines were actually read.
+- **Deferred:** `compareLogs` (window vs. window, PR stand vs. main) — no confirmed use;
+  `getTrace` — no tracing on the stands, the key-based collection covers Kafka `traceId`
+  too; Drain-style template mining — `log.logger` plus the message template is enough for
+  JSON logs.
+
+### Work packages
+
+- **S14 — stack trace parser and root-cause grouping** (done 2026-09-23: the first page is
+  50 lines, not 200, because a 200-line first page of 30 KB lines is 6 MB before any size
+  is known; the next page asks for the lines of the boundary instant on top, so that an
+  instant with more lines than a page is read through). `StackTrace` (sections with type,
+  multi-line message, frames, omitted count) and `ErrorSignature` (root type, root message,
+  application frame, wrapper chain) in `service`; `applicationPackages` in
+  `ConnectionDefinition` / `connections.md`; `EventNormalizer` learns `log.logger` /
+  `logger_name`; `LogSummary` groups by signature and renders
+  `N×  span  LEVEL service  RootType: root message`, then `at Class.method(File:line)` and
+  `wrapped in Outer ← Middle`; number normalization accepts space-grouped digits; the
+  sample is fetched in byte-aware pages; `docs/queries.md` and the tool description follow.
+  Tests: parser cases from the fixture (multi-line PSQL root, constraint list, SMEV chain,
+  no root cause, plain-text trace), grouping of the fixture into at most 35 groups under
+  12 KB (the 7.8 KB of the prototype printed 90 characters a message; Russian text is two
+  bytes a character; 13 KB after S15 added `linked:` lines), the two `ssj-backend` lines of one `taskExecutionId` in one group, the servlet
+  filter never chosen as the frame, the existing `LogTextTest` / `StdioSmokeTest`
+  unchanged.
+- **S15 — correlation keys** (done 2026-09-23). `CorrelationKeys` takes `name=value` /
+  `name: value` pairs whose name ends in `Id`, `ID` or `_id` and the trace id; a group of
+  `summarizeLogs` prints `linked:` only for keys other groups carry, so a one-off `ErrorID`
+  costs nothing. The eighth tool `followKey` reads one key across services oldest first
+  (`|= "value"` in Loki, a whole-token match here) with the root cause and the rule tag of
+  each error, the advice once per rule. On DEV `taskExecutionId=13548` gave the whole task
+  in 12 lines of scheduler and ssj (created → dispatched → accepted → no worker → FAILED),
+  6 lines holding the number inside longer numbers left out. The fixture summary grew to
+  under 13 KB with the `linked:` lines.
+- **S16 — rules catalogue** (done 2026-09-23). `rulesFile`, the engine (`LogRules`), a
+  "Known causes" block and a "Noise" block in `summarizeLogs`, the asva2 starting set in
+  `examples/asva2-rules.json`. `message` is also searched in wrapper messages: the URL of a
+  failed neighbour and the SMEV recipient are there, not in the root cause. The filter hint
+  names only noise rules holding a tenth of the sample, so the retried query stays short.
+  On DEV on 2026-09-23, 475 of 500 sampled error lines were `NoResourceFoundException` for
+  one path and covered 8 hours; with the suggested filter the same call read the whole day
+  (71 lines).
+- **S17 — restarts and deploys.** `Started *Application`, `HikariPool-* - Start
+  completed`, a change of `service.version` / `build.version` / `git.commit` inside a
+  stream as timeline events; later the one-call incident overview built from S14–S17.
+
 ## Open items
 
 - Manual end-to-end run with DeepSeek 4.1 Flash ("the DEV stand is broken, find out why");
@@ -140,3 +264,6 @@ structured-metadata filter can exceed the 30 s request timeout.
   consider `git update-index --chmod=+x gradlew` instead of the `chmod` step.
 - Docker image: deferred; the stdio server is launched by a local MCP client.
 - Grafana Explore links, Grafana proxy transport: only if a real need appears.
+- asva2 side, not ours: the DEV promtail lacks the JSON stage (no `applicationName` /
+  `level` labels on ECS streams as of 2026-09-21); the helm upgrade of `loki-stack` is
+  pending there.

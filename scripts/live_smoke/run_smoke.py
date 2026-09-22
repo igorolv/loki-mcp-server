@@ -23,7 +23,7 @@ import threading
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "queryMetrics"}
+TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics"}
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)}")
 
 

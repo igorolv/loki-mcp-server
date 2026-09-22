@@ -34,8 +34,66 @@ Format: an object `connections` with one or more connections. Names are case-sen
 letter or a digit. `description` is optional, up to 512 characters. `hint` is an optional
 hint for the model, up to 1024 characters: which labels the stand has, how to pick a
 service. `serviceLabels` is an optional list of labels that name the service on a line
-(default `applicationName, service_name, service, app, container, job`). The registry never
-picks a default connection, even with a single entry, and never trims names.
+(default `applicationName, service_name, service, app, container, job`).
+`applicationPackages` is an optional list of up to 32 Java package prefixes of the stand's
+own code (`["ru.it_spectrum.asv", "ru.it_spectrum.core"]`): `summarizeLogs` shows the
+nearest frame of these packages under the root cause of a stack trace. Without it no frame
+is recognised as own code and nothing is guessed from class names. `rulesFile` is an
+optional path to a rules catalogue (below); a relative path is resolved against the
+directory of the connections file, `${VARIABLES}` are substituted, and connections naming
+the same file share one loaded copy. The registry never picks a default connection, even
+with a single entry, and never trims names.
+
+### Rules catalogue
+
+What known kinds of lines of a stand mean, so that `summarizeLogs` can say it instead of
+the model working it out: a JSON object with a list `rules`, tried in order, the first
+match wins. The asva2 starting set is
+[examples/asva2-rules.json](../examples/asva2-rules.json).
+
+```json
+{
+  "rules": [
+    {
+      "id": "flyway-schema-ahead",
+      "category": "startup",
+      "match": { "message": "Schema \"(?<schema>[^\"]+)\" has version (?<version>[\\d.]+), but no migration could be resolved" },
+      "subject": "schema ${schema}",
+      "advice": "The service stops at start-up: schema ${schema} is at version ${version}, newer than the migrations of this build."
+    },
+    {
+      "id": "missing-endpoint",
+      "category": "noise",
+      "match": { "exception": "^NoResourceFoundException$" },
+      "advice": "A client calls an endpoint that does not exist; not a failure of this service.",
+      "filter": "!= \"NoResourceFoundException\""
+    }
+  ]
+}
+```
+
+- `id` — 1–64 characters: lower-case letters, digits and dashes; unique in the file.
+- `category` — `dependency` (another system failed: a database, a queue, a neighbouring
+  service, an agency), `startup` (the service did not start), `configuration` (its own
+  settings are wrong or missing) or `noise` (known harmless lines).
+- `match` — Java regular expressions, searched (not anchored); every given one must match
+  and at least one is required. `exception` is tried against the simple class names of the
+  root cause and of every wrapper (so it needs a stack trace), `message` against the logged
+  message (its first 2000 characters), then the root cause message, then the wrapper
+  messages, `logger` against the logger name (`log.logger`, `logger_name`). Up to 1000
+  characters each.
+- `subject` — what failed, up to 300 characters; required for `dependency`. Lines are summed
+  by category and subject in the "Known causes" block.
+- `advice` — one sentence for the model, up to 300 characters, printed under the group.
+- `subject` and `advice` may use `${name}` of named groups of `message`; a name the pattern
+  does not define is a configuration error.
+- `filter` — for noise: LogQL line filters that drop these lines (`!= "..."`, `!~ "..."`,
+  several allowed), offered when noise crowds a sample.
+
+Up to 200 rules; unknown fields, an invalid pattern or category, a missing `advice` or a
+file above 1 MB stop the start-up with the same message as a bad connections file.
+Rules name causes outside the code; bugs of the application are left to the root-cause
+grouping.
 
 `url` is required: an absolute HTTP/HTTPS URL, a path prefix is allowed. User info, query
 and fragment are forbidden. Authorization is a separate `auth`:

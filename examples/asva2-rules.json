@@ -1,0 +1,129 @@
+{
+  "rules": [
+    {
+      "id": "client-abort",
+      "category": "noise",
+      "match": { "exception": "^(ClientAbortException|AsyncRequestNotUsableException)$" },
+      "advice": "The client closed the connection before the response was written (a closed tab, a timeout on the client side); not a server failure.",
+      "filter": "!= \"ClientAbortException\""
+    },
+    {
+      "id": "broken-pipe",
+      "category": "noise",
+      "match": { "message": "Обрыв канала|Broken pipe|Connection reset by peer" },
+      "advice": "The client closed the connection before the response was written; not a server failure.",
+      "filter": "!= \"Обрыв канала\" != \"Broken pipe\""
+    },
+    {
+      "id": "missing-endpoint",
+      "category": "noise",
+      "match": { "exception": "^NoResourceFoundException$" },
+      "advice": "A client calls an endpoint that does not exist (often a frontend polling a path an older build had); not a failure of this service, but frequent ones crowd the sample.",
+      "filter": "!= \"NoResourceFoundException\""
+    },
+    {
+      "id": "bad-request-target",
+      "category": "noise",
+      "match": { "message": "Invalid character found in the request target|Error parsing HTTP request header|Character decoding failed" },
+      "advice": "Tomcat rejected a malformed request (an unencoded URL from a client or a scanner); not a failure of this service.",
+      "filter": "!~ \"Invalid character found in the request target|Error parsing HTTP request header|Character decoding failed\""
+    },
+    {
+      "id": "smev-recipient",
+      "category": "dependency",
+      "match": { "message": "Не удалось отправить в СМЭВ запрос \"(?<recipient>[^\"]+)\"" },
+      "subject": "SMEV",
+      "advice": "The request to ${recipient} through SMEV failed on the transport: the SMEV adapter of the stand or the recipient is unavailable. Retry later; the card goes to ERROR_SENDING meanwhile."
+    },
+    {
+      "id": "smev-transport",
+      "category": "dependency",
+      "match": { "exception": "^(WebServiceTransportException|SmevCallException)$" },
+      "subject": "SMEV",
+      "advice": "The SMEV transport answered with an HTTP error: the SMEV adapter of the stand or the recipient is unavailable. Retry later."
+    },
+    {
+      "id": "postgres-connection",
+      "category": "dependency",
+      "match": { "exception": "^(SQLTransientConnectionException|CannotGetJdbcConnectionException|CannotCreateTransactionException|PSQLException)$",
+                 "message": "(?i)Connection is not available|Connection to \\S+ refused|connection attempt failed|terminating connection|the database system is (starting up|shutting down)|не удалось подключиться" },
+      "subject": "PostgreSQL",
+      "advice": "The service could not get a database connection: PostgreSQL is down or restarting, or the Hikari pool is exhausted by long transactions."
+    },
+    {
+      "id": "missing-table",
+      "category": "configuration",
+      "match": { "message": "(?:отношение|relation) \"(?<table>[^\"]+)\" (?:не существует|does not exist)" },
+      "subject": "table ${table}",
+      "advice": "Table ${table} does not exist in the schema this service uses: its migrations did not run against this database, or the service points to the wrong schema."
+    },
+    {
+      "id": "redis",
+      "category": "dependency",
+      "match": { "exception": "^Redis\\w*Exception$" },
+      "subject": "Redis",
+      "advice": "Redis did not answer in time: it is down, restarting or overloaded; sessions and caches of this service are affected."
+    },
+    {
+      "id": "kafka",
+      "category": "dependency",
+      "match": { "logger": "^org\\.apache\\.kafka\\." },
+      "subject": "Kafka",
+      "advice": "The Kafka client of this service reports a broker or network problem."
+    },
+    {
+      "id": "schema-registry",
+      "category": "dependency",
+      "match": { "exception": "^RestClientException$", "message": "(?i)schema" },
+      "subject": "Schema Registry",
+      "advice": "The Avro schema lookup failed: Schema Registry is unavailable or the subject is not registered."
+    },
+    {
+      "id": "neighbour-io",
+      "category": "dependency",
+      "match": { "exception": "^ResourceAccessException$", "message": "request for \"https?://(?<host>[^/:\"]+)" },
+      "subject": "${host}",
+      "advice": "The call to ${host} did not get an answer (connection refused or timed out): that service is down or restarting."
+    },
+    {
+      "id": "unauthorized-call",
+      "category": "dependency",
+      "match": { "exception": "^HttpClientErrorException\\$Unauthorized$" },
+      "subject": "auth (sec, Keycloak)",
+      "advice": "Another service rejected this service's call with 401: its service token or Keycloak client is wrong, or sec is down."
+    },
+    {
+      "id": "flyway-schema-ahead",
+      "category": "startup",
+      "match": { "message": "Schema \"(?<schema>[^\"]+)\" has version (?<version>[\\d.]+), but no migration could be resolved" },
+      "subject": "schema ${schema}",
+      "advice": "The service stops at start-up: schema ${schema} is at version ${version}, newer than the migrations of this build (another branch or PR stand migrated the shared database). Deploy a matching build or clean the extra migrations."
+    },
+    {
+      "id": "context-failed",
+      "category": "startup",
+      "match": { "exception": "^(BeanCreationException|UnsatisfiedDependencyException|ApplicationContextException|PortInUseException)$" },
+      "advice": "The Spring context failed to start; the root cause above says which bean or setting."
+    },
+    {
+      "id": "application-failed-to-start",
+      "category": "startup",
+      "match": { "message": "APPLICATION FAILED TO START" },
+      "advice": "The service did not start; read the lines around this one with getLogContext for the reason Spring Boot prints."
+    },
+    {
+      "id": "oauth-client-registration",
+      "category": "configuration",
+      "match": { "message": "Could not find ClientRegistration with id '(?<client>[^']+)'" },
+      "subject": "OAuth2 client ${client}",
+      "advice": "The OAuth2 client registration '${client}' is missing from this service's configuration (spring.security.oauth2.client.registration.${client})."
+    },
+    {
+      "id": "task-worker-missing",
+      "category": "configuration",
+      "match": { "message": "Не найдена доступная задача с классом (?<task>[\\w.$]+)" },
+      "subject": "task worker",
+      "advice": "The service the scheduler sent the task to has no worker for ${task}: the task is routed to the wrong service, or the worker bean is not loaded there."
+    }
+  ]
+}

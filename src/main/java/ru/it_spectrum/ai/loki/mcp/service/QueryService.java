@@ -102,31 +102,47 @@ public class QueryService {
         int usedSample = sample == null ? Math.min(LogSummary.DEFAULT_SAMPLE, maximum) : sample;
         if (usedSample <= 0 || usedSample > maximum)
             throw Errors.invalid("sample must be between 1 and " + maximum + " for this connection.");
-        var events = fetch(connection, query, window, usedSample, LokiHttpClient.Direction.BACKWARD);
+        var sampled = sample(connection, query, window, usedSample, definition.limits().maxHttpResponseBytes());
+        var events = sampled.events();
         ZoneId zone = definition.timezone();
         String where = query.strip() + " — " + connection + ", " + window(window, zone);
         if (events.isEmpty()) return "Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
                 + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.";
-        boolean more = events.size() >= usedSample;
-        var groups = LogSummary.group(events, normalizer, definition.serviceLabels());
+        boolean more = events.size() >= usedSample || sampled.cutByBytes();
+        var groups = LogSummary.group(events, normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules());
         String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
                 + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
-        String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist), "
+        String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist"
+                + (sampled.cutByBytes() ? "; stopped at " + megabytes(sampled.bytes()) + " MB of log text" : "") + "), "
                 : "all " + events.size() + " lines, ") + "spanning " + span + ", " + groups.size()
                 + (groups.size() == 1 ? " distinct message." : " distinct messages.");
-        var top = groups.subList(0, Math.min(LogSummary.TOP_GROUPS, groups.size()));
+        // Noise groups (by the connection's rules) are listed apart and never take a place in the top or rare lists.
+        var noise = new ArrayList<LogSummary.Group>();
+        var listed = new ArrayList<LogSummary.Group>();
+        for (var group : groups) (LogSummary.isNoise(group) ? noise : listed).add(group);
+        var top = listed.subList(0, Math.min(LogSummary.TOP_GROUPS, listed.size()));
         var rare = new ArrayList<LogSummary.Group>();
-        for (var group : groups.subList(top.size(), groups.size()))
+        for (var group : listed.subList(top.size(), listed.size()))
             if (group.count <= LogSummary.RARE_LINES) rare.add(group);
         rare.sort(Comparator.comparing((LogSummary.Group g) -> g.last.nanos()).reversed());
+        var known = knownCauses(listed);
+        int noiseLines = noise.stream().mapToInt(g -> g.count).sum();
         int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
-        int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size());
+        int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size()),
+                keepNoise = Math.min(LogSummary.NOISE_GROUPS, noise.size());
+        int fullRare = keepRare, fullNoise = keepNoise;
         while (true) {
             var lines = new ArrayList<String>();
-            lines.add("Groups by count in the sample (first–last time, level, service, newest example):");
-            for (var group : top.subList(0, keepTop)) lines.addAll(LogSummary.render(group, zone));
-            int hiddenGroups = groups.size() - keepTop, hiddenLines = 0;
-            for (var group : groups.subList(keepTop, groups.size())) hiddenLines += group.count;
+            if (!known.isEmpty()) {
+                lines.add("Known causes by the rules of this connection (lines in the sample):");
+                lines.addAll(known);
+            }
+            if (keepTop > 0) {
+                lines.add("Groups by count in the sample (first–last time, level, service, newest example):");
+                for (var group : top.subList(0, keepTop)) lines.addAll(LogSummary.render(group, zone));
+            }
+            int hiddenGroups = listed.size() - keepTop, hiddenLines = 0;
+            for (var group : listed.subList(keepTop, listed.size())) hiddenLines += group.count;
             if (keepRare > 0) {
                 lines.add("Rare (" + (LogSummary.RARE_LINES == 1 ? "1 line" : "1–" + LogSummary.RARE_LINES + " lines") + " each, easy to miss):");
                 for (var group : rare.subList(0, keepRare)) lines.addAll(LogSummary.render(group, zone));
@@ -135,18 +151,154 @@ public class QueryService {
             }
             if (hiddenGroups > 0)
                 lines.add("  (+" + hiddenGroups + " more groups, " + hiddenLines + " lines: narrow the query to see them)");
+            if (!noise.isEmpty()) {
+                lines.add("Noise by the rules of this connection (" + noiseLines + " of " + events.size() + " sampled lines, not listed above):");
+                for (var group : noise.subList(0, keepNoise)) lines.add(LogSummary.renderNoise(group, zone));
+                int hiddenNoise = noise.size() - keepNoise, hiddenNoiseLines = 0;
+                for (var group : noise.subList(keepNoise, noise.size())) hiddenNoiseLines += group.count;
+                if (hiddenNoise > 0) lines.add("  (+" + hiddenNoise + " more noise groups, " + hiddenNoiseLines + " lines)");
+                String filters = noiseFilters(noise, events.size());
+                // Noise that crowds a cut sample hides the rest of the window: offer the filters that drop it.
+                if (more && noiseLines * 3 >= events.size() && !filters.isEmpty())
+                    lines.add("Noise takes " + noiseLines + " of " + events.size() + " sampled lines; to sample past it, add " + filters
+                            + " to the query.");
+            }
             var footer = new StringBuilder();
-            if (keepTop < top.size() || keepRare < Math.min(LogSummary.RARE_GROUPS, rare.size()))
-                footer.append("Output limit reached: showing ").append(keepTop + keepRare).append(" of ").append(groups.size()).append(" groups. ");
+            if (keepTop < top.size() || keepRare < fullRare || keepNoise < fullNoise)
+                footer.append("Output limit reached: showing ").append(keepTop + keepRare + keepNoise).append(" of ").append(groups.size()).append(" groups. ");
             footer.append("Counts are for the ").append(events.size()).append(" sampled lines only; countLogs gives the number for the whole window. ")
                     .append("To read one group: queryLogs with |= \"<distinctive part of its message>\".");
+            if (top.subList(0, keepTop).stream().anyMatch(g -> !g.links.isEmpty()) || rare.subList(0, keepRare).stream().anyMatch(g -> !g.links.isEmpty()))
+                footer.append(" Groups with the same 'linked:' key are one failure seen by several services; followKey with that key shows its lines in order.");
             String text = assemble(header, lines, footer.toString());
             if (bytes(text) <= budget) return text;
+            // Rare groups go first, then noise, then the top list from its end; one group always stays.
             if (keepRare > 0) keepRare--;
+            else if (keepNoise > (keepTop == 0 ? 1 : 0)) keepNoise--;
             else if (keepTop > 1) keepTop--;
             else throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                         "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the query or raise the limit.");
         }
+    }
+
+    static final int KNOWN_CAUSES = 10;
+
+    /**
+     * {@code   dependency     SMEV  3 lines}: matched rules other than noise, summed by category and subject.
+     */
+    private static List<String> knownCauses(List<LogSummary.Group> groups) {
+        var lines = new LinkedHashMap<String, Integer>();
+        for (var group : groups) {
+            if (group.rule == null) continue;
+            String key = String.format("  %-13s  %s", group.rule.category().text(),
+                    group.rule.subject() == null ? group.rule.rule().id() : group.rule.subject());
+            lines.merge(key, group.count, Integer::sum);
+        }
+        var sorted = new ArrayList<>(lines.entrySet());
+        sorted.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+        var result = new ArrayList<String>();
+        for (var entry : sorted.subList(0, Math.min(KNOWN_CAUSES, sorted.size())))
+            result.add(entry.getKey() + "  " + entry.getValue() + (entry.getValue() == 1 ? " line" : " lines"));
+        if (sorted.size() > KNOWN_CAUSES) result.add("  (+" + (sorted.size() - KNOWN_CAUSES) + " more)");
+        return result;
+    }
+
+    /**
+     * Filters of the noise rules that hold at least a tenth of the sample, biggest first: a short query to retry with.
+     */
+    private static String noiseFilters(List<LogSummary.Group> noise, int sampled) {
+        var lines = new LinkedHashMap<String, Integer>();
+        for (var group : noise)
+            if (group.rule.rule().filter() != null) lines.merge(group.rule.rule().filter().strip(), group.count, Integer::sum);
+        var filters = new ArrayList<>(lines.entrySet());
+        filters.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+        var result = new ArrayList<String>();
+        for (var filter : filters) if (filter.getValue() * 10 >= sampled) result.add(filter.getKey());
+        return String.join(" ", result);
+    }
+
+    public static final int DEFAULT_FOLLOW = 100;
+    private static final java.util.regex.Pattern KEY_PAIR = java.util.regex.Pattern.compile("\\s*([A-Za-z][\\w.]{0,63})\\s*[=:]\\s*(.+?)\\s*");
+
+    /**
+     * Every line of a stream selector that holds one identifier, oldest first, across services: what happened to one
+     * task, request or message on a stand without tracing. The key is filtered in Loki by its value and then matched
+     * as a whole token here; errors show their root cause and the rule that knows them.
+     */
+    public String followKey(String connection, String selector, String key, String start, String end, Integer limit) {
+        var definition = registry.require(connection);
+        if (selector == null || selector.isBlank())
+            throw Errors.invalid("selector is required: the stream selector of every service to search, e.g. {namespace=\"dev\"}.");
+        if (selector.length() > DiscoveryLimits.SELECTOR_CHARACTERS || !DiscoveryService.SELECTOR.matcher(selector).matches())
+            throw Errors.invalid("selector must be a stream selector only, like {namespace=\"dev\"}: followKey adds the key filter itself. "
+                    + "Take it from discoverLogs or from the braces of the query you used.");
+        if (key == null || key.isBlank())
+            throw Errors.invalid("key is required: an identifier as printed by summarizeLogs, e.g. \"taskExecutionId=13548\", or a bare value like \"ERR-5ced1eb2\".");
+        var pair = KEY_PAIR.matcher(key);
+        String value = pair.matches() ? pair.group(2) : key.strip();
+        if (value.length() < 3 || value.length() > 200 || value.chars().anyMatch(c -> c == '"' || c == '\\' || c == '`' || Character.isISOControl(c)))
+            throw Errors.invalid("key value must be 3 to 200 characters without quotes or backslashes, e.g. \"taskExecutionId=13548\".");
+        var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        int maximum = definition.limits().maxEntries();
+        int usedLimit = limit == null ? Math.min(DEFAULT_FOLLOW, maximum) : limit;
+        if (usedLimit <= 0 || usedLimit > maximum)
+            throw Errors.invalid("limit must be between 1 and " + maximum + " for this connection.");
+        String scope = selector.strip();
+        var fetched = fetch(connection, scope + " |= \"" + value + "\"", window, usedLimit, LokiHttpClient.Direction.FORWARD);
+        boolean more = fetched.size() >= usedLimit;
+        var token = CorrelationKeys.token(value);
+        var events = new ArrayList<LogEvent>();
+        for (var event : fetched) if (token.matcher(event.line()).find()) events.add(event);
+        int partial = fetched.size() - events.size();
+        ZoneId zone = definition.timezone();
+        String what = pair.matches() ? pair.group(1) + "=" + value : value;
+        String where = "Lines with " + what + " in " + scope + " — " + connection + ", " + window(window, zone);
+        String partialNote = partial == 0 ? "" : " " + partial + (partial == 1 ? " line" : " lines")
+                + " holding " + value + " only inside a longer word were left out.";
+        if (events.isEmpty()) return where + ": no lines." + partialNote + "\nNo line of the window holds this value. Widen the window "
+                + "around the time the key was seen (start=\"...\", end=\"...\"), or use a selector that covers every service.";
+        var lines = new ArrayList<String>();
+        var services = new LinkedHashSet<String>();
+        String firstError = null;
+        var advised = new HashSet<String>();
+        for (var event : events) {
+            var view = normalizer.view(event, definition.serviceLabels());
+            var signature = LogSummary.signature(view, definition.applicationPackages());
+            var rule = LogRules.match(definition.rules(), view, signature);
+            String service = view.service() == null ? "-" : view.service();
+            services.add(service);
+            boolean error = "ERROR".equals(view.level()) || "FATAL".equals(view.level()) || signature != null;
+            String time = TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone));
+            if (error && firstError == null) firstError = time + " " + service;
+            var text = new StringBuilder(time).append(' ').append(String.format("%-5s", view.level() == null ? "-" : view.level()))
+                    .append(' ').append(service).append("  ")
+                    .append(truncate(view.message().replace('\n', ' ').replace("\r", "").strip(), MESSAGE_CHARS));
+            // The advice of a rule is printed at its first line; later lines of the same rule carry its tag only.
+            boolean advice = rule != null && advised.add(rule.rule().id() + "\n" + rule.advice());
+            for (String cause : LogSummary.causeLines(view, signature, rule, advice)) text.append('\n').append(cause);
+            lines.add(text.toString());
+        }
+        String header = where + ": " + (more ? "oldest " : "all ") + events.size() + (events.size() == 1 ? " line" : " lines")
+                + " in " + services.size() + (services.size() == 1 ? " service (" : " services (") + String.join(", ", services) + ")"
+                + (firstError == null ? ", no errors." : "; first error " + firstError + ".") + partialNote;
+        var marked = withDateMarkers(events, lines, zone);
+        int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
+        // Oldest first: the story of a key starts at its first line, so a cut drops the newest lines.
+        for (int keep = marked.size(); keep >= 1; keep--) {
+            var shown = marked.subList(0, keep);
+            int shownEvents = (int) shown.stream().filter(l -> !l.startsWith("--- ")).count();
+            var footer = new StringBuilder();
+            if (keep < marked.size())
+                footer.append("Output limit reached: showing the oldest ").append(shownEvents).append(" of ").append(events.size()).append(" lines. ");
+            if (keep < marked.size() || more) {
+                var newest = QueryTime.fromNanos(events.get(shownEvents - 1).timestampNanos());
+                footer.append("Newer: repeat with start=\"").append(iso(newest, zone)).append("\".");
+            } else footer.append("Shown every line of the window with this key.");
+            String text = assemble(header, shown, footer.toString());
+            if (bytes(text) <= budget) return text;
+        }
+        throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the window or raise the limit.");
     }
 
     /**
@@ -362,6 +514,58 @@ public class QueryService {
     /**
      * Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD.
      */
+    /**
+     * The newest lines of a window, read in pages sized by the lines seen so far, so that a sample of 16 KB error
+     * lines never asks Loki for one response above maxHttpResponseBytes. Stops at {@code wanted} lines, at the end
+     * of the window, or when the lines read reach the connection's HTTP byte limit ({@code cutByBytes}).
+     */
+    record Sample(List<LogEvent> events, long bytes, boolean cutByBytes) {
+    }
+
+    static final int FIRST_PAGE = 50;
+
+    Sample sample(String connection, String query, QueryTime.Range window, int wanted, int maxHttpResponseBytes) {
+        var collected = new ArrayList<LogEvent>();
+        long bytes = 0;
+        Instant end = window.end();
+        int page = Math.min(wanted, FIRST_PAGE);
+        while (true) {
+            // Loki's end is exclusive, so the next page starts 1 ns after the oldest line read and returns the lines of
+            // that instant again. They are asked for on top of the page and dropped, so that an instant holding more
+            // lines than a page is read through instead of being returned over and over.
+            var held = new ArrayList<LogEvent>();
+            if (!collected.isEmpty()) {
+                long boundary = collected.getFirst().nanos();
+                for (var event : collected) if (event.nanos() == boundary) held.add(event); else break;
+            }
+            int limit = page + held.size();
+            var events = fetch(connection, query, new QueryTime.Range(window.start(), end), limit, LokiHttpClient.Direction.BACKWARD);
+            int returned = events.size();
+            if (!held.isEmpty()) {
+                long boundary = held.getFirst().nanos();
+                events.removeIf(e -> e.nanos() == boundary && held.remove(e));
+            }
+            if (events.isEmpty()) break;
+            collected.addAll(0, events);
+            for (var event : events) bytes += event.line().length();
+            if (collected.size() >= wanted) {
+                collected = new ArrayList<>(collected.subList(collected.size() - wanted, collected.size()));
+                break;
+            }
+            if (returned < limit) break;
+            if (bytes >= maxHttpResponseBytes) return new Sample(collected, bytes, true);
+            long average = Math.max(1, bytes / collected.size());
+            page = (int) Math.max(1, Math.min(wanted - collected.size(), maxHttpResponseBytes / 2 / average));
+            end = QueryTime.fromNanos(collected.getFirst().timestampNanos()).plusNanos(1);
+            if (!end.isAfter(window.start())) break;
+        }
+        return new Sample(collected, bytes, false);
+    }
+
+    private static String megabytes(long bytes) {
+        return BigDecimal.valueOf(bytes).divide(BigDecimal.valueOf(1024 * 1024), 1, RoundingMode.HALF_UP).toPlainString();
+    }
+
     List<LogEvent> fetch(String connection, String query, QueryTime.Range window, int limit, LokiHttpClient.Direction direction) {
         var response = client.queryRange(connection, query, window.start(), window.end(), limit, direction, null);
         if (!(response.data() instanceof LokiResponses.Streams streams))

@@ -1,8 +1,8 @@
 # Loki MCP Server
 
 A local MCP server (stdio) that lets an agent read logs from Grafana Loki: overview of the
-stand → count → summary → lines → context around an event → the full original line. Seven
-tools, every response is readable text; built for small models (target: DeepSeek 4.1
+stand → count → summary → lines → context around an event → the lines of one id across
+services → the full original line. Eight tools, every response is readable text; built for small models (target: DeepSeek 4.1
 Flash). Read-only: push, delete, `/config` and other management endpoints are never exposed.
 
 | Tool | What it does |
@@ -11,8 +11,9 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | Groups of repeated messages in a sample of the newest lines: count, first/last time, example; rare ones listed separately |
+| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
+| `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
 
 Loki 2.6.1 and 3.x are supported. The response contract is in
@@ -51,7 +52,11 @@ environment variables `LOKI_DEV_URL` and `LOKI_TST_URL`. The minimum:
 ```
 
 `hint` is a short map of the stand for the model (which labels exist, how to pick a
-service, known traps); `serviceLabels` says which labels name the service on a line.
+service, known traps); `serviceLabels` says which labels name the service on a line;
+`applicationPackages` names the packages of the stand's own code (the frame shown under a
+root cause); `rulesFile` points to a catalogue of what known lines mean — dependencies,
+start-up failures, configuration errors, noise — which `summarizeLogs` applies (the asva2
+set is [examples/asva2-rules.json](examples/asva2-rules.json)).
 Credentials go through `auth` (`BASIC` or `BEARER`) and `${VARIABLES}`, `tenant` becomes
 `X-Scope-OrgID`; none of it is ever printed in responses or logs. The full format, defaults
 and loading errors are in [docs/connections.md](docs/connections.md).
@@ -116,7 +121,7 @@ Name the stand, the service and the period: "show errors of ssj-ui-backend on DE
 last hour", "the DEV stand is broken, find out why", "what values does the label
 applicationName have on TST". The typical investigation the server suggests to the model
 through `instructions`:
-`listConnections → discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext → queryLogs raw=true`.
+`listConnections → discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext / followKey → queryLogs raw=true`.
 
 ## Error format
 
