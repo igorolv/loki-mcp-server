@@ -173,6 +173,9 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
 - `LogSummary` groups a sample by message template (identifiers → `*`, exception headers
   in the key, frame lines into one group) and renders a group; `QueryService.summarize`
   does the sampling, the top/rare selection and the budget. Loki's pattern API is not used.
+- `ServiceStarts` reads Spring Boot start/stop lines (one extra request of `summarizeLogs`
+  over the query's selector) into starts, unfinished starts, stops and deploys; the
+  patterns are generic Spring Boot / Tomcat / Netty text, never stand names.
 - `Map` is fine for labels and arbitrary fields; limits and timeouts live in
   `ConnectionLimits` and `DiscoveryLimits`, no magic numbers in tools.
 - `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven

@@ -252,9 +252,37 @@ e-mails and hosts replaced with stable substitutes, so equal ids stay equal).
   On DEV on 2026-09-23, 475 of 500 sampled error lines were `NoResourceFoundException` for
   one path and covered 8 hours; with the suggested filter the same call read the whole day
   (71 lines).
-- **S17 — restarts and deploys.** `Started *Application`, `HikariPool-* - Start
-  completed`, a change of `service.version` / `build.version` / `git.commit` inside a
-  stream as timeline events; later the one-call incident overview built from S14–S17.
+- **S17 — restarts and deploys** (done 2026-09-23). A "Restarts and deploys in the window"
+  block in `summarizeLogs` (no new tool) from one more Loki request over the query's stream
+  selector without level matchers, `ServiceStarts` in `service`; a group whose lines a
+  service logged while starting says `logged while starting: … in the start of <service>
+  <begin>–<end>, version …`. What DEV showed (lines of 2026-09-22, anonymised in
+  `src/test/resources/fixtures/asva2-dev-lifecycle.jsonl`):
+  - Every restart is a new pod, so a new stream: "a change of version inside a stream"
+    never happens. A start is paired inside its stream (`Starting X v… using Java` →
+    `Started X in N seconds`); the deploy is found per service — against the previous start
+    or the stop of the pod it replaced. In a rolling update the old pod logs `Graceful
+    shutdown complete` 2–5 s after the new `Started`, with the old version in its JSON.
+  - `main` and PR releases carry `build.version` (2789 → 2792 over a day) and `git.commit`;
+    `development` releases print `build LOCAL` and `commit unknown`, so there a restart and
+    a deploy cannot be told apart and the block says `version development build LOCAL,
+    unchanged`.
+  - The Flyway `Schema "sbp" has version 1.7 …` is an ERROR that `sbp-ui-backend` logs
+    between `HikariPool-1 - Start completed` and `Started`, on every start (13:06, 15:55,
+    16:55), and the start still finishes; the same for sms and parus. The summary now reads
+    "logged while starting … sbp-ui-backend 16:54:24.863–16:56:42.055, version development
+    build LOCAL". The live run also showed a `NullPointerException` in
+    `VersionService.initVersionInfo` on every start of `ssj-ek-export-service`.
+  - `HikariPool-N - Start completed` is not used: it repeats per pool, also after
+    `Started` (`HikariPool-2` of parus), and adds nothing to the Starting/Started pair.
+  - One `Starting` (a second component of `sbp-backend` in the same release) had no
+    `Started` for the rest of the day; it is printed as an unfinished start.
+  - Cost on Loki 2.6.1 over a day of `{namespace="dev", app=~"asv-app|sp-app"}`: the
+    regular expression `Started \S+ in …|Starting …` alone took 18 s (over three days the
+    ingress answered 502 after 2 minutes); a literal alternation `|~ "Start|Graceful shutdown
+    complete"` in front of it, which Loki runs as a substring search, 4–5 s for 360 lines.
+    The summary of the day's errors took 9–14 s in all.
+  Later: the one-call incident overview built from S14–S17.
 
 ## Open items
 

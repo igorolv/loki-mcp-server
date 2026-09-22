@@ -22,7 +22,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 @Service
 public class DiscoveryService {
     // A selector only, never a pipeline: this scope is reused for series lookup and for sampling lines.
-    private static final String MATCHER = "[a-zA-Z_][a-zA-Z0-9_]*\\s*(?:=~|!~|!=|=)\\s*\"(?:[^\"\\\\\\r\\n]|\\\\[^\\r\\n])*+\"";
+    static final String MATCHER = "[a-zA-Z_][a-zA-Z0-9_]*\\s*(?:=~|!~|!=|=)\\s*\"(?:[^\"\\\\\\r\\n]|\\\\[^\\r\\n])*+\"";
     static final Pattern SELECTOR = Pattern.compile("\\s*\\{\\s*" + MATCHER + "(?:\\s*,\\s*" + MATCHER + ")*+\\s*}\\s*");
     private static final List<String> LEVEL_FIELDS = List.of("log_level", "level", "severity", "lvl");
     private final ConnectionRegistry registry;

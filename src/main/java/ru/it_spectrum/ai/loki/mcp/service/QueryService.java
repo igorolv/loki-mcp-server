@@ -109,7 +109,10 @@ public class QueryService {
         if (events.isEmpty()) return "Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
                 + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.";
         boolean more = events.size() >= usedSample || sampled.cutByBytes();
-        var groups = LogSummary.group(events, normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules());
+        var starts = starts(connection, query, window);
+        if (starts != null) starts.count(events);
+        var groups = LogSummary.group(events, normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules(),
+                starts == null ? event -> null : starts::startOf);
         String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
                 + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
         String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist"
@@ -130,6 +133,7 @@ public class QueryService {
         int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
         int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size()),
                 keepNoise = Math.min(LogSummary.NOISE_GROUPS, noise.size());
+        int keepStarts = starts == null || starts.isEmpty() ? 0 : Math.min(ServiceStarts.SERVICES_SHOWN, starts.services());
         int fullRare = keepRare, fullNoise = keepNoise;
         while (true) {
             var lines = new ArrayList<String>();
@@ -137,6 +141,7 @@ public class QueryService {
                 lines.add("Known causes by the rules of this connection (lines in the sample):");
                 lines.addAll(known);
             }
+            if (starts != null && !starts.isEmpty()) lines.addAll(starts.render(keepStarts, zone));
             if (keepTop > 0) {
                 lines.add("Groups by count in the sample (first–last time, level, service, newest example):");
                 for (var group : top.subList(0, keepTop)) lines.addAll(LogSummary.render(group, zone));
@@ -172,9 +177,10 @@ public class QueryService {
                 footer.append(" Groups with the same 'linked:' key are one failure seen by several services; followKey with that key shows its lines in order.");
             String text = assemble(header, lines, footer.toString());
             if (bytes(text) <= budget) return text;
-            // Rare groups go first, then noise, then the top list from its end; one group always stays.
+            // Rare groups go first, then noise, then restarted services, then the top list from its end; one group always stays.
             if (keepRare > 0) keepRare--;
             else if (keepNoise > (keepTop == 0 ? 1 : 0)) keepNoise--;
+            else if (keepStarts > 0) keepStarts--;
             else if (keepTop > 1) keepTop--;
             else throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                         "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the query or raise the limit.");
@@ -182,6 +188,24 @@ public class QueryService {
     }
 
     static final int KNOWN_CAUSES = 10;
+
+    /**
+     * Spring Boot start and graceful stop lines of the query's streams in the window: one more Loki request, whose
+     * failure costs the block, never the summary. Null when the query has no stream selector to reuse.
+     */
+    private ServiceStarts starts(String connection, String query, QueryTime.Range window) {
+        var definition = registry.require(connection);
+        String selector = ServiceStarts.selector(query);
+        if (selector == null) return null;
+        int limit = definition.limits().maxEntries();
+        try {
+            var events = fetch(connection, selector + ServiceStarts.FILTER, window, limit, LokiHttpClient.Direction.BACKWARD);
+            return ServiceStarts.of(selector, events, events.size() >= limit, normalizer, definition.serviceLabels(), window.end());
+        } catch (LokiOperationException e) {
+            if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
+            return ServiceStarts.failed(selector, e.error().code());
+        }
+    }
 
     /**
      * {@code   dependency     SMEV  3 lines}: matched rules other than noise, summed by category and subject.

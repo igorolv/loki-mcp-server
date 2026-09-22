@@ -202,8 +202,9 @@ different error must not disappear. The rest is counted in `(+N more groups, M l
 A single-line group prints one time. The header names the real span of the sample
 (`spanning`): 500 newest lines may cover only part of the window, so the frequency in the
 sample is never presented as a statistic of the interval — the footer points to
-`countLogs`. Under the budget rare groups are dropped first, then groups from the end of
-the list: `Output limit reached: showing N of M groups.` An empty result gives the same
+`countLogs`. Under the budget rare groups are dropped first, then noise groups, then
+restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
+from the end of the list: `Output limit reached: showing N of M groups.` An empty result gives the same
 advice as `queryLogs`.
 
 **Reading the sample.** An error line of a Spring Boot ECS service is 16 KB on average
@@ -215,6 +216,54 @@ many more, so an instant holding more lines than a page is read through. Reading
 `sample` lines, at the start of the window, or when the lines read reach
 `maxHttpResponseBytes`; the header then says `newest N lines sampled (more exist; stopped
 at X MB of log text)`.
+
+**Restarts and deploys.** After the sample the summary asks Loki once more for the start
+and stop lines of the same streams in the same window: the query's stream selector without
+level matchers (`level`, `detected_level`, `severity`, `lvl` — start lines are INFO) plus
+
+```
+|~ "Start|Graceful shutdown complete" |~ `Started \S+ in \S+ seconds|Starting \S+ (v\S+ )?using Java|Graceful shutdown complete`
+```
+
+The first stage is a literal alternation that Loki runs as a substring search: over a day
+of the asva2 DEV stand on Loki 2.6.1 it takes 4–5 s, the regular expression alone 18 s. The
+request asks for `maxEntries` newest lines; the lines are parsed in Java (message of a JSON
+line, or the plain line). A start is a `Starting X … using Java` / `Started X in N seconds`
+pair in one stream — a restarted pod is a new stream; a `Started` line without its
+`Starting` begins at `Started` minus the printed process uptime; a `Starting` without
+`Started` is an unfinished start. `Graceful shutdown complete` is a stop. The service is the
+line's own `service.name` plus, when it differs, the service label of the stream
+(`sbp-ui-backend [sbp-main]`: one helm release holds several services). The version is
+ECS `service.version`, `build.version` and `git.commit` (10 characters, `unknown`
+skipped), else the `v2.4.1` of the `Starting` line. A deploy is a start whose version differs
+from the previous start of the service or, for its first start in the window, from the stop
+of another stream of that service within 10 minutes (the pod it replaced: in a rolling
+update the old pod stops a few seconds after the new one started, and its stop line carries
+the old version).
+
+One line per service, at most 10: services whose starts contain sampled lines first, then
+those with deploys, unfinished starts or stops without a start nearby, then the most
+recent. Up to four start times (the time of `Started`), `version … , unchanged` when every
+start printed the same version, or the deploys (the last two, only the changed parts) and
+the current version. A group whose lines were logged by a service while it was starting —
+same stream, between `Starting` and `Started`, or after an unfinished `Starting` — says so
+under its example:
+
+```
+Restarts and deploys in the window (Spring Boot start and graceful stop lines of {namespace="dev", app=~"asv-app|sp-app"}):
+  sbp-ui-backend [sbp-main]  started 13:08:13.827, 15:57:38.749, 16:56:42.055; version development build LOCAL, unchanged; 3 sampled lines logged while starting
+  ssj-backend [ssj-main]  started 12:28:19.155, 13:36:53.053, 16:18:28.254, 17:21:23.368; 4 deploys, last 2 at 16:18:28.254 build 2790 → 2791, commit c000000009 → c000000007; 17:21:23.368 build 2791 → 2792, commit c000000007 → c000000008; now main build 2792 commit c000000008
+  sbp-backend [sbp-main]  started 13:06:46.451, 15:56:59.452, 17:02:33.157; version development build LOCAL, unchanged; start at 17:00:01.481 did not finish (no "Started" line after it in its stream)
+  (+30 more services: ssj-ui-backend [ssj-pr-1374], …)
+Groups by count in the sample (first–last time, level, service, newest example):
+    3×  13:06:32.721–16:55:09.062  ERROR sbp-main  Schema "sbp" has version 1.7, but no migration could be resolved in the configured locations !
+         logged while starting: 3 of 3 lines, newest in the start of sbp-ui-backend [sbp-main] 16:54:24.863–16:56:42.055, version development build LOCAL
+```
+
+No block is printed when the window has no such lines or the query has no stream selector
+left to reuse. A failed request costs the block, not the summary: `Restarts and deploys: not
+checked, the query for start and stop lines of {…} failed (UPSTREAM_TIMEOUT).` Only Spring
+Boot / Tomcat / Netty lines are recognised; other stacks show no block.
 
 ## countLogs(connection, query, start, end, groupBy)
 

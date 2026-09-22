@@ -13,3 +13,13 @@ so equal identifiers stay equal: UUIDs → `00000000-0000-4000-8000-<n>`, user i
 `1001…`, `…Id=<n>` / `…ID: <n>` → `500001…`, git commits → `<n>` padded to 40 digits,
 e-mails → `user@example.com`, hosts → `*.example.internal`. Timestamps, service names,
 loggers, stack frames and Russian message texts are original.
+
+`asva2-dev-lifecycle.jsonl` — 320 lines of the same stand from 2026-09-22 for the releases
+`sbp-main`, `sms-main`, `parus-main`, `ssj-main` and `ssj-pr-1375`: every line the Loki side
+of the start/stop query (`|~ "Start|Graceful shutdown complete"`) returns — Spring Boot
+`Starting` / `Started`, `Graceful shutdown complete`, and the lines that only look alike
+(`HikariPool-N - Start completed`, `Starting service [Tomcat]`, `KafkaStartupLogger`) — plus
+the nine Flyway `Schema "…" has version …` errors logged during those starts. Same format
+and labels as above. Git commits → `c0<n>` padded to 40 characters (distinct in the first
+10), node hosts → `*.example.internal`; pod names, versions, build numbers and messages
+are original.

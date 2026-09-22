@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
@@ -69,6 +70,11 @@ public final class LogSummary {
          * {@code taskExecutionId=13548 → scheduler-main 2 lines}: keys of the newest line found in lines of other groups.
          */
         final List<String> links = new ArrayList<>();
+        /**
+         * Lines logged by a service while it was starting, and the newest such start.
+         */
+        int whileStarting;
+        ServiceStarts.Start start;
 
         Group(String template) {
             this.template = template;
@@ -85,6 +91,14 @@ public final class LogSummary {
 
     public static List<Group> group(List<LogEvent> events, EventNormalizer normalizer, List<String> serviceLabels,
                                     List<String> applicationPackages, List<LogRule> rules) {
+        return group(events, normalizer, serviceLabels, applicationPackages, rules, event -> null);
+    }
+
+    /**
+     * {@code startOf} names the service start a line was logged in, or null.
+     */
+    static List<Group> group(List<LogEvent> events, EventNormalizer normalizer, List<String> serviceLabels,
+                             List<String> applicationPackages, List<LogRule> rules, Function<LogEvent, ServiceStarts.Start> startOf) {
         var groups = new LinkedHashMap<String, Group>();
         var occurrences = new HashMap<CorrelationKeys.Key, List<Group>>();
         for (var event : events) {
@@ -98,6 +112,11 @@ public final class LogSummary {
             var match = LogRules.match(rules, view, signature);
             if (match != null) group.rule = match;
             group.lastKeys = CorrelationKeys.of(view);
+            var start = startOf.apply(event);
+            if (start != null) {
+                group.whileStarting++;
+                group.start = start;
+            }
             for (var key : group.lastKeys) occurrences.computeIfAbsent(key, k -> new ArrayList<>()).add(group);
         }
         for (var group : groups.values()) link(group, occurrences);
@@ -190,6 +209,13 @@ public final class LogSummary {
         lines.add(text.toString());
         lines.addAll(causeLines(view, group.lastSignature, group.rule, true));
         if (!group.links.isEmpty()) lines.add("         linked: " + String.join("; ", group.links));
+        if (group.whileStarting > 0) {
+            var start = group.start;
+            lines.add("         logged while starting: " + group.whileStarting + " of " + group.count + (group.count == 1 ? " line" : " lines")
+                    + ", newest in the start of " + start.service() + " " + TIME.format(start.begin().atZone(zone)) + "–"
+                    + (start.end() == null ? "(did not finish)" : TIME.format(start.end().atZone(zone)))
+                    + (start.version() == null ? "" : ", version " + start.version()));
+        }
         return lines;
     }
 

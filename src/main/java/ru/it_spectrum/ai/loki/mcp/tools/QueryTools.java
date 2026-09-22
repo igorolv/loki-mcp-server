@@ -34,12 +34,12 @@ public class QueryTools {
     }
 
     @McpTool(name = "summarizeLogs",
-            description = "Summarize many matching log lines instead of reading them: errors are grouped by root cause (the exception, "
-                    + "what wrapped it, the line of our code where it happened), other lines by repeated message, each group with its count "
-                    + "in the sample, first and last time and the newest example; rare one-off messages are listed separately. "
-                    + "Use it when countLogs shows hundreds of lines. Example query: {app=\"backend\"} |= \"ERROR\". "
-                    + "Counts refer to the sampled newest lines only, not the whole window. "
-                    + "Then read one group with queryLogs |= \"<part of its message>\" or use getLogContext around its time.",
+            description = "Summarize many matching log lines instead of reading them: errors grouped by root cause (the exception, "
+                    + "its wrappers, the line of our code), other lines by repeated message, each group with its count in the sample, "
+                    + "first/last time and newest example; rare one-off messages listed separately. Restarts and deploys of the same "
+                    + "services are listed on top, and errors logged while a service was starting say so. Use it when countLogs shows "
+                    + "hundreds of lines, e.g. query {app=\"backend\"} |= \"ERROR\"; counts cover the sampled newest lines only. "
+                    + "Then read one group with queryLogs |= \"<part of its message>\" or getLogContext around its time.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String summarizeLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,

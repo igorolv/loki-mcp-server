@@ -347,7 +347,7 @@ class QueryServiceTest {
         pagedRange(Map.of("app", "x"), big);
         var text = service.summarize("paged", "{app=\"x\"}", "now-1h", "now", 500);
         var limits = org.mockito.ArgumentCaptor.forClass(Integer.class);
-        verify(client, times(3)).queryRange(eq("paged"), anyString(), any(), any(), limits.capture(), any(), any());
+        verify(client, times(3)).queryRange(eq("paged"), eq("{app=\"x\"}"), any(), any(), limits.capture(), any(), any());
         assertEquals(QueryService.FIRST_PAGE, limits.getAllValues().getFirst());
         assertTrue(limits.getAllValues().get(1) < 100 && limits.getAllValues().get(2) < 100, limits.getAllValues().toString());
         assertTrue(text.matches("(?s).*: newest \\d+ lines sampled \\(more exist; stopped at 0\\.2 MB of log text\\), .*"), text);

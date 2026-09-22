@@ -31,9 +31,9 @@ public final class EventNormalizer {
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
-    private static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
+    static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
     private static final List<String> LEVEL_FIELDS = List.of("log.level", "level", "severity", "lvl", "@l");
-    private static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application", "applicationName");
+    static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application", "applicationName");
     private static final List<String> LOGGER_FIELDS = List.of("log.logger", "logger_name", "logger", "log.logger_name");
     private static final List<String> MESSAGE_FIELDS = List.of("message", "msg", "@message", "event", "@m");
     private static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");
@@ -108,7 +108,7 @@ public final class EventNormalizer {
         }
     }
 
-    private static String first(Map<String, String> source, List<String> keys) {
+    static String first(Map<String, String> source, List<String> keys) {
         for (String key : keys) {
             String value = source.get(key);
             if (value != null && !value.isBlank()) return value;

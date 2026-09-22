@@ -11,7 +11,7 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately |
+| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
 | `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
@@ -76,7 +76,8 @@ file with telling names; keep different systems in separate files via
 The connection's `limits` object (all fields optional): `maxEntries` (1000) — the cap of
 `limit` and `sample`; `maxIntervalSeconds` (86400) — the longest `start`–`end` window;
 `maxResponseBytes` (65536) — the limit of one response text; when exceeded, `queryLogs`
-drops the oldest lines and `summarizeLogs` drops rare groups, and the footer says so;
+drops the oldest lines and `summarizeLogs` drops rare groups, noise and restarted services
+before the top groups, and the output says so;
 `requestTimeoutMs` (30000) and `maxHttpResponseBytes` (8 MiB) — the limit of one request
 to Loki. Time: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 with an offset
 (`2026-09-13T10:00:00+03:00`), local time in the connection's `timezone`, or epoch
@@ -90,7 +91,10 @@ Verified by container tests on Loki 2.6.1 and 3.6.0 and on live stands running 2
 `series` are used. On Loki 2.6.1 an empty `/series` or `/label/<name>/values` result
 without a `data` field is accepted as an empty list; on 3.x `detected_level` from
 structured metadata counts as the line's level (`unknown` as no level). Loki's pattern API
-is not needed: `summarizeLogs` groups locally.
+is not needed: `summarizeLogs` groups locally. `summarizeLogs` makes one more request for
+the start and stop lines of the same streams, filtered by a literal alternation first so
+that a day of a busy environment stays within seconds on 2.6.1; if it fails, the summary
+is printed without that block.
 
 ## Connecting an MCP client
 
