@@ -12,7 +12,8 @@ public class QueryTools {
     static final String END = "Window end. Default \"now\". Same formats as start; use the value from a previous footer to read older lines.";
     static final String QUERY = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\". "
             + "Leave it out when you pass service, level or text.";
-    static final String SERVICE = "Instead of query: service name as discoverLogs prints it, e.g. \"backend\"; several: \"backend,frontend\"";
+    static final String SERVICE = "Instead of query: service name as discoverLogs prints it, e.g. \"backend\", or a system name that "
+            + "listConnections lists; several: \"backend,frontend\"";
     static final String LEVEL = "Instead of query: \"error\" or \"warn\" (listConnections names the levels of the stand)";
     static final String TEXT = "Instead of query: text the line must contain, case-sensitive, e.g. \"timeout\"";
     private final QueryService service;

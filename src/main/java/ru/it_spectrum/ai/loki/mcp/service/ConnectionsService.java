@@ -3,6 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.service;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.LineLayout;
+import ru.it_spectrum.ai.loki.mcp.connection.ServiceSystem;
 
 @Service
 public class ConnectionsService {
@@ -26,6 +27,9 @@ public class ConnectionsService {
             if (text.charAt(text.length() - 1) != '.') text.append('.');
             text.append(" Without LogQL: service, level (").append(String.join(", ", connection.allLevels().keySet())).append("), text")
                     .append(connection.scope() == null ? "; service is required." : ", searched in " + connection.scope() + ".");
+            if (!connection.systems().isEmpty())
+                text.append(" service also takes a system name: ")
+                        .append(String.join("; ", connection.systems().stream().map(ServiceSystem::toString).toList())).append('.');
             if (!connection.layouts().isEmpty())
                 text.append(" exportLogs formats: raw, ").append(String.join(", ", connection.layouts().stream().map(LineLayout::id).toList())).append('.');
             text.append('\n');

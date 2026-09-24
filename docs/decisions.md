@@ -22,9 +22,29 @@ The server does the mechanical work a model does badly or expensively — buildi
 paging, compacting stack traces, grouping lines by root cause, staying under a byte budget —
 and carries what the model cannot know: the knowledge of the stand kept next to the
 connection (`hint`, `serviceLabels`, `scope`, `levels`, `applicationPackages`, `ignoredFrames`,
-`versionFields`, the rules catalogue with its line formats and layouts). Adding project
-knowledge there is preferred over adding analysis to the code. Statistical conclusions (what is new, since when, what is
-related) are left to the model, which reads the groups and asks `countLogs` / `queryLogs`.
+`versionFields`, the rules catalogue with its line formats, layouts and system names).
+Adding project knowledge there is preferred over adding analysis to the code. Statistical
+conclusions (what is new, since when, what is related) are left to the model, which reads
+the groups and asks `countLogs` / `queryLogs`.
+
+## System names and the asva2 hint (2026-09-25)
+
+Users name parts of asva2 by their business names (`ССЖ`, `НСИ`, `Парус`), while the stands
+name services differently: TST by `spring.application.name` (`ssj-backend`), DEV — whose
+promtail has no JSON stage, so no `applicationName` or `userId` label at all as of
+2026-09-25 — by the helm release (`instance="ssj-main"`). A catalogue's `systems` map a name
+to every form of its services; a query keeps the forms the window holds on one service
+label. The list is taken from `spring.application.name` of `asva2/apps/*` and the service
+index of `asva2/docs/microservices-agent.md`, and the DEV release names from the stand.
+Checked on DEV: `service="ССЖ"` builds `instance=~"ssj-main|ssj-ek-export-main|
+ssj-reports-main"`; names on different labels (`ССЖ,config`) are an argument error rather
+than a silently dropped system.
+
+The DEV and TST hints were rewritten for `service` / `level` / `text` (LogQL recipes the
+tools now build were dropped) and carry recipes instead: one user (on DEV the JSON field
+`"userId":"…"`, on TST the label), one task or error id across services, which config a
+service got (`service="config-server"` with the service name as text: 4616 lines a day on
+DEV).
 
 ## Project knowledge out of the code (2026-09-25)
 
@@ -278,6 +298,8 @@ request timeout.
 - Docker image: deferred; the stdio server is launched by a local MCP client.
 - Grafana Explore links, Grafana proxy transport: only if a real need appears.
 - More stand knowledge in the connection profile and its catalogues (see "Where the value
-  is"): what the asva2 profile should carry beyond `hint`, rules and layouts is not decided.
+  is"): rules from a day of real DEV/TST groups without a rule tag, the retention of TST.
+- The `npo` and `npfds` releases on DEV have no system name yet (their business names are
+  not in the asva2 service index); the TST names of РЦ (`ais`) were not checked.
 - asva2 side, not ours: the DEV promtail lacks the JSON stage (no `applicationName` /
   `level` labels on ECS streams as of 2026-09-21).

@@ -62,7 +62,7 @@ class ServiceStartsTest {
     private QueryService service(LokiHttpClient client, int maxResponseBytes) {
         var registry = new ConnectionRegistry(List.of(new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
                 ConnectionAuth.NONE, null, MOSCOW, new ConnectionLimits(100, 100, 8_000_000, maxResponseBytes, 1000, 86400), SERVICE_LABELS,
-                List.of(), List.of(), null, Map.of(), List.of(), List.of(), List.of(), VERSION_FIELDS)));
+                List.of(), List.of(), null, Map.of(), List.of(), List.of(), List.of(), VERSION_FIELDS, List.of())));
         return new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
     }
 

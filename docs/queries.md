@@ -35,7 +35,10 @@ the plain empty answer.
   of each of the connection's `serviceLabels` within its `scope` over the window and takes
   the first label that holds every name: `applicationName="ssj-backend"`, or
   `instance=~"ssj-main|sec-main"`. A name no label holds is an argument error with the
-  closest values; names held by different labels ask for one call each.
+  closest values; names held by different labels ask for one call each. A system name of
+  the connection's catalogue ([connections.md](connections.md#systems)) stands for its
+  services that the window holds: `service="ССЖ"` on the asva2 DEV stand builds
+  `instance=~"ssj-main|ssj-ek-export-main|ssj-reports-main"`.
 - `level` — a name of the connection's `levels` (default `error`, `warn`), added as its
   line filter.
 - `text` — `|= "<text>"`, case-sensitive, up to 500 characters on one line.

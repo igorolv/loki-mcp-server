@@ -6,6 +6,7 @@ import ru.it_spectrum.ai.loki.mcp.client.LokiResponses.LabelResponse;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
+import ru.it_spectrum.ai.loki.mcp.connection.ServiceSystem;
 
 import java.net.URI;
 import java.time.Instant;
@@ -29,6 +30,17 @@ class QueryIntentTest {
     private static ConnectionDefinition definition(String scope, Map<String, String> levels) {
         return new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null, ZoneId.of("UTC"),
                 ConnectionLimits.DEFAULTS, List.of("applicationName", "instance"), List.of(), List.of(), scope, levels);
+    }
+
+    /**
+     * ССЖ by its Spring services (one stand) and by its helm release (the other), НСИ by one service.
+     */
+    private static ConnectionDefinition withSystems() {
+        return new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null, ZoneId.of("UTC"),
+                ConnectionLimits.DEFAULTS, List.of("applicationName", "instance"), List.of(), List.of(), SCOPE, Map.of(), List.of(), List.of(),
+                List.of(), ConnectionDefinition.DEFAULT_VERSION_FIELDS,
+                List.of(new ServiceSystem(List.of("ССЖ", "ssj"), "deposit insurance", List.of("ssj-backend", "ssj-ui-backend", "ssj-main")),
+                        new ServiceSystem(List.of("НСИ"), null, List.of("nsi-backend"))));
     }
 
     private static String message(Runnable call) {
@@ -74,6 +86,29 @@ class QueryIntentTest {
         assertEquals("level must be one of: error, warn.", message(() -> resolve(dev, null, null, "debug", null)));
         assertTrue(message(() -> resolve(definition(null, Map.of()), null, null, "error", null)).startsWith("This connection has no scope"));
         assertTrue(message(() -> resolve(dev, null, "a\"b", null, null)).startsWith("service must be names"));
+    }
+
+    @Test
+    void aSystemNameStandsForTheServicesTheWindowHolds() {
+        values("applicationName", "ssj-backend", "sec-backend");
+        values("instance", "ssj-main", "sec-main");
+        var dev = withSystems();
+        // ssj-ui-backend logged nothing in the window: left out; the name is matched without regard to case.
+        assertEquals(SCOPE.replace("}", ", applicationName=\"ssj-backend\"}"), resolve(dev, null, "ссж", null, null));
+        assertEquals(SCOPE.replace("}", ", applicationName=~\"ssj-backend|sec-backend\"}"), resolve(dev, null, "SSJ, sec-backend", null, null));
+        // Every name must be on the chosen label: ССЖ and sec-main meet on the releases, not on the Spring names.
+        assertEquals(SCOPE.replace("}", ", instance=~\"ssj-main|sec-main\"}"), resolve(dev, null, "ССЖ,sec-main", null, null));
+        // A stand without the Spring names: the release holds ССЖ.
+        values("applicationName");
+        assertEquals(SCOPE.replace("}", ", instance=\"ssj-main\"}"), resolve(dev, null, "ССЖ", null, null));
+        assertEquals("No service of НСИ (nsi-backend) in this window (labels applicationName, instance were searched). Try a wider window.",
+                message(() -> resolve(dev, null, "НСИ", null, null)));
+        assertThrows(LokiOperationException.class, () -> new ServiceSystem(List.of("a,b"), null, List.of("x")));
+        assertThrows(LokiOperationException.class, () -> new ServiceSystem(List.of("a"), null, List.of()));
+        assertThrows(LokiOperationException.class, () -> new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
+                ConnectionAuth.NONE, null, ZoneId.of("UTC"), ConnectionLimits.DEFAULTS, List.of("app"), List.of(), List.of(), null, Map.of(),
+                List.of(), List.of(), List.of(), ConnectionDefinition.DEFAULT_VERSION_FIELDS,
+                List.of(new ServiceSystem(List.of("ssj"), null, List.of("a")), new ServiceSystem(List.of("SSJ"), null, List.of("b")))));
     }
 
     @Test

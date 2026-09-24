@@ -60,6 +60,8 @@ start-up failures, configuration errors, noise — which `summarizeLogs` applies
 one file or a list, the stand's own first (the asva2 set is
 [examples/asva2-rules.json](examples/asva2-rules.json), a generic Java set
 [examples/java-rules.json](examples/java-rules.json)).
+A catalogue's `systems` map the names people use (`ССЖ`, `НСИ`) to the services they stand
+for, so that `service="ССЖ"` works; `listConnections` lists them.
 `exportRoots` at the top level lists the directories `exportLogs` may write into (default
 `~/.loki-mcp-server/exports`), and a catalogue's `layouts` name the line templates it
 writes (`spring` in the generic Java set).

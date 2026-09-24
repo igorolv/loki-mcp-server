@@ -192,6 +192,35 @@ application name before the thread) and the classic logback one
 Up to 32 layouts per connection. The same template syntax is accepted as `format` in an
 `exportLogs` call.
 
+### Systems
+
+`systems` are the names people use for parts of the project, each standing for the services
+it is made of, so that `service="ССЖ"` works in `queryLogs`, `countLogs`, `summarizeLogs`
+and `exportLogs`. They belong to the project, not to one stand, so they live in the
+project's catalogue (`examples/asva2-rules.json`) that its connections share.
+
+```json
+{
+  "systems": [
+    { "names": ["ССЖ", "ssj"], "about": "deposit insurance, the main business system",
+      "services": ["ssj-backend", "ssj-ui-backend", "ssj-ws-backend", "ssj-main"] }
+  ],
+  "rules": []
+}
+```
+
+- `names` — 1–8 names, matched without regard to case, unique across the systems of a
+  connection; the first is the one printed. `about` — optional, up to 200 characters.
+- `services` — 1–32 values of the connection's `serviceLabels`. List every form a stand
+  uses: the Spring names of one stand and the helm release of another (`ssj-backend` and
+  `ssj-main`). A query takes the first service label holding at least one of them (and
+  every other name of the call) and keeps only the values found in the window, so a service
+  that logged nothing is left out; none found is an argument error.
+
+`listConnections` ends the line of a connection with `service also takes a system name: ССЖ
+(ssj): deposit insurance, the main business system; …`. The built query in the answer shows
+what a name stood for. Up to 64 systems per connection.
+
 Up to 200 rules per connection, ids unique across its files; unknown fields, an invalid pattern or category, a missing `advice` or a
 file above 1 MB stop the start-up with the same message as a bad connections file.
 Rules name causes outside the code; bugs of the application are left to the root-cause

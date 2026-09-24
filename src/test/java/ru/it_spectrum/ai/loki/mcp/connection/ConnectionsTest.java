@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
 
@@ -61,7 +62,7 @@ class ConnectionsTest {
         assertEquals("UTC", registry.require("c").timezone().getId());
         assertEquals(List.of("ru.it_spectrum.asv", "com.example"), registry.require("c").applicationPackages());
         assertEquals(List.of(), registry.require("a").applicationPackages());
-        assertEquals("\\.doFilter$",registry.require("c").ignoredFrames().getFirst().pattern());
+        assertEquals("\\.doFilter$", registry.require("c").ignoredFrames().getFirst().pattern());
         assertEquals(List.of("service.version", "git.commit"), List.copyOf(registry.require("c").versionFields().keySet()));
         assertEquals(List.of(), registry.require("a").ignoredFrames());
         assertEquals(ConnectionDefinition.DEFAULT_VERSION_FIELDS, registry.require("a").versionFields());
@@ -91,6 +92,25 @@ class ConnectionsTest {
         var matcher = rule.message().matcher("Schema \"sbp\" has version 1.7");
         assertTrue(matcher.find());
         assertEquals("Schema sbp is ahead.", LogRule.expand(rule.advice(), matcher));
+    }
+
+    @Test
+    void systemsComeFromTheRulesCatalogueAndListConnectionsNamesThem() throws Exception {
+        var asva2 = ConnectionsLoader.loadCatalogue(Path.of("examples/asva2-rules.json"));
+        assertEquals(16, asva2.systems().size());
+        assertEquals("ССЖ (ssj): deposit insurance, the main business system", asva2.systems().getFirst().toString());
+        Files.writeString(directory.resolve("stand.json"),
+                "{\"systems\":[{\"names\":[\"ССЖ\",\"ssj\"],\"about\":\"deposit insurance\",\"services\":[\"ssj-backend\"]}],\"rules\":[]}");
+        var entries = load("{\"connections\":{\"a\":{\"url\":\"http://localhost:1\",\"rulesFile\":\"stand.json\"}}}");
+        assertEquals(List.of("ssj-backend"), entries.getFirst().system("ссж").services());
+        assertTrue(new ConnectionsService(new ConnectionRegistry(entries)).list()
+                .endsWith(" service also takes a system name: ССЖ (ssj): deposit insurance."));
+        // The same name twice across the files of one connection, or a bad entry, stops the start-up.
+        Files.writeString(directory.resolve("other.json"), "{\"systems\":[{\"names\":[\"SSJ\"],\"services\":[\"x\"]}],\"rules\":[]}");
+        assertThrows(LokiOperationException.class, () -> load(
+                "{\"connections\":{\"a\":{\"url\":\"http://localhost:1\",\"rulesFile\":[\"stand.json\",\"other.json\"]}}}"));
+        Files.writeString(directory.resolve("bad.json"), "{\"systems\":[{\"names\":[\"x\"],\"services\":[\"a\\\"b\"]}],\"rules\":[]}");
+        assertThrows(LokiOperationException.class, () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost:1\",\"rulesFile\":\"bad.json\"}}}"));
     }
 
     @Test

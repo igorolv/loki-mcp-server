@@ -18,13 +18,15 @@ import java.util.regex.Pattern;
  * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}; formats split plain-text lines into fields,
  * in the order they are tried; layouts are the named line templates exportLogs can write lines in; ignoredFrames are
  * frames of the stand's own code that are never where a failure comes from (a request filter every call passes);
- * versionFields name the JSON fields that tell a build, each with the word printed before its value.
+ * versionFields name the JSON fields that tell a build, each with the word printed before its value; systems (from the
+ * rules catalogue) are the names people use for parts of the project, each standing for several services.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits,
                                    List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules,
                                    String scope, Map<String, String> levels, List<LineFormat> formats,
-                                   List<LineLayout> layouts, List<Pattern> ignoredFrames, Map<String, String> versionFields) {
+                                   List<LineLayout> layouts, List<Pattern> ignoredFrames, Map<String, String> versionFields,
+                                   List<ServiceSystem> systems) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
             "service_name", "service", "app", "container", "job");
     public static final int MAX_APPLICATION_PACKAGES = 32;
@@ -34,6 +36,7 @@ public record ConnectionDefinition(String name, String description, String hint,
     public static final int MAX_LAYOUTS = 32;
     public static final int MAX_IGNORED_FRAMES = 32;
     public static final int MAX_VERSION_FIELDS = 8;
+    public static final int MAX_SYSTEMS = 64;
     /**
      * The ECS field of the release; a profile names the fields of its own builds.
      */
@@ -50,7 +53,7 @@ public record ConnectionDefinition(String name, String description, String hint,
                                 List<String> applicationPackages, List<LogRule> rules, String scope, Map<String, String> levels,
                                 List<LineFormat> formats, List<LineLayout> layouts) {
         this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, scope, levels,
-                formats, layouts, List.of(), DEFAULT_VERSION_FIELDS);
+                formats, layouts, List.of(), DEFAULT_VERSION_FIELDS, List.of());
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
@@ -116,7 +119,10 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || ignoredFrames == null || ignoredFrames.size() > MAX_IGNORED_FRAMES || ignoredFrames.stream().anyMatch(java.util.Objects::isNull)
                 || versionFields == null || versionFields.isEmpty() || versionFields.size() > MAX_VERSION_FIELDS
                 || versionFields.entrySet().stream().anyMatch(f -> f.getKey() == null || !f.getKey().matches("[\\w.@-]{1,64}")
-                || f.getValue() == null || !f.getValue().matches("[\\w -]{0,16}"))) {
+                || f.getValue() == null || !f.getValue().matches("[\\w -]{0,16}"))
+                || systems == null || systems.size() > MAX_SYSTEMS || systems.stream().anyMatch(java.util.Objects::isNull)
+                || systems.stream().flatMap(s -> s.names().stream()).map(n -> n.toLowerCase(java.util.Locale.ROOT)).distinct().count()
+                   != systems.stream().mapToLong(s -> s.names().size()).sum()) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
@@ -128,6 +134,15 @@ public record ConnectionDefinition(String name, String description, String hint,
         layouts = List.copyOf(layouts);
         ignoredFrames = List.copyOf(ignoredFrames);
         versionFields = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(versionFields));
+        systems = List.copyOf(systems);
+    }
+
+    /**
+     * The system the name stands for, or null.
+     */
+    public ServiceSystem system(String name) {
+        for (var system : systems) if (system.named(name)) return system;
+        return null;
     }
 
     public static boolean validName(String name) {

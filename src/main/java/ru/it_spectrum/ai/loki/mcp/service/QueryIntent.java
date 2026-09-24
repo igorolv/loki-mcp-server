@@ -72,34 +72,50 @@ final class QueryIntent {
     }
 
     /**
-     * {@code app="billing"} or {@code container=~"billing|orders"}: the first service label whose
-     * values in the window (within the scope) hold every name.
+     * {@code app="billing"} or {@code container=~"billing|orders"}: the first service label whose values in the window
+     * (within the scope) hold every name. A system name of the profile ({@code ССЖ}) stands for its services; those the
+     * window does not hold are left out, as long as one of them is on the same label as the other names.
      */
     private static String serviceMatcher(ConnectionDefinition definition, LokiHttpClient client, String service, QueryTime.Range window) {
-        var names = new ArrayList<String>();
+        // One entry per name asked for: a service alone, or the services of a system, one of which must be found.
+        var wanted = new LinkedHashMap<String, List<String>>();
         for (String name : service.split(",")) {
             name = name.strip();
             if (name.isEmpty()) continue;
             if (name.length() > SERVICE_CHARS || name.chars().anyMatch(c -> c == '"' || c == '\\' || Character.isISOControl(c)))
                 throw Errors.invalid("service must be names as discoverLogs prints them, separated by commas, without quotes.");
-            names.add(name);
+            var system = definition.system(name);
+            if (system == null) wanted.putIfAbsent(name, List.of(name));
+            else wanted.putIfAbsent(system.names().getFirst(), system.services());
         }
-        if (names.isEmpty()) throw Errors.invalid("service must name at least one service, e.g. service=\"backend\".");
+        if (wanted.isEmpty()) throw Errors.invalid("service must name at least one service, e.g. service=\"backend\".");
         var found = new LinkedHashMap<String, String>();
         var all = new TreeSet<String>();
         for (String label : definition.serviceLabels()) {
             var response = client.labelValues(definition.name(), label, window.start(), window.end(), definition.scope());
             var values = response == null ? List.<String>of() : response.values();
             all.addAll(values);
-            if (values.containsAll(names)) return matcher(label, names);
-            for (String name : names) if (values.contains(name)) found.putIfAbsent(name, label);
+            var held = new ArrayList<String>();
+            boolean every = true;
+            for (var entry : wanted.entrySet()) {
+                var present = entry.getValue().stream().filter(values::contains).toList();
+                if (present.isEmpty()) every = false;
+                else found.putIfAbsent(entry.getKey(), label);
+                for (String name : present) if (!held.contains(name)) held.add(name);
+            }
+            if (every) return matcher(label, held);
         }
-        var missing = names.stream().filter(n -> !found.containsKey(n)).toList();
-        if (missing.isEmpty())
-            throw Errors.invalid("These services are named by different labels (" + String.join(", ", new TreeSet<>(found.values()))
-                    + "); ask for them one call at a time.");
-        throw Errors.invalid("No service \"" + missing.getFirst() + "\" in this window (labels " + String.join(", ", definition.serviceLabels())
-                + " were searched)" + (all.isEmpty() ? ". Try a wider window." : "; closest: " + String.join(", ", SelectorCheck.closest(missing.getFirst(), all)) + "."));
+        for (var entry : wanted.entrySet()) {
+            if (found.containsKey(entry.getKey())) continue;
+            String name = entry.getKey();
+            if (entry.getValue().size() == 1 && entry.getValue().getFirst().equals(name))
+                throw Errors.invalid("No service \"" + name + "\" in this window (labels " + String.join(", ", definition.serviceLabels())
+                        + " were searched)" + (all.isEmpty() ? ". Try a wider window." : "; closest: " + String.join(", ", SelectorCheck.closest(name, all)) + "."));
+            throw Errors.invalid("No service of " + name + " (" + String.join(", ", entry.getValue()) + ") in this window (labels "
+                    + String.join(", ", definition.serviceLabels()) + " were searched). Try a wider window.");
+        }
+        throw Errors.invalid("These services are named by different labels (" + String.join(", ", new TreeSet<>(found.values()))
+                + "); ask for them one call at a time.");
     }
 
     private static String matcher(String label, List<String> names) {

@@ -71,7 +71,8 @@ public final class ConnectionsLoader {
                         e.applicationPackages() == null ? List.of() : e.applicationPackages(),
                         catalogue.rules(), e.scope(), e.levels() == null ? Map.of() : e.levels(), catalogue.formats(),
                         catalogue.layouts(), ignoredFrames(e.ignoredFrames()),
-                        e.versionFields() == null ? ConnectionDefinition.DEFAULT_VERSION_FIELDS : e.versionFields()));
+                        e.versionFields() == null ? ConnectionDefinition.DEFAULT_VERSION_FIELDS : e.versionFields(),
+                        catalogue.systems()));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -97,6 +98,7 @@ public final class ConnectionsLoader {
         var rules = new ArrayList<LogRule>();
         var formats = new ArrayList<LineFormat>();
         var layouts = new ArrayList<LineLayout>();
+        var systems = new ArrayList<ServiceSystem>();
         for (String file : files) {
             if (file.isBlank()) throw Errors.configuration();
             var catalogue = loaded.computeIfAbsent(rulesPath(connections, resolve(file, environment)), ConnectionsLoader::loadCatalogue);
@@ -105,9 +107,10 @@ public final class ConnectionsLoader {
             // The first file that names a layout wins: the stand's own file can redefine a generic one.
             for (var layout : catalogue.layouts())
                 if (layouts.stream().noneMatch(l -> l.id().equals(layout.id()))) layouts.add(layout);
+            systems.addAll(catalogue.systems());
         }
         // One file: its shared copy, so that connections naming it hold the same lists.
-        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : new Catalogue(rules, formats, layouts);
+        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : new Catalogue(rules, formats, layouts, systems);
     }
 
     /**
@@ -156,6 +159,12 @@ public final class ConnectionsLoader {
                     if (l == null) throw Errors.configuration();
                     layouts.add(new LineLayout(l.id(), l.template()));
                 }
+            var systems = new ArrayList<ServiceSystem>();
+            if (file.systems() != null)
+                for (SystemEntry entry : file.systems()) {
+                    if (entry == null) throw Errors.configuration();
+                    systems.add(new ServiceSystem(entry.names(), entry.about(), entry.services()));
+                }
             var rules = new ArrayList<LogRule>();
             for (Rule r : file.rules()) {
                 if (r == null || r.category() == null) throw Errors.configuration();
@@ -164,7 +173,7 @@ public final class ConnectionsLoader {
                         LogRule.compile(m.exception()), LogRule.compile(m.message()), LogRule.compile(m.logger()),
                         r.subject(), r.advice(), r.filter()));
             }
-            return new Catalogue(List.copyOf(rules), List.copyOf(formats), List.copyOf(layouts));
+            return new Catalogue(List.copyOf(rules), List.copyOf(formats), List.copyOf(layouts), List.copyOf(systems));
         } catch (Exception ignored) {
             // Same policy as the connections file: never retain parser messages that quote the source.
             throw Errors.configuration();
@@ -202,11 +211,11 @@ public final class ConnectionsLoader {
     }
 
     /**
-     * What a rules catalogue holds: the rules, tried in order, the plain-text line formats, tried in order, and the
-     * line templates of exportLogs.
+     * What a rules catalogue holds: the rules, tried in order, the plain-text line formats, tried in order, the line
+     * templates of exportLogs and the names of the parts of the project.
      */
-    public record Catalogue(List<LogRule> rules, List<LineFormat> formats, List<LineLayout> layouts) {
-        static final Catalogue EMPTY = new Catalogue(List.of(), List.of(), List.of());
+    public record Catalogue(List<LogRule> rules, List<LineFormat> formats, List<LineLayout> layouts, List<ServiceSystem> systems) {
+        static final Catalogue EMPTY = new Catalogue(List.of(), List.of(), List.of(), List.of());
     }
 
     /**
@@ -224,7 +233,10 @@ public final class ConnectionsLoader {
                          LinkedHashMap<String, String> versionFields) {
     }
 
-    private record RulesFile(List<Rule> rules, List<Format> formats, List<Layout> layouts) {
+    private record SystemEntry(List<String> names, String about, List<String> services) {
+    }
+
+    private record RulesFile(List<Rule> rules, List<Format> formats, List<Layout> layouts, List<SystemEntry> systems) {
     }
 
     private record Layout(String id, String template) {
