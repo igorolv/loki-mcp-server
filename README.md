@@ -11,7 +11,7 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the pod, build, node or user its lines share unlike the other lines of their service, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
+| `summarizeLogs` | An incident picture on top — the new or growing failures, since when, in which services in which order, the dependency, the key of one failure across services and restarts around them — then groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the pod, build, node or user its lines share unlike the other lines of their service, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
 | `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
@@ -55,8 +55,10 @@ environment variables `LOKI_DEV_URL` and `LOKI_TST_URL`. The minimum:
 service, known traps); `serviceLabels` says which labels name the service on a line;
 `applicationPackages` names the packages of the stand's own code (the frame shown under a
 root cause); `rulesFile` points to a catalogue of what known lines mean — dependencies,
-start-up failures, configuration errors, noise — which `summarizeLogs` applies (the asva2
-set is [examples/asva2-rules.json](examples/asva2-rules.json)).
+start-up failures, configuration errors, noise — which `summarizeLogs` applies; it takes
+one file or a list, the stand's own first (the asva2 set is
+[examples/asva2-rules.json](examples/asva2-rules.json), a generic Java set
+[examples/java-rules.json](examples/java-rules.json)).
 Credentials go through `auth` (`BASIC` or `BEARER`) and `${VARIABLES}`, `tenant` becomes
 `X-Scope-OrgID`; none of it is ever printed in responses or logs. The full format, defaults
 and loading errors are in [docs/connections.md](docs/connections.md).

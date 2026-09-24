@@ -14,8 +14,9 @@ spring:
           1. listConnections - pick the stand by name and pass it as 'connection' to every other tool.
           2. discoverLogs - see labels, values, line format and JSON fields; copy the suggested selector.
           3. countLogs - check whether the problem exists and when it started (groupBy="time").
-          4. summarizeLogs - when there are hundreds of lines, see the distinct messages with counts and examples first;
-             it also lists service restarts and deploys in the window: errors logged while starting usually come from that start.
+          4. summarizeLogs - when asked what is broken or when there are hundreds of lines. Read its incident picture first:
+             what is new or growing, since when, in which services in which order, the dependency, restarts and deploys around it.
+             The groups below it are the evidence; errors logged while a service was starting usually come from that start.
           5. queryLogs - read matching lines; narrow the query instead of paging through many lines.
           6. getLogContext - read the lines before and after one interesting line in its stream (selector without filters).
              followKey - read every line of one id (a 'linked:' key from summarizeLogs, a task, request or error id) across services, oldest first.

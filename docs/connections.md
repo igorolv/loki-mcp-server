@@ -39,9 +39,10 @@ service. `serviceLabels` is an optional list of labels that name the service on 
 own code (`["ru.it_spectrum.asv", "ru.it_spectrum.core"]`): `summarizeLogs` shows the
 nearest frame of these packages under the root cause of a stack trace. Without it no frame
 is recognised as own code and nothing is guessed from class names. `rulesFile` is an
-optional path to a rules catalogue (below); a relative path is resolved against the
-directory of the connections file, `${VARIABLES}` are substituted, and connections naming
-the same file share one loaded copy. The registry never picks a default connection, even
+optional path to a rules catalogue (below) or a non-empty list of them, tried in order —
+the stand's own file first, then generic sets (`["asva2-rules.json", "java-rules.json"]`);
+a relative path is resolved against the directory of the connections file, `${VARIABLES}`
+are substituted, and connections naming the same file share one loaded copy. The registry never picks a default connection, even
 with a single entry, and never trims names.
 
 ### Rules catalogue
@@ -49,7 +50,12 @@ with a single entry, and never trims names.
 What known kinds of lines of a stand mean, so that `summarizeLogs` can say it instead of
 the model working it out: a JSON object with a list `rules`, tried in order, the first
 match wins. The asva2 starting set is
-[examples/asva2-rules.json](../examples/asva2-rules.json).
+[examples/asva2-rules.json](../examples/asva2-rules.json);
+[examples/java-rules.json](../examples/java-rules.json) is a generic set of Java client
+failures (JDBC connections, Redis, Kafka, HTTP 5xx, connect and read timeouts, Flyway, a
+failed Spring context, out of memory) without stand names, meant to go after a stand's own
+file. The incident picture of `summarizeLogs` joins groups by the subject of their
+`dependency` rule.
 
 ```json
 {
@@ -90,7 +96,7 @@ match wins. The asva2 starting set is
 - `filter` — for noise: LogQL line filters that drop these lines (`!= "..."`, `!~ "..."`,
   several allowed), offered when noise crowds a sample.
 
-Up to 200 rules; unknown fields, an invalid pattern or category, a missing `advice` or a
+Up to 200 rules per connection, ids unique across its files; unknown fields, an invalid pattern or category, a missing `advice` or a
 file above 1 MB stop the start-up with the same message as a bad connections file.
 Rules name causes outside the code; bugs of the application are left to the root-cause
 grouping.

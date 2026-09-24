@@ -161,8 +161,8 @@ class ServiceStartsTest {
 
     @Test
     void theBudgetDropsRestartedServicesBeforeTopGroups() {
-        String text = service(loki(), 2600).summarize("dev", "{namespace=\"dev\"} |= \"migration\"", "now-24h", "now", null);
-        assertTrue(LogText.bytes(text) <= 2600 - LogText.ENVELOPE_BYTES, text);
+        String text = service(loki(), 3600).summarize("dev", "{namespace=\"dev\"} |= \"migration\"", "now-24h", "now", null);
+        assertTrue(LogText.bytes(text) <= 3600 - LogText.ENVELOPE_BYTES, text);
         // The cut services are named in one line; the groups stay whole.
         assertTrue(text.contains("\n  (+") && !text.contains("Output limit reached"), text);
         assertEquals(3, text.split("\n +3×  ").length - 1, text);

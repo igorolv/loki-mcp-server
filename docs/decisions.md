@@ -117,6 +117,10 @@ a rolling file. `immediateExecution(true)` and SDK input validation off, as in t
   events; the only place where anything is pushed to Loki.
 - `scripts/live_smoke/run_smoke.py`: read-only run against a configured stand, selector
   taken from `discoverLogs`.
+- CI (`.github/workflows/build.yml`) runs `build` and `integrationTest` on every push;
+  green again from `8ef11b8` (the S14–S17 pushes failed in `integrationTest` on an outdated
+  assertion). Actions at v5 since 2026-09-24; `gradlew` is executable in the index, so
+  there is no `chmod` step.
 - Tool descriptions and `instructions` can only be verified by running the investigation
   scenario with the target model through a real MCP client; this is done manually.
 
@@ -463,16 +467,69 @@ over 09:06–13:06 MSK: 67 lines in 13 groups.
   no finding from plain-text background lines, nothing for a group of fewer than 3 lines,
   the existing `LogSummaryTest` / `StdioSmokeTest` unchanged apart from the new lines.
 
+## Incident picture (2026-09-24)
+
+The one-call overview planned since S17: `summarizeLogs` answers "what broke, where, since
+when, because of which dependency, was there a restart" in a block above its groups, built
+from S14–S19. Decided with the user on 2026-09-24:
+
+- **No new tool.** It would take the same arguments and cost the same 10–33 s on DEV; a
+  weak model would call both, doubling the time and the load on a stand that answers 429.
+  The block goes first in the text and is the last thing the budget cuts.
+- **A type dictionary is a rules catalogue.** `rulesFile` takes a list of files, tried in
+  order (the stand's first); `examples/java-rules.json` is a generic set of Java client
+  exceptions (JDBC, Redis, Kafka, HTTP 5xx, connect and read timeouts) without stand names.
+  Rule ids stay unique across the files of a connection. With no rule, a `host:port` or URL
+  in the root or wrapper messages is printed as the endpoint — text of the line, not a
+  guess from the type.
+- **C (change point, first seen, order of services) is part of the picture**, not a
+  package of its own.
+
+### S20 — the picture in `summarizeLogs`
+
+- An incident is a set of printed groups joined by a shared `linked:` key or the same
+  dependency (rule subject or endpoint); at least one of its groups is new or more than
+  usual (all groups when the history was not checked). Noise is never one. At most 5,
+  the biggest by lines, printed oldest onset first.
+- Per incident: the onset and the verdict, the root cause of its biggest new or growing
+  group with the rule tag, the services in the order they began, the lines and groups, the
+  key to follow, the first field finding, and restarts of its services: logged while
+  starting, a restart or deploy up to 10 minutes before the onset, a restart after it, or
+  none in the window.
+- **Onset** is where the lines of the group stop fitting its usual rate: the point `b` that
+  minimises the Poisson tail of the lines from `b` to the window end against the usual
+  count scaled to that part (a new group: its first line). From the sample when it read the
+  whole window — exact time, no request; otherwise one range request of the S18 kind
+  (`| regexp` into `mcp_fragment`, by the service label) over the window with a step of about
+  a 48th of it, printed as `since about HH:MM`. An onset at the window start says it may
+  have begun earlier.
+- The requests stay one at a time under the 20 s deadline: history → onset → background
+  → the page of a day earlier.
+
+Done 2026-09-24. What the work added to the plan:
+
+- A new group begins with its first line by rule, not by the scan: in a cut sample of three
+  lines the scan picked the second one.
+- Restarts are matched by the service a line names itself, as the start lines do
+  (`ssj-backend [ssj-main]`): by the release label alone the task failure of `ssj-backend`
+  was put next to a deploy of `ssj-ui-backend`. Only the first restart after the onset is
+  printed, and lines logged while starting make the later restarts of that service no news.
+- A window over midnight prints the day with every time of the picture (`09-23 16:46:29.355`).
+- Services that began in one step of the counts share a place in the order.
+- On DEV (Loki 2.6.1, the query of the baseline section): 4 hours 9.4–10.1 s (10.5 s before),
+  24 hours 33.6–36 s (33 s before); both samples read the whole window, so no onset request
+  was made. Over 4 hours the picture named the task failure (ssj-main, then scheduler-main
+  0.2 s later, `taskExecutionId`, pod of build 2799) and that `ssj-backend` was redeployed
+  2799 → 2801 at 12:09 with no such line after it. Over 24 hours the first incident was the
+  `Connect timed out` burst of 09-23 16:46 in six services within 30 s, joined into one by
+  the PostgreSQL rule, on `k8s-node1`, which ended with the restarts at 17:24–17:26; the
+  start-up NPE and Flyway errors came out "more than usual" because the services restarted
+  more often, which their restarts line says.
+
 ## Open items
 
 - Manual end-to-end run with DeepSeek 4.1 Flash ("the DEV stand is broken, find out why");
   fix tool descriptions, `instructions` and hints from its protocol; decide on MCP prompts.
-- CI workflow (`.github/workflows/build.yml`) runs on push: green up to `95ff6e3`; the
-  S14–S17 pushes failed in `integrationTest` only, because `LokiCompatibilityTest` still
-  expected the fully qualified root type in the summary (fixed 2026-09-23; `integrationTest`
-  green locally on 2026-09-24 with S18, not yet re-run on CI). Still to do: move to
-  `actions/setup-java@v5` (v4 is deprecated) and consider `git update-index --chmod=+x
-  gradlew` instead of the `chmod` step.
 - Docker image: deferred; the stdio server is launched by a local MCP client.
 - Grafana Explore links, Grafana proxy transport: only if a real need appears.
 - asva2 side, not ours: the DEV promtail lacks the JSON stage (no `applicationName` /

@@ -1,0 +1,67 @@
+{
+  "rules": [
+    {
+      "id": "java-jdbc-connection",
+      "category": "dependency",
+      "match": { "exception": "^(SQLTransientConnectionException|SQLNonTransientConnectionException|CannotGetJdbcConnectionException|JDBCConnectionException|PoolInitializationException)$" },
+      "subject": "database",
+      "advice": "The service could not get a database connection: the database is down or restarting, unreachable, or the connection pool is exhausted."
+    },
+    {
+      "id": "java-redis",
+      "category": "dependency",
+      "match": { "exception": "^Redis\\w*(Connection|Timeout|Unavailable)\\w*Exception$|^RedisCommandTimeoutException$" },
+      "subject": "Redis",
+      "advice": "Redis did not answer in time or refused the connection: it is down, restarting or overloaded."
+    },
+    {
+      "id": "java-kafka",
+      "category": "dependency",
+      "match": { "exception": "^(KafkaException|KafkaProducerException|DisconnectException|NetworkException|NotLeaderOrFollowerException|TopicAuthorizationException)$" },
+      "subject": "Kafka",
+      "advice": "The Kafka client of this service reports a broker, network or permission problem."
+    },
+    {
+      "id": "java-http-5xx",
+      "category": "dependency",
+      "match": { "exception": "^(HttpServerErrorException(\\$\\w+)?|WebClientResponseException(\\$(InternalServerError|BadGateway|ServiceUnavailable|GatewayTimeout))?|WebServiceTransportException|FeignServerException|FeignException\\$\\w+)$",
+                 "message": "\\b5\\d\\d\\b" },
+      "subject": "a called service (HTTP 5xx)",
+      "advice": "A service this one calls answered with a server error: that service failed or a proxy in between could not reach it."
+    },
+    {
+      "id": "java-connect",
+      "category": "dependency",
+      "match": { "exception": "^(ConnectException|NoRouteToHostException|UnknownHostException|HttpHostConnectException|ConnectTimeoutException|PortUnreachableException)$" },
+      "subject": "network connection",
+      "advice": "The service could not open a connection: the other side is down, restarting or unreachable (address, DNS or network policy)."
+    },
+    {
+      "id": "java-read-timeout",
+      "category": "dependency",
+      "match": { "exception": "^(SocketTimeoutException|ReadTimeoutException|WriteTimeoutException|HttpTimeoutException|ResourceAccessException)$" },
+      "subject": "network timeout",
+      "advice": "A call to another system did not get an answer in time: that system is slow or overloaded, or the timeout is too short."
+    },
+    {
+      "id": "java-flyway",
+      "category": "startup",
+      "match": { "message": "(?i)Validate failed: Migrations have failed validation|has version \\S+, but no migration could be resolved|FlywayValidateException" },
+      "subject": "database migrations",
+      "advice": "Flyway refused the schema at start-up: the database holds migrations this build does not know or that differ from its own."
+    },
+    {
+      "id": "java-context-failed",
+      "category": "startup",
+      "match": { "exception": "^(BeanCreationException|UnsatisfiedDependencyException|ApplicationContextException|PortInUseException|BeanInstantiationException)$" },
+      "advice": "The Spring context failed to start; the root cause says which bean or setting."
+    },
+    {
+      "id": "java-out-of-memory",
+      "category": "configuration",
+      "match": { "exception": "^OutOfMemoryError$" },
+      "subject": "memory",
+      "advice": "The JVM ran out of memory: the heap or the container limit is too small for the load, or something leaks."
+    }
+  ]
+}

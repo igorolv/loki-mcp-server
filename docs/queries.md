@@ -204,7 +204,8 @@ A single-line group prints one time. The header names the real span of the sampl
 sample is never presented as a statistic of the interval — the footer points to
 `countLogs`. Under the budget rare groups are dropped first, then the groups of a day
 earlier that are gone, then noise groups, then restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
-from the end of the list: `Output limit reached: showing N of M groups.` An empty result gives the same
+from the end of the list: `Output limit reached: showing N of M groups.`, and last the smallest
+incidents of the picture (below). An empty result gives the same
 advice as `queryLogs`.
 
 **Reading the sample.** An error line of a Spring Boot ECS service is 16 KB on average
@@ -357,6 +358,60 @@ The block tells a day that was not normal from one that was; with a cut sample i
 printed, because a group missing from the sample may still be in the window. A failed read
 prints `Seen at these hours a day earlier, not now: not checked (Loki did not answer in
 time or failed).`
+
+**Incident picture.** Right after the history line the summary answers the investigator's
+questions for the failures that are new or growing, in at most 5 incidents:
+
+```
+Incident picture: new or growing errors, oldest first (the groups below are the evidence):
+1. since 10:17:13.495, new (not seen in the 7 days before) — Check [ errorCode=21, checkCode=null, …
+   where: ssj-pr-1396; 4 lines
+   all 4 lines: node_name k8s-node3.example.internal (0% in other lines of ssj-pr-1396), pod ssj-pr-1396-a…p-backend-5df6b7f478-mgmlx (0%)
+   restarts: none of ssj-pr-1396 restarted in the window
+4. since 10:56:52.561, more than usual (6 now, usually 0) — SpectrumException: Не найдена доступная задача с классом ru.it_spectrum.asv.ssj.bc.tasks.DeleteDraftUploadsDelegate [configuration: task worker]
+   where: ssj-main 10:56:52.561, then scheduler-main 10:56:52.751; 12 lines in 3 groups, one failure across services by taskExecutionId=500004 (followKey shows its lines in order)
+   all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (7% in other lines of ssj-main), node_name k8s-node3.example.internal (15%) (+4 more)
+   restarts: none of ssj-main, scheduler-main restarted in the window
+Not in the picture: 5 groups seen before at the usual rate (7 lines), noise 38 lines.
+```
+
+- **Incidents.** Printed groups (top and rare, never noise) are joined when one carries a
+  key of another's newest line (the `linked:` keys) or when they have the same dependency:
+  the subject of a `dependency` rule, else an address found in the root message, the
+  wrapper messages or the message (`scheme://host:port` without its user part, or
+  `host:port` / `ip:port`; `File.java:42` of a frame is not one). A set is an incident when
+  one of its groups is new, more than usual or has no history; the 5 with the most such
+  lines are printed, oldest onset first. The headline is the root cause (or first message
+  line) of its biggest new or growing group with the rule tags of its groups (dependency
+  rules of the other groups too) and the address.
+- **Onset.** A new group began with its first line. For a growing one it is the point from
+  which its lines stop fitting the usual rate: of the candidate points, the one whose lines
+  at and after it are least likely under a Poisson rate of the usual count of the window
+  (at least 0.5) scaled to the part of the window left. When the sample read the whole
+  window the points are its lines: `since 10:56:52.561`, no request. Otherwise the groups of
+  the incidents are counted in steps of about a 48th of the window (a "nice" step, 5 minutes
+  for 4 hours) with the same `| regexp` request as the history, by the service label:
+  `since about 10:20`. When that request fails or the deadline has passed, the sample
+  alone gives `first in the sample at … (older lines of the window were not read)`. An
+  onset within the first step of the window adds `(the window start: it may have begun
+  earlier)`.
+- **where** — the services in the order their lines began at or after the onset (services
+  of one step share a place: `scheduler-main and ssj-main about 10:55`), at most 4; the
+  lines and groups; the key when the incident is one failure across services.
+- The first field finding of its biggest group (two values).
+- **restarts** — from the start and stop lines above: lines logged while a service was
+  starting, a restart up to 10 minutes before the onset (`just before`, with the deploy's
+  version change), the first restart after it (`none of these lines after it` or `the
+  lines went on`), else `none of … restarted in the window`; not printed without that block.
+
+When nothing is new or growing the block is one line: `Incident picture: nothing new or
+growing, every group below was seen before at its usual rate. If something is broken now,
+its lines may be outside this query: widen the selector or the filter.` Without any history
+(a query without a stream selector, or Loki refused the counts) the biggest groups are the
+incidents and the header says that new and usual ones are not told apart. The onset
+request runs after the history and before the fields, under the same deadline, and its
+log line shows `<log text>` for the fragments. The budget cuts the picture last, by its
+smallest incidents: `Not in the picture: N more incidents (output limit)`.
 
 ## countLogs(connection, query, start, end, groupBy)
 

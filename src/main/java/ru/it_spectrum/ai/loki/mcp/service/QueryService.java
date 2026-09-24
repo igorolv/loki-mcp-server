@@ -140,10 +140,12 @@ public class QueryService {
                 keepNoise = Math.min(LogSummary.NOISE_GROUPS, noise.size());
         int keepStarts = starts == null || starts.isEmpty() ? 0 : Math.min(ServiceStarts.SERVICES_SHOWN, starts.services());
         int keepGone = past.gone() == null ? 0 : past.gone().size();
+        int keepIncidents = past.incidents().size();
         int fullRare = keepRare, fullNoise = keepNoise;
         while (true) {
             var lines = new ArrayList<String>();
             if (past.header() != null) lines.add(past.header());
+            lines.addAll(IncidentPicture.render(past.incidents(), keepIncidents, printed, noiseLines, window, starts, zone));
             if (!known.isEmpty()) {
                 lines.add("Known causes by the rules of this connection (lines in the sample):");
                 lines.addAll(known);
@@ -188,12 +190,14 @@ public class QueryService {
                 footer.append(" Groups with the same 'linked:' key are one failure seen by several services; followKey with that key shows its lines in order.");
             String text = assemble(header, lines, footer.toString());
             if (bytes(text) <= budget) return text;
-            // Rare groups go first, then noise, then restarted services, then the top list from its end; one group always stays.
+            // Rare groups go first, then the groups gone, noise, restarted services, the top list from its end and last
+            // the smallest incidents; one group and one incident always stay.
             if (keepRare > 0) keepRare--;
             else if (keepGone > 0) keepGone--;
             else if (keepNoise > (keepTop == 0 ? 1 : 0)) keepNoise--;
             else if (keepStarts > 0) keepStarts--;
             else if (keepTop > 1) keepTop--;
+            else if (keepIncidents > 1) keepIncidents--;
             else throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                         "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the query or raise the limit.");
         }
@@ -207,12 +211,13 @@ public class QueryService {
      * day earlier that are gone: {@code goneTitle} is null when there is nothing to say, {@code gone} null when the
      * request failed.
      */
-    record Past(String header, String goneTitle, List<LogSummary.Group> gone) {
+    record Past(String header, String goneTitle, List<LogSummary.Group> gone, List<IncidentPicture.Incident> incidents) {
     }
 
     /**
-     * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups), the background of
-     * {@link FieldContrast} and the "not now" page of a day earlier, in this order and one request after another:
+     * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups), the onset of the
+     * incidents ({@link IncidentPicture}), the background of {@link FieldContrast} and the "not now" page of a day
+     * earlier, in this order and one request after another:
      * parallel requests of one call trip a stand's rate limit and leave its queue full for the next call. No request
      * starts after the deadline; a failure costs its own lines, never the summary. Sets {@code history} and
      * {@code fields} of the printed groups.
@@ -246,12 +251,15 @@ public class QueryService {
                 }
                 var verdict = GroupHistory.classify(previous.get(group), same.get(group), window.duration());
                 group.history = verdict.text();
+                group.verdict = verdict;
                 verdicts.add(verdict);
             }
         String header = batches.isEmpty() ? null : GroupHistory.header(verdicts, notChecked);
+        var incidents = IncidentPicture.select(printed);
+        onsets(connection, query, window, incidents, wholeWindow, sample, deadline);
         contrast(connection, query, window, printed, sample, deadline);
         // The groups of a day earlier can only be "gone" when the sample of this window saw every line of it.
-        if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS) return new Past(header, null, null);
+        if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS) return new Past(header, null, null, incidents);
         String title = "Seen at these hours a day earlier, not now";
         var dayBefore = new QueryTime.Range(window.start().minus(Duration.ofDays(1)), window.end().minus(Duration.ofDays(1)));
         Sample sampled;
@@ -260,13 +268,55 @@ public class QueryService {
             sampled = sample(connection, query, dayBefore, FIRST_PAGE, definition.limits().maxHttpResponseBytes());
         } catch (LokiOperationException e) {
             if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
-            return new Past(header, title + ": not checked (Loki did not answer in time or failed).", null);
+            return new Past(header, title + ": not checked (Loki did not answer in time or failed).", null, incidents);
         }
         var gone = new ArrayList<LogSummary.Group>();
         for (var group : LogSummary.group(sampled.events(), normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules()))
             if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS) gone.add(group);
-        if (gone.isEmpty()) return new Past(header, null, null);
-        return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):", gone);
+        if (gone.isEmpty()) return new Past(header, null, null, incidents);
+        return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):",
+                gone, incidents);
+    }
+
+    /**
+     * When each incident began and in which order its services joined: from the sampled lines when they are every
+     * line of the window, else from counts of its groups in steps of the window (one request per batch, the same
+     * fragments as the history), else from the sample alone.
+     */
+    private void onsets(String connection, String query, QueryTime.Range window, List<IncidentPicture.Incident> incidents, boolean wholeWindow,
+                        List<LogEvent> sample, long deadline) {
+        if (incidents.isEmpty()) return;
+        var definition = registry.require(connection);
+        java.util.function.Function<LogEvent, String> serviceOf = event -> normalizer.view(event, definition.serviceLabels()).service();
+        java.util.function.Function<LogEvent, String> nameOf = event -> {
+            var values = new LinkedHashMap<String, String>();
+            normalizer.parse(event.line(), values, new LinkedHashMap<>());
+            return ServiceStarts.service(event, values, definition.serviceLabels());
+        };
+        if (wholeWindow) {
+            for (var incident : incidents) IncidentPicture.fromLines(incident, window, IncidentPicture.Source.LINES, serviceOf, nameOf);
+            return;
+        }
+        Duration step = IncidentPicture.timelineStep(window);
+        var counts = new HashMap<LogSummary.Group, TreeMap<Long, Map<String, Long>>>();
+        for (var batch : GroupHistory.batches(query, IncidentPicture.timelineGroups(incidents))) {
+            if (System.nanoTime() >= deadline) break;
+            var request = GroupHistory.timeline(batch, window, step);
+            try {
+                var response = client.queryRange(connection, request.expression(), request.start(), request.end(), definition.limits().maxEntries(),
+                        LokiHttpClient.Direction.FORWARD, stepSeconds(step), request.logged());
+                counts.putAll(GroupHistory.timeline(batch, response));
+            } catch (LokiOperationException e) {
+                if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
+                break;
+            } catch (IllegalStateException e) {
+                break;
+            }
+        }
+        var sampled = new QueryTime.Range(QueryTime.fromNanos(sample.getFirst().timestampNanos()), window.end());
+        for (var incident : incidents)
+            if (!IncidentPicture.fromCounts(incident, counts, window, step, nameOf))
+                IncidentPicture.fromLines(incident, sampled, IncidentPicture.Source.SAMPLE, serviceOf, nameOf);
     }
 
     /**
@@ -308,7 +358,10 @@ public class QueryService {
             for (var field : FieldContrast.fields(event, normalizer).entrySet())
                 sampleValues.computeIfAbsent(service, k -> new HashMap<>()).computeIfAbsent(field.getKey(), k -> new HashSet<>()).add(field.getValue());
         }
-        for (var group : targets) group.fields = FieldContrast.findings(group, normalizer, background, sampleValues);
+        for (var group : targets) {
+            group.findings = FieldContrast.analyse(group, normalizer, background, sampleValues);
+            group.fields = group.findings.stream().map(f -> "         " + FieldContrast.render(f, group.services, FieldContrast.PARTS)).toList();
+        }
     }
 
     /**

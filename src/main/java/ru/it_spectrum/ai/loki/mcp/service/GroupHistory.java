@@ -230,6 +230,44 @@ final class GroupHistory {
         return request(batch, length, aligned - end, aligned - days * DAY_SECONDS, aligned);
     }
 
+    /**
+     * The window itself in steps of {@code step}, for the onset of the groups: evaluations at multiples of the step
+     * (Loki aligns them so anyway), each counting (t - step, t]; the edge steps may reach past the window.
+     */
+    static Request timeline(Batch batch, QueryTime.Range window, Duration step) {
+        long seconds = step.toSeconds();
+        long first = Math.floorDiv(window.start().getEpochSecond(), seconds) * seconds + seconds;
+        long endSecond = window.end().getEpochSecond() + (window.end().getNano() > 0 ? 1 : 0);
+        long last = Math.max(first, Math.ceilDiv(endSecond, seconds) * seconds);
+        return request(batch, seconds, 0, first, last);
+    }
+
+    /**
+     * Counts of a {@link #timeline} request per group: evaluation time in epoch seconds → count by service (the value
+     * of the group's service label, "" when the group has none).
+     */
+    static Map<LogSummary.Group, TreeMap<Long, Map<String, Long>>> timeline(Batch batch, LokiResponses.QueryResponse response) {
+        if (response == null || !(response.data() instanceof LokiResponses.Matrix matrix)) throw new IllegalStateException("not a matrix");
+        var result = new HashMap<LogSummary.Group, TreeMap<Long, Map<String, Long>>>();
+        for (var group : batch.fragments().keySet()) result.put(group, new TreeMap<>());
+        for (var series : matrix.series()) {
+            String fragment = series.labels().get(LABEL);
+            for (var entry : batch.fragments().entrySet()) {
+                var group = entry.getKey();
+                String service = group.serviceLabel == null ? "" : series.labels().get(group.serviceLabel);
+                if (!entry.getValue().equals(fragment) || service == null
+                        || (group.serviceLabel != null && !group.serviceValues.contains(service))) continue;
+                for (var sample : series.samples()) {
+                    long count = value(sample.value());
+                    if (count <= 0) continue;
+                    long at = sample.timestampSeconds().setScale(0, RoundingMode.HALF_UP).longValueExact();
+                    result.get(group).computeIfAbsent(at, k -> new TreeMap<>()).merge(service, count, Long::sum);
+                }
+            }
+        }
+        return result;
+    }
+
     private static Request request(Batch batch, long rangeSeconds, long offsetSeconds, long start, long end) {
         return new Request(expression(batch, rangeSeconds, offsetSeconds), expression(new Batch(batch.fragments(), batch.logged(), batch.logged(), batch.by()),
                 rangeSeconds, offsetSeconds), Instant.ofEpochSecond(start), Instant.ofEpochSecond(end));

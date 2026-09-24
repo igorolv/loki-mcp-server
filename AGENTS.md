@@ -190,6 +190,12 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
   the other lines of its services (a background of 12 slices of the window, read by
   `QueryService` after the history): values most group lines hold and few other lines do,
   or one value of a varying field every group line holds; field names come from the lines.
+- `IncidentPicture` builds the first block of `summarizeLogs` from the printed groups after
+  their history: groups joined by a shared key or dependency (rule subject, address in the
+  text) into at most 5 incidents of new or growing groups, the onset (a Poisson change point
+  from the sampled lines, or from one step-count request when the sample was cut), the
+  order of services, the first field finding and the restarts around the onset. Generic
+  knowledge of Java client exceptions lives in `examples/java-rules.json`, never in code.
 - `Map` is fine for labels and arbitrary fields; limits and timeouts live in
   `ConnectionLimits` and `DiscoveryLimits`, no magic numbers in tools.
 - `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven

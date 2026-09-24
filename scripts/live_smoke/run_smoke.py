@@ -183,9 +183,11 @@ def main() -> int:
         if not args.connection and not variables:
             continue  # a literal URL such as the local example is not a live stand
         rules = profile.get("rulesFile")
-        if rules and not Path(rules).is_absolute():
+        if rules:
             # The temporary connections.json lives elsewhere; a relative rulesFile is resolved against the original file.
-            profile = dict(profile, rulesFile=str(Path(args.connections_file).resolve().parent / rules))
+            base = Path(args.connections_file).resolve().parent
+            resolved = [r if Path(r).is_absolute() else str(base / r) for r in ([rules] if isinstance(rules, str) else rules)]
+            profile = dict(profile, rulesFile=resolved[0] if isinstance(rules, str) else resolved)
         chosen[name] = profile
     if not chosen:
         print("no profile selected: set LOKI_DEV_URL / LOKI_TST_URL (see examples/connections.json) or pass --connection", file=sys.stderr)

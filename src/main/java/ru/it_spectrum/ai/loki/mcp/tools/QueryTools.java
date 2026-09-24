@@ -34,13 +34,12 @@ public class QueryTools {
     }
 
     @McpTool(name = "summarizeLogs",
-            description = "Summarize many matching log lines instead of reading them: errors grouped by root cause (the exception, "
-                    + "its wrappers, the line of our code), other lines by repeated message, each group with its count in the sample, "
-                    + "first/last time and newest example; rare one-off messages listed separately. Each group says whether it is new, "
-                    + "more than usual or seen in the 7 days before, and which pod, build, node or user its lines share; restarts and "
-                    + "deploys are listed on top. Use it when countLogs shows "
-                    + "hundreds of lines, e.g. query {app=\"backend\"} |= \"ERROR\"; counts cover the sampled newest lines only. "
-                    + "Then read one group with queryLogs |= \"<part of its message>\" or getLogContext around its time.",
+            description = "Summarize many log lines instead of reading them. It starts with an incident picture: what is new or "
+                    + "growing, since when, in which services in which order, the dependency, and restarts or deploys around it; below "
+                    + "are the groups (errors by root cause, other lines by message) with counts in the sample and their history. Use it "
+                    + "when asked what is broken or when countLogs shows hundreds of lines, e.g. {app=\"backend\"} |= \"ERROR\" with "
+                    + "start=\"now-4h\". Then follow the picture: followKey for its key, queryLogs |= \"<part of its message>\" or "
+                    + "getLogContext around its time.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String summarizeLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,

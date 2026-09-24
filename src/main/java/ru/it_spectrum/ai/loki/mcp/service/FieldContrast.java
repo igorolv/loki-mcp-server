@@ -94,12 +94,50 @@ final class FieldContrast {
     }
 
     /**
+     * A field value of a group and its share among the other lines that carry the field; -1 when few other lines do.
+     */
+    record Part(String name, String value, double share) {
+    }
+
+    /**
+     * Values held by the same {@code covered} of the group's {@code size} lines, lowest share first.
+     */
+    record Finding(int covered, int size, List<Part> parts) {
+    }
+
+    /**
      * {@code all 6 lines: pod …, build.version 2799 (7% of other ssj-main lines)}, at most {@link #FINDINGS}; empty when
      * the group is small or its services have too few other lines to compare with.
      *
      * @param sampleValues values of every field in the sampled lines of the window, by service
      */
     static List<String> findings(LogSummary.Group group, EventNormalizer normalizer, List<Line> background,
+                                 Map<String, Map<String, Set<String>>> sampleValues) {
+        var lines = new ArrayList<String>();
+        for (var finding : analyse(group, normalizer, background, sampleValues))
+            lines.add("         " + render(finding, group.services, PARTS));
+        return lines;
+    }
+
+    /**
+     * {@code all 6 lines: pod … (7% in other lines of ssj-main), build.version 2799 (43%)}: at most {@code parts} values.
+     */
+    static String render(Finding finding, Collection<String> services, int parts) {
+        var text = new StringBuilder(finding.covered() == finding.size() ? "all " + finding.size() + " lines: "
+                : finding.covered() + " of " + finding.size() + " lines: ");
+        // Each value with its share among the other lines that carry its field; the first one says what the share is of.
+        String others = " other lines of " + String.join(", ", services);
+        for (int i = 0; i < Math.min(parts, finding.parts().size()); i++) {
+            var part = finding.parts().get(i);
+            if (i > 0) text.append(", ");
+            text.append(part.name()).append(' ').append(middle(part.value())).append(" (")
+                    .append(part.share() < 0 ? "rare" : Math.round(part.share() * 100) + "%").append(i == 0 ? " in" + others : "").append(')');
+        }
+        if (finding.parts().size() > parts) text.append(" (+").append(finding.parts().size() - parts).append(" more)");
+        return text.toString();
+    }
+
+    static List<Finding> analyse(LogSummary.Group group, EventNormalizer normalizer, List<Line> background,
                                  Map<String, Map<String, Set<String>>> sampleValues) {
         if (group.events.size() < MIN_LINES) return List.of();
         var services = group.services;
@@ -120,8 +158,6 @@ final class FieldContrast {
                 held.merge(field.getKey() + "\u0000" + field.getValue(), 1, Integer::sum);
             }
         int size = group.events.size();
-        record Part(String name, String value, double share) {
-        }
         var findings = new LinkedHashMap<BitSet, List<Part>>();
         var gaps = new HashMap<BitSet, Double>();
         for (var name : byName.entrySet()) {
@@ -148,24 +184,13 @@ final class FieldContrast {
         var ordered = new ArrayList<>(findings.entrySet());
         ordered.sort(Comparator.comparingDouble((Map.Entry<BitSet, List<Part>> e) -> -gaps.get(e.getKey()))
                 .thenComparingInt(e -> -e.getKey().cardinality()));
-        var lines = new ArrayList<String>();
+        var result = new ArrayList<Finding>();
         for (var finding : ordered.subList(0, Math.min(FINDINGS, ordered.size()))) {
             var parts = new ArrayList<>(finding.getValue());
             parts.sort(Comparator.comparingDouble(Part::share).thenComparing(Part::name));
-            int covered = finding.getKey().cardinality();
-            var text = new StringBuilder("         ").append(covered == size ? "all " + size + " lines: " : covered + " of " + size + " lines: ");
-            // Each value with its share among the other lines that carry its field; the first one says what the share is of.
-            String others1 = " other lines of " + String.join(", ", services);
-            for (int i = 0; i < Math.min(PARTS, parts.size()); i++) {
-                var part = parts.get(i);
-                if (i > 0) text.append(", ");
-                text.append(part.name()).append(' ').append(middle(part.value())).append(" (")
-                        .append(part.share() < 0 ? "rare" : Math.round(part.share() * 100) + "%").append(i == 0 ? " in" + others1 : "").append(')');
-            }
-            if (parts.size() > PARTS) text.append(" (+").append(parts.size() - PARTS).append(" more)");
-            lines.add(text.toString());
+            result.add(new Finding(finding.getKey().cardinality(), size, List.copyOf(parts)));
         }
-        return lines;
+        return result;
     }
 
     /**

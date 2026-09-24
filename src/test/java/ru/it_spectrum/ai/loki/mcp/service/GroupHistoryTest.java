@@ -185,7 +185,7 @@ class GroupHistoryTest {
      * A Loki that answers the log query from the window and day-before fixtures, the start/stop query with nothing,
      * and a count request with one series per fixture group whose fragment it holds, from asva2-dev-contrast-history.json.
      */
-    private LokiHttpClient stand(List<String> requests) {
+    LokiHttpClient stand(List<String> requests) {
         var client = mock(LokiHttpClient.class);
         var events = new ArrayList<>(Fixtures.events("asva2-dev-contrast-window.jsonl"));
         events.addAll(Fixtures.events("asva2-dev-contrast-yesterday.jsonl"));
@@ -202,7 +202,7 @@ class GroupHistoryTest {
                 synchronized (requests) {
                     requests.add(query);
                 }
-                return new QueryResponse(new Matrix(series(query, from, to)), new QueryStats(0L), List.of());
+                return new QueryResponse(new Matrix(series(query, from, to, events)), new QueryStats(0L), List.of());
             }
             var page = new ArrayList<LogStream>();
             var slice = BACKGROUND.matcher(query);
@@ -225,11 +225,12 @@ class GroupHistoryTest {
         return client;
     }
 
-    private List<MetricSeries> series(String expression, Instant from, Instant to) {
+    private List<MetricSeries> series(String expression, Instant from, Instant to, List<LogEvent> events) {
         var range = RANGE.matcher(expression);
         assertTrue(range.find(), expression);
         long length = Long.parseLong(range.group(1));
         long offset = range.group(2) == null ? 0 : Long.parseLong(range.group(2));
+        if (length != GroupHistory.DAY_SECONDS && length != end.getEpochSecond() - start.getEpochSecond()) return timeline(expression, from, to, length, events);
         var result = new ArrayList<MetricSeries>();
         for (var group : history.get("groups")) {
             String fragment = group.get("fragment").asString();
@@ -256,10 +257,53 @@ class GroupHistoryTest {
         return result;
     }
 
+    /**
+     * The onset counts of the incidents: the lines of the fixtures holding a fragment of the request, leftmost first as
+     * Loki's regexp takes it, counted in steps of {@code length} ending at multiples of it, by fragment and instance.
+     */
+    private List<MetricSeries> timeline(String expression, Instant from, Instant to, long length, List<LogEvent> events) {
+        assertEquals(0, from.getEpochSecond() % length);
+        assertEquals(0, to.getEpochSecond() % length);
+        var fragments = new ArrayList<String>();
+        for (var group : history.get("groups")) {
+            String fragment = group.get("fragment").asString();
+            if (expression.contains(GroupHistory.logqlEscape(GroupHistory.regexEscape(fragment)))) fragments.add(fragment);
+        }
+        var counts = new TreeMap<String, TreeMap<Long, Long>>();
+        for (var event : events) {
+            String fragment = null;
+            int at = Integer.MAX_VALUE;
+            for (String candidate : fragments) {
+                int index = event.line().indexOf(candidate);
+                if (index >= 0 && (index < at || (index == at && candidate.length() > fragment.length()))) {
+                    at = index;
+                    fragment = candidate;
+                }
+            }
+            if (fragment == null) continue;
+            long second = QueryTime.fromNanos(event.timestampNanos()).getEpochSecond();
+            long evaluation = Math.ceilDiv(second + 1, length) * length;
+            if (evaluation < from.getEpochSecond() || evaluation > to.getEpochSecond()) continue;
+            counts.computeIfAbsent(fragment + "\u0000" + event.labels().get("instance"), k -> new TreeMap<>()).merge(evaluation, 1L, Long::sum);
+        }
+        var result = new ArrayList<MetricSeries>();
+        for (var series : counts.entrySet()) {
+            String[] key = series.getKey().split("\u0000");
+            var samples = new ArrayList<MetricSample>();
+            series.getValue().forEach((evaluation, count) -> samples.add(new MetricSample(BigDecimal.valueOf(evaluation), Long.toString(count))));
+            result.add(new MetricSeries(Map.of("mcp_fragment", key[0], "instance", key[1]), samples));
+        }
+        return result;
+    }
+
     private QueryService service(LokiHttpClient client, int maxResponseBytes) {
+        return service(client, maxResponseBytes, List.of());
+    }
+
+    QueryService service(LokiHttpClient client, int maxResponseBytes, List<ru.it_spectrum.ai.loki.mcp.connection.LogRule> rules) {
         var registry = new ConnectionRegistry(List.of(new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
                 ConnectionAuth.NONE, null, ZoneId.of("Europe/Moscow"),
-                new ConnectionLimits(100, 100, 8 * 1024 * 1024, maxResponseBytes, 1000, 86400, 100, 1000), SERVICE_LABELS, PACKAGES)));
+                new ConnectionLimits(100, 100, 8 * 1024 * 1024, maxResponseBytes, 1000, 86400, 100, 1000), SERVICE_LABELS, PACKAGES, rules)));
         return new QueryService(registry, client, Clock.fixed(end, ZoneOffset.UTC));
     }
 

@@ -237,6 +237,33 @@ final class ServiceStarts {
         }
     }
 
+    boolean checked() {
+        return failure == null;
+    }
+
+    /**
+     * Starts of a service by the name a summary group gives it: the name itself, or the line's service or the stream
+     * label of a {@code name [label]} start.
+     */
+    List<Start> startsOf(String service) {
+        var result = new ArrayList<Start>();
+        for (var start : starts)
+            if (start.service().equals(service) || start.service().startsWith(service + " [") || start.service().endsWith(" [" + service + "]"))
+                result.add(start);
+        return result;
+    }
+
+    /**
+     * The deploy a start was, or null when it kept the version (or the version is unknown).
+     */
+    Deploy deployOf(Start start) {
+        for (var summary : summaries()) {
+            var deploy = summary.byStart.get(start);
+            if (deploy != null) return deploy;
+        }
+        return null;
+    }
+
     boolean isEmpty() {
         return failure == null && starts.isEmpty() && stops.isEmpty();
     }
@@ -271,6 +298,7 @@ final class ServiceStarts {
         final List<Start> starts = new ArrayList<>();
         final List<Stop> stops = new ArrayList<>();
         final List<Deploy> deploys = new ArrayList<>();
+        final Map<Start, Deploy> byStart = new HashMap<>();
         final List<Stop> alone = new ArrayList<>();
         int whileStarting;
         Instant latest = Instant.MIN;
@@ -296,6 +324,8 @@ final class ServiceStarts {
                 Version before = previous != null ? previous : stopped != null ? stopped.version() : null;
                 if (before != null && start.version() != null && !before.equals(start.version()))
                     deploys.add(new Deploy(at, before, start.version()));
+                if (before != null && start.version() != null && !before.equals(start.version()))
+                    byStart.put(start, deploys.getLast());
                 if (start.version() != null) previous = start.version();
             }
             for (var stop : stops) {

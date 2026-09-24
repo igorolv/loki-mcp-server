@@ -7,6 +7,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +74,11 @@ public final class LogSummary {
          */
         final List<String> links = new ArrayList<>();
         /**
+         * The groups whose lines carry a key of this group's newest line, and the first such key.
+         */
+        final Set<Group> linked = new LinkedHashSet<>();
+        String linkKey;
+        /**
          * Lines logged by a service while it was starting, and the newest such start.
          */
         int whileStarting;
@@ -89,11 +95,16 @@ public final class LogSummary {
          */
         String history;
         /**
+         * The verdict behind {@link #history}; null when the history was not checked.
+         */
+        GroupHistory.Verdict verdict;
+        /**
          * The sampled lines of the group and the services they came from, for {@link FieldContrast}; its findings.
          */
         final List<LogEvent> events = new ArrayList<>();
         final Set<String> services = new TreeSet<>();
         List<String> fields = List.of();
+        List<FieldContrast.Finding> findings = List.of();
 
         Group(String template) {
             this.template = template;
@@ -174,6 +185,9 @@ public final class LogSummary {
             var byService = new LinkedHashMap<String, Integer>();
             for (var other : occurrences.getOrDefault(key, List.of())) {
                 if (other == group) continue;
+                group.linked.add(other);
+                other.linked.add(group);
+                if (group.linkKey == null) group.linkKey = key.text();
                 String service = other.lastView.service() == null ? "-" : other.lastView.service();
                 byService.merge(service, 1, Integer::sum);
             }

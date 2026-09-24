@@ -3,6 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.connection;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -58,14 +59,36 @@ public final class ConnectionsLoader {
                         ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits,
                         e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels(),
                         e.applicationPackages() == null ? List.of() : e.applicationPackages(),
-                        e.rulesFile() == null ? List.of() : rulesByFile.computeIfAbsent(
-                                rulesPath(path, resolve(e.rulesFile(), environment)), ConnectionsLoader::loadRules)));
+                        rules(path, e.rulesFile(), environment, rulesByFile)));
             }
             return List.copyOf(definitions);
         } catch (Exception ignored) {
             // Jackson, URI and filesystem errors can include source values. Do not retain their cause.
             throw Errors.configuration();
         }
+    }
+
+    /**
+     * The rules of every file of {@code rulesFile} (one path or a list), in order: the stand's own file first, then
+     * generic sets. A file shared by connections is loaded once.
+     */
+    private static List<LogRule> rules(Path connections, JsonNode rulesFile, UnaryOperator<String> environment,
+                                       Map<Path, List<LogRule>> loaded) {
+        if (rulesFile == null || rulesFile.isNull()) return List.of();
+        var files = new ArrayList<String>();
+        if (rulesFile.isString()) files.add(rulesFile.asString());
+        else if (rulesFile.isArray() && !rulesFile.isEmpty()) for (var file : rulesFile) {
+            if (!file.isString()) throw Errors.configuration();
+            files.add(file.asString());
+        }
+        else throw Errors.configuration();
+        var rules = new ArrayList<LogRule>();
+        for (String file : files) {
+            if (file.isBlank()) throw Errors.configuration();
+            rules.addAll(loaded.computeIfAbsent(rulesPath(connections, resolve(file, environment)), ConnectionsLoader::loadRules));
+        }
+        // One file: its shared copy, so that connections naming it hold the same list.
+        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : rules;
     }
 
     /**
@@ -124,7 +147,7 @@ public final class ConnectionsLoader {
 
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
                          Limits limits, List<String> serviceLabels, List<String> applicationPackages,
-                         String rulesFile) {
+                         JsonNode rulesFile) {
     }
 
     private record RulesFile(List<Rule> rules) {

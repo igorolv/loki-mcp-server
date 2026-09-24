@@ -89,6 +89,20 @@ class ConnectionsTest {
         assertEquals("Schema sbp is ahead.", LogRule.expand(rule.advice(), matcher));
     }
 
+    @Test
+    void severalRulesFilesAreTriedInTheirOrderWithIdsUniqueAcrossThem() throws Exception {
+        Files.writeString(directory.resolve("stand.json"), "{\"rules\":[" + RULE + "]}");
+        Files.writeString(directory.resolve("java.json"),
+                "{\"rules\":[{\"id\":\"redis\",\"category\":\"dependency\",\"match\":{\"exception\":\"^Redis\"},\"subject\":\"Redis\",\"advice\":\"a\"}]}");
+        var entries = load("{\"connections\":{\"a\":{\"url\":\"http://localhost:1\",\"rulesFile\":[\"stand.json\",\"java.json\"]}}}");
+        assertEquals(List.of("flyway", "redis"), entries.getFirst().rules().stream().map(LogRule::id).toList());
+        // The same id in two files, an empty list and a list of anything but paths stop the start-up.
+        Files.writeString(directory.resolve("again.json"), "{\"rules\":[" + RULE + "]}");
+        for (String rulesFile : List.of("[\"stand.json\",\"again.json\"]", "[]", "[\"stand.json\",1]", "{\"a\":\"stand.json\"}", "[\" \"]"))
+            assertSafeConfigurationError(assertThrows(LokiOperationException.class,
+                    () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":" + rulesFile + "}}}")));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "{\"rules\":[{\"id\":\"a\",\"category\":\"weather\",\"match\":{\"message\":\"x\"},\"advice\":\"SECRET\"}]}",
