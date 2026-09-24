@@ -43,11 +43,10 @@ public class QueryTools {
     }
 
     @McpTool(name = "summarizeLogs",
-            description = "Summarize many log lines instead of reading them. It starts with an incident picture: what is new or "
-                    + "growing, since when, in which services in which order, the dependency, and restarts or deploys around it; below "
-                    + "are the groups (errors by root cause, other lines by message) with counts in the sample and their history. Use it "
-                    + "when asked what is broken or when countLogs shows hundreds of lines, e.g. level=\"error\", start=\"now-4h\" "
-                    + "(or a service, or a LogQL query). Then follow the picture: followKey for its key, queryLogs with its text, "
+            description = "Summarize many log lines instead of reading them: groups of errors by root cause and of other lines by "
+                    + "message, with counts in the sample, the causes the connection's rules know, noise apart, and restarts or deploys "
+                    + "in the window. Use it when asked what is broken or when countLogs shows hundreds of lines, e.g. level=\"error\", "
+                    + "start=\"now-4h\" (or a service, or a LogQL query). Then read one group with queryLogs and its text, or "
                     + "getLogContext around its time.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String summarizeLogs(
@@ -60,22 +59,6 @@ public class QueryTools {
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "How many newest lines to sample, default 500", required = false) Integer sample) {
         return this.service.summarize(connection, query, service, level, text, start, end, sample);
-    }
-
-    @McpTool(name = "followKey",
-            description = "Follow one identifier across services: every line of the selector that holds the key, oldest first, "
-                    + "with the root cause of errors. Use it for a key that summarizeLogs prints after 'linked:', or an id you were given "
-                    + "(taskExecutionId=13548, ErrorID ERR-..., a trace id). Pass the selector of the whole environment, e.g. {namespace=\"dev\"}, "
-                    + "and a window around the time the key was seen. The value is matched as a whole word, so 13548 does not match 135480.",
-            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
-    public String followKey(
-            @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "Stream selector only, covering every service to search, e.g. {namespace=\"dev\"}") String selector,
-            @McpToolParam(description = "The key as printed, e.g. \"taskExecutionId=13548\", or a bare value, e.g. \"ERR-5ced1eb2-849d-478d-8cbe-31ad23a1f88a\"") String key,
-            @McpToolParam(description = START, required = false) String start,
-            @McpToolParam(description = END, required = false) String end,
-            @McpToolParam(description = "Maximum lines to return, oldest first, default 100", required = false) Integer limit) {
-        return service.followKey(connection, selector, key, start, end, limit);
     }
 
     @McpTool(name = "getLogContext",
@@ -111,19 +94,5 @@ public class QueryTools {
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "A label name to break the count down by, or \"time\" for buckets over the window", required = false) String groupBy) {
         return this.service.count(connection, query, service, level, text, start, end, groupBy);
-    }
-
-    @McpTool(name = "queryMetrics",
-            description = "Advanced: evaluate a metric LogQL expression over the window and print one table per series. "
-                    + "Example: sum by (level) (count_over_time({app=\"backend\"}[5m])) or sum(rate({app=\"backend\"} |= \"timeout\"[1m])). "
-                    + "For simple counts prefer countLogs, which writes the expression for you.",
-            annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
-    public String queryMetrics(
-            @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "Metric LogQL expression, e.g. sum(rate({app=\"backend\"}[5m]))") String query,
-            @McpToolParam(description = START, required = false) String start,
-            @McpToolParam(description = END, required = false) String end,
-            @McpToolParam(description = "Distance between points like \"30s\", \"5m\", \"1h\". Default: about 20 points over the window", required = false) String step) {
-        return service.metrics(connection, query, start, end, step);
     }
 }

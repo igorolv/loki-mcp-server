@@ -1,4 +1,4 @@
-# Reading logs, counting, summaries and metrics
+# Reading logs, counting, summaries and export
 
 Every tool returns a single text `content`. There are no output schemas, no
 `structuredContent`, no cursors and no field projections. The consumer is a small model
@@ -11,7 +11,7 @@ short form `15m` is accepted), RFC3339 with an offset, local time in the connect
 timezone, or epoch nanoseconds. The window is limited by the connection's
 `maxIntervalSeconds`.
 
-**Why a result is empty.** When `queryLogs`, `countLogs`, `summarizeLogs`, `followKey` or
+**Why a result is empty.** When `queryLogs`, `countLogs`, `summarizeLogs` or
 `getLogContext` find no line, the server looks for the reason with metadata requests that
 cost nothing while there are lines: the values of every label of an `=` matcher
 (`/label/<name>/values` over the window), the label list when a label has none, then
@@ -87,46 +87,6 @@ millisecond: Loki treats `end` as exclusive, so the boundary is re-read (one dup
 possible) but lines with the same millisecond are never lost. Nothing is stored between
 calls; no snapshot is promised. An empty result suggests widening the window, checking
 labels with `discoverLogs` or simplifying the filter.
-
-## followKey(connection, selector, key, start, end, limit = 100)
-
-Every line of a stream selector that holds one identifier, oldest first, across services:
-what happened to one task, request or message on a stand without tracing. `key` is
-`name=value` or `name: value` as `summarizeLogs` prints it (`taskExecutionId=13548`), or a
-bare value (`ERR-5ced1eb2-849d-478d-8cbe-31ad23a1f88a`); the value must be 3–200
-characters without quotes or backslashes. `selector` is a plain stream selector covering
-every service to search (`{namespace="dev"}`); the server adds the filter itself:
-one forward `query_range` of `selector |= "value"`, `limit` lines. The value is then matched
-as a whole token (`13548` is not found in `135480` or `ERR-13548x`); lines that held it only
-inside a longer word are counted in the header and left out.
-
-```
-Lines with taskExecutionId=13548 in {namespace=~"dev|asv-dev"} — dev, 2026-09-22 00:29:32–2026-09-23 00:29:32 (+03:00): all 12 lines in 2 services (scheduler-main, ssj-main); first error 00:00:13.689 ssj-main. 6 lines holding 13548 only inside a longer word were left out.
-00:00:13.293 INFO  scheduler-main  [TASK_DB_CREATE] Создана запись о выполнении: taskExecutionId=13548, taskName=ssd-load, …
-00:00:13.665 INFO  scheduler-main  [TASK_DISPATCH] Отправка задачи на выполнение: taskExecutionId=13548, taskClass=…UploadInsuranceCompany, worker=ssj-service, …
-00:00:13.682 INFO  ssj-main  [TASK_ACCEPT] Принята задача (sync): taskExecutionId=13548, …
-00:00:13.689 ERROR ssj-main  [TASK_EXECUTE_ERROR] Ошибка при выполнении задачи: taskExecutionId=13548, …
-         SpectrumException: Не найдена доступная задача с классом ru.it_spectrum.asv.ssj.bc.tasks.UploadInsuranceCompany
-         at ru.it_spectrum.asv.bc.task.runtime.TaskServiceImpl.findDelegate(TaskServiceImpl.java:321)
-         [configuration: task worker] The service the scheduler sent the task to has no worker for …
-00:00:13.762 ERROR ssj-main  [TASK_EXECUTION_ERROR] Ошибка при выполнении задачи: taskExecutionId=13548
-         SpectrumException: …  ← wrapped in ExecutionException, SpectrumException
-         at ru.it_spectrum.asv.bc.task.runtime.TaskServiceImpl.findDelegate(TaskServiceImpl.java:321)
-         [configuration: task worker]
-00:00:13.777 WARN  scheduler-main  [TASK_FAILED_STATUS] Задача вернула ошибочный статус: taskExecutionId=13548, status=FAILED, …
-         [configuration: task worker]
-Shown every line of the window with this key.
-```
-
-The header names the services in the order they appear and the first error (a line with
-level `ERROR`/`FATAL` or a stack trace). A line prints as in `queryLogs` (message cut at
-400 characters) followed by the root cause, the application frame and the rule tag as in
-`summarizeLogs`; the advice of a rule is printed at its first line only. Lines are
-chronological with date markers; the budget cuts the newest lines, since the story of a key
-starts at its first one: `Output limit reached: showing the oldest N of M lines.` When
-lines were cut or `limit` was reached, the footer says `Newer: repeat with start="<time of
-the last shown line>"` — the boundary millisecond is read again rather than lost. An empty
-result advises a window around the time the key was seen or a wider selector.
 
 ## getLogContext(connection, selector, time, before = 20, after = 20)
 
@@ -218,15 +178,6 @@ it, add != "NoResourceFoundException" to the query.` Under the budget noise grou
 dropped after the rare ones and before the top list. Without a catalogue the output is as
 below.
 
-**Linked keys.** Every line's identifiers are collected: `name=value` or `name: value`
-pairs of the message whose name ends in `Id`, `ID` or `_id` (the value 3–64 letters,
-digits, `_` or `-`), and the trace id. When a key of a group's newest line is carried by
-lines of other groups, the group prints `linked: taskExecutionId=13548 → scheduler-main 2
-lines` (up to two keys, counted by the service of those groups) and the footer adds
-`Groups with the same 'linked:' key are one failure seen by several services; followKey
-with that key shows its lines in order.` A key carried by one line only (the `ErrorID` of a
-single request) is not printed.
-
 A group prints its newest line (level, service, the message cut at 200 characters), then
 for a root-cause group the root type, its message when the logged message does not already
 contain it (cut at 160 characters) and the wrappers outermost first — repeats collapsed, a
@@ -240,11 +191,10 @@ different error must not disappear. The rest is counted in `(+N more groups, M l
 A single-line group prints one time. The header names the real span of the sample
 (`spanning`): 500 newest lines may cover only part of the window, so the frequency in the
 sample is never presented as a statistic of the interval — the footer points to
-`countLogs`. Under the budget rare groups are dropped first, then the groups of a day
-earlier that are gone, then noise groups, then restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
-from the end of the list: `Output limit reached: showing N of M groups.`, and last the smallest
-incidents of the picture (below). An empty result gives the same
-advice as `queryLogs`.
+`countLogs`. Under the budget rare groups are dropped first, then noise groups, then
+restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
+from the end of the list: `Output limit reached: showing N of M groups.` An empty result
+gives the same advice as `queryLogs`.
 
 **Reading the sample.** An error line of a Spring Boot ECS service is 16 KB on average
 (up to 30 KB), so the sample is read backwards in pages: the first asks for 50 lines, the
@@ -304,153 +254,6 @@ left to reuse. A failed request costs the block, not the summary: `Restarts and 
 checked, the query for start and stop lines of {…} failed (UPSTREAM_TIMEOUT).` Only Spring
 Boot / Tomcat / Netty lines are recognised; other stacks show no block.
 
-**History of the groups.** Every printed group (top and rare, not noise) is looked up in
-the 7 days before the window by counting, not by reading lines. The count is of lines of
-the query that hold a fragment of the group's text: the longest part of the first line of
-its root message (or of its message, for a group without a root cause) between the parts
-replaced by `*`, at least 8 characters, else the root type's simple name; JSON-escaped for
-a JSON line, because Loki searches the raw line; cut to 60 characters at a word boundary.
-Frame-line groups and messages without such a part are not looked up.
-
-One metric request counts many groups. The query's stream selector gets a matcher on the
-service label when every group took its service from that label (`instance=~"nsi-main|
-sbp-main|…"`), the query's pipeline is kept, and two stages are added: a literal
-alternation of the fragments, longest first, which Loki runs as a substring search, and the
-same alternation as the named group of `| regexp`, so that the fragment a line holds becomes
-the label `mcp_fragment`; the sum is by that label and the service label. A group adds up
-the series of its fragment and its services. A line holding two fragments counts once, for
-the one that starts first. Groups go into one request until the URL-encoded query reaches
-6000 bytes (an ingress passes 8 KB request lines; a Cyrillic character is 6 bytes encoded),
-then into the next. Each evaluation is moved by `offset` so that it ends where it should,
-because Loki aligns the steps of a range query to multiples of the step (UTC midnight):
-
-- `sum by (mcp_fragment, instance) (count_over_time(<scope> [86400s] offset Xs))`, step one
-  day — the seven periods of 24 hours before the window start. All zeros: `new: not seen in
-  the 7 days before`.
-- `… [<window>s] offset Ys))`, step one day — for a window of at most 6 hours the window
-  itself and the same hours on each of the 7 days before: `more than usual: 6 in this
-  window, usually 0 at these hours; 14 in the 7 days before` when the window holds at least
-  three times the median of the same hours (at least 1) and the Poisson tail `P(X ≥ window |
-  λ = max(median, 0.5))` is below 0.01, otherwise `seen before: 22 in the 7 days before,
-  usually 0 at these hours`. A longer window is compared with the median of the daily
-  counts scaled to its length (`usually about 10 in 12h`); its own count is the group's count
-  in the sample when the sample read the whole window, else the request asks for the window
-  only. The same hours of a day window would read 8 days of lines: 27 s on the asva2 DEV
-  Loki 2.6.1.
-- Groups never seen before need no second request.
-
-The line is printed under the group; above the groups one line sums them up: `Compared
-with the 7 days before (lines of this query with the same text): 4 groups new, 2 more than
-usual, 7 seen before.` The requests run one after another — four in parallel tripped the DEV
-Loki's rate limit (HTTP 429) and left its queue full for the next call — and no request
-starts once the history has taken 20 seconds. A group without its 7 days says `history not
-checked`, and the summary line adds `; N not checked (Loki did not answer in time or refused
-the count)`; without its same hours it says `seen before: N in the 7 days before`. A
-fragment is a heuristic: two lines of one failure can come out differently when one of them
-carries text that earlier lines of the failure did not. A stand whose retention is shorter
-than 7 days makes old groups look new. In the server's own log these requests show the
-fragments as `<log text>`. On the DEV stand a summary of 4 hours took 8 s with the history,
-of 24 hours 34 s (16 s of them the sample itself).
-
-**Fields that set a group apart.** A printed group of at least 3 sampled lines is compared
-with the other lines of its services in the window: the query's stream selector without
-its pipeline and level matchers, narrowed to the services of those groups, read in 12
-slices of the window, the newest 200 lines of each (slices far apart first, so that the
-deadline leaves an even sample); lines of level ERROR/FATAL or with a stack trace are not
-"other lines". The fields of a line are its stream labels and the scalar fields of its JSON
-(`EventNormalizer.parse`), without time, level, logger, message, `error.*`, stack, trace,
-process id, `filename` and `job`, and values over 120 characters; digit runs in thread names
-become `*`. A value is a finding
-
-- when at least half of the group's lines hold it and its share among the other lines that
-  carry the field (at least 20 of them) is lower by 0.4 or more;
-- or, for a field fewer than 20 other lines carry, when every line of the group holds it and
-  the field takes more than one value in the sampled and other lines of those services (a
-  user id does; the build of one service does not).
-
-Values held by exactly the same lines are one finding; at most two findings a group, at most
-four values each, lowest share first, a long value cut in the middle:
-
-```
-    6×  10:56:52.561–10:58:53.189  ERROR ssj-main  [TASK_EXECUTION_ERROR] …
-         all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (5% in other lines of ssj-main), node_name k8s-node3 (7%), process.thread.name http-nio-*-exec-* (22%), service.name ssj-backend (38%) (+2 more)
-    5×  10:24:50.259–12:24:27.059  ERROR ssj-main  При обработке данных возникла ошибка
-         all 5 lines: userId 1002 (rare in other lines of ssj-main), process.thread.name Информация по загрузке (0%), service.name ssj-ui-backend (54%)
-```
-
-Fewer than 20 other lines of the group's services give no finding. The slices run after the
-history and before the "gone" page, under the same deadline; a failed slice ends the
-reading.
-
-**Gone since a day earlier.** When the sample read every line of a window of at most 24
-hours, the same query is read over the same hours a day earlier (one page of 50 lines,
-read the same byte-aware way) and grouped; up to 5 groups that are not in this window and
-are not noise are listed after the groups:
-
-```
-Seen at these hours a day earlier, not now (in a sample of 25 lines of 2026-09-23 09:06:56–13:06:56 (+03:00)):
-    2×  scheduler-main  SocketTimeoutException: Connect timed out
-```
-
-The block tells a day that was not normal from one that was; with a cut sample it is not
-printed, because a group missing from the sample may still be in the window. A failed read
-prints `Seen at these hours a day earlier, not now: not checked (Loki did not answer in
-time or failed).`
-
-**Incident picture.** Right after the history line the summary answers the investigator's
-questions for the failures that are new or growing, in at most 5 incidents:
-
-```
-Incident picture: new or growing errors, oldest first (the groups below are the evidence):
-1. since 10:17:13.495, new (not seen in the 7 days before) — Check [ errorCode=21, checkCode=null, …
-   where: ssj-pr-1396; 4 lines
-   all 4 lines: node_name k8s-node3.example.internal (0% in other lines of ssj-pr-1396), pod ssj-pr-1396-a…p-backend-5df6b7f478-mgmlx (0%)
-   restarts: none of ssj-pr-1396 restarted in the window
-4. since 10:56:52.561, more than usual (6 now, usually 0) — SpectrumException: Не найдена доступная задача с классом ru.it_spectrum.asv.ssj.bc.tasks.DeleteDraftUploadsDelegate [configuration: task worker]
-   where: ssj-main 10:56:52.561, then scheduler-main 10:56:52.751; 12 lines in 3 groups, one failure across services by taskExecutionId=500004 (followKey shows its lines in order)
-   all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (7% in other lines of ssj-main), node_name k8s-node3.example.internal (15%) (+4 more)
-   restarts: none of ssj-main, scheduler-main restarted in the window
-Not in the picture: 5 groups seen before at the usual rate (7 lines), noise 38 lines.
-```
-
-- **Incidents.** Printed groups (top and rare, never noise) are joined when one carries a
-  key of another's newest line (the `linked:` keys) or when they have the same dependency:
-  the subject of a `dependency` rule, else an address found in the root message, the
-  wrapper messages or the message (`scheme://host:port` without its user part, or
-  `host:port` / `ip:port`; `File.java:42` of a frame is not one). A set is an incident when
-  one of its groups is new, more than usual or has no history; the 5 with the most such
-  lines are printed, oldest onset first. The headline is the root cause (or first message
-  line) of its biggest new or growing group with the rule tags of its groups (dependency
-  rules of the other groups too) and the address.
-- **Onset.** A new group began with its first line. For a growing one it is the point from
-  which its lines stop fitting the usual rate: of the candidate points, the one whose lines
-  at and after it are least likely under a Poisson rate of the usual count of the window
-  (at least 0.5) scaled to the part of the window left. When the sample read the whole
-  window the points are its lines: `since 10:56:52.561`, no request. Otherwise the groups of
-  the incidents are counted in steps of about a 48th of the window (a "nice" step, 5 minutes
-  for 4 hours) with the same `| regexp` request as the history, by the service label:
-  `since about 10:20`. When that request fails or the deadline has passed, the sample
-  alone gives `first in the sample at … (older lines of the window were not read)`. An
-  onset within the first step of the window adds `(the window start: it may have begun
-  earlier)`.
-- **where** — the services in the order their lines began at or after the onset (services
-  of one step share a place: `scheduler-main and ssj-main about 10:55`), at most 4; the
-  lines and groups; the key when the incident is one failure across services.
-- The first field finding of its biggest group (two values).
-- **restarts** — from the start and stop lines above: lines logged while a service was
-  starting, a restart up to 10 minutes before the onset (`just before`, with the deploy's
-  version change), the first restart after it (`none of these lines after it` or `the
-  lines went on`), else `none of … restarted in the window`; not printed without that block.
-
-When nothing is new or growing the block is one line: `Incident picture: nothing new or
-growing, every group below was seen before at its usual rate. If something is broken now,
-its lines may be outside this query: widen the selector or the filter.` Without any history
-(a query without a stream selector, or Loki refused the counts) the biggest groups are the
-incidents and the header says that new and usual ones are not told apart. The onset
-request runs after the history and before the fields, under the same deadline, and its
-log line shows `<log text>` for the fragments. The budget cuts the picture last, by its
-smallest incidents: `Not in the picture: N more incidents (output limit)`.
-
 ## countLogs(connection, query | service, level, text, start, end, groupBy)
 
 The server builds the metric LogQL; `query` is an ordinary log query starting with `{`.
@@ -467,27 +270,8 @@ The server builds the metric LogQL; `query` is an ordinary log query starting wi
   a bucket start. `<- spike` marks a bucket that is ≥ 5 and ≥ 3 × the median bucket (3 × the
   mean when the median is zero). This is a simple rule, not analysis.
 
-A metric expression (`sum(...)`, `rate(...)`) is rejected with the advice to use `queryMetrics`.
-
-## queryMetrics(connection, query, start, end, step)
-
-Always a range query. `step` is `30s`, `5m`, `1h`; the default is the nearest "nice" step
-not smaller than `window/20` (1s … 1d). The number of evaluations per series must not
-exceed `maxMetricPoints`.
-
-```
-sum by (level) (rate({app="backend"}[5m])) — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), step 5m, 2 series:
-{level="error"}
-  09-13 10:00  0.5
-  09-13 10:05  0.7
-{level="warn"}
-  09-13 10:00  0.1
-Output trimmed to 2 series / 40 points (connection limits). Aggregate with sum by (...) or use a larger step.
-```
-
-Values are printed as Loki strings (`NaN`, `+Inf` are kept). Point times are `HH:mm:ss` for
-steps under a minute, otherwise `MM-dd HH:mm`. A log query is rejected with the advice to
-use `queryLogs`/`countLogs`; there is no instant mode.
+A metric expression (`sum(...)`, `rate(...)`) is rejected: the tool writes the expression itself.
+There is no tool for arbitrary metric LogQL.
 
 ## exportLogs(connection, query | service, level, text, start, end, format = raw, directory, splitByService = false)
 
@@ -547,14 +331,13 @@ it. The `QueryToolsConfig` wrapper checks the actual text size as the last guard
 ## Verification
 
 `gradlew.bat build --console=plain` — unit tests for the line format, stack trace
-compaction, footer, budget, countLogs/queryMetrics, getLogContext (two requests, marker,
-time precision, trimming around the target), summarizeLogs (templates, rare groups, budget;
-the history and the gone groups against the counts DEV Loki gave for
-`asva2-dev-contrast-*`, `GroupHistoryTest`; the fields against its background,
-`FieldContrastTest`) and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
-16 outstanding calls with different budgets, errors without secrets, Loki 400 text).
-`gradlew.bat integrationTest --console=plain` — Loki 2.6.1/3.6.0: page, continuation by
-`end`, raw with labels, context (lines at the moment, exact time, a moment without lines,
-pipeline rejection), count/groupBy/time, summary, metrics, parser error, discovery and label
-values, and last the summary history against a line pushed a day before the window. `python scripts/live_smoke/run_smoke.py --connection <name>` — a read-only run of
-the packaged jar over stdio against a live stand (see README, "Development").
+compaction, footer, budget, countLogs, getLogContext (two requests, marker, time precision,
+trimming around the target), summarizeLogs (root causes, templates, rules, restarts, rare
+groups, budget), export, and the stdio smoke on the packaged jar (`instructions`,
+tools/list without output schema, 16 outstanding calls with different budgets, errors
+without secrets, Loki 400 text). `gradlew.bat integrationTest --console=plain` — Loki
+2.6.1/3.6.0: page, continuation by `end`, raw with labels, context (lines at the moment,
+exact time, a moment without lines, pipeline rejection), count/groupBy/time, summary,
+parser error, discovery and label values. `python scripts/live_smoke/run_smoke.py
+--connection <name>` — a read-only run of the packaged jar over stdio against a live stand
+(see README, "Development").

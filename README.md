@@ -1,9 +1,8 @@
 # Loki MCP Server
 
 A local MCP server (stdio) that lets an agent read logs from Grafana Loki: overview of the
-stand → count → summary → lines → context around an event → the lines of one id across
-services → the full original line, and saving the lines of a window to disk. Nine tools, every response is readable
-text; built for small models (target: DeepSeek 4.1 Flash). Loki is only read: push, delete, `/config` and other
+stand → count → summary → lines → context around an event → the full original line, and
+saving the lines of a window to disk. Seven tools, every response is readable text; built for small models (target: DeepSeek 4.1 Flash). Loki is only read: push, delete, `/config` and other
 management endpoints are never exposed; the only thing written is an `exportLogs` file inside the configured export
 directories.
 
@@ -13,10 +12,8 @@ directories.
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | An incident picture on top — the new or growing failures, since when, in which services in which order, the dependency, the key of one failure across services and restarts around them — then groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the pod, build, node or user its lines share unlike the other lines of their service, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
+| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; known causes and noise by the connection's rules; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
-| `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
-| `queryMetrics` | Metric LogQL as a table (advanced) |
 | `exportLogs` | Every matching line of a window saved to a file on the local disk, oldest first and in full: the original lines, a layout such as `spring` (the Spring Boot console line from ECS JSON), or a template of one's own; one file or one per service |
 
 Loki 2.6.1 and 3.x are supported. The response contract is in
@@ -85,7 +82,7 @@ file with telling names; keep different systems in separate files via
 The connection's `limits` object (all fields optional): `maxEntries` (1000) — the cap of
 `limit` and `sample`; `maxIntervalSeconds` (86400) — the longest `start`–`end` window;
 `maxResponseBytes` (65536) — the limit of one response text; when exceeded, `queryLogs`
-drops the oldest lines and `summarizeLogs` drops rare groups, the gone groups, noise and restarted services
+drops the oldest lines and `summarizeLogs` drops rare groups, noise and restarted services
 before the top groups, and the output says so;
 `requestTimeoutMs` (30000) and `maxHttpResponseBytes` (8 MiB) — the limit of one request
 to Loki; `maxExportLines` (500000) and `maxExportBytes` (256 MiB) — where one `exportLogs`
@@ -104,12 +101,7 @@ structured metadata counts as the line's level (`unknown` as no level). Loki's p
 is not needed: `summarizeLogs` groups locally. `summarizeLogs` makes one more request for
 the start and stop lines of the same streams, filtered by a literal alternation first so
 that a day of a busy environment stays within seconds on 2.6.1; if it fails, the summary
-is printed without that block. It also counts the history of the printed groups with
-metric range queries (`count_over_time` with a day step and an `offset`, the fragments of
-many groups in one request through `| regexp`, one request after another, none started
-after 20 s) and reads one page of the same hours a day earlier; a group whose count failed
-says `history not checked`. For groups of 3 lines or more it reads 12 slices of 200 lines of
-the same streams without the query's filters, to compare their fields with the other lines.
+is printed without that block.
 
 ## Connecting an MCP client
 
@@ -140,7 +132,7 @@ Name the stand, the service and the period: "show errors of ssj-ui-backend on DE
 last hour", "the DEV stand is broken, find out why", "what values does the label
 applicationName have on TST". The typical investigation the server suggests to the model
 through `instructions`:
-`listConnections → discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext / followKey → queryLogs raw=true`.
+`listConnections → discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext → queryLogs raw=true`.
 
 ## Error format
 
@@ -205,7 +197,7 @@ python scripts/live_smoke/run_smoke.py --connection dev   # read-only run of the
 The live smoke takes profiles from [examples/connections.json](examples/connections.json)
 (URLs from `LOKI_DEV_URL`/`LOKI_TST_URL`), starts the jar over stdio like a real client and
 walks `listConnections → discoverLogs → countLogs → queryLogs → summarizeLogs →
-getLogContext → raw`, plus pipeline rejection, a Loki parser error and `queryMetrics`; the
+getLogContext → raw`, plus pipeline rejection and a Loki parser error; the
 selector is taken from the `discoverLogs` response, so the script does not depend on a
 particular stand. `--verbose` prints full responses, `--window now-24h` widens the window.
 Nothing is written to Loki.

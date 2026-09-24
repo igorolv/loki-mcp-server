@@ -152,7 +152,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(9, catalog.size());
+            assertEquals(7, catalog.size());
             var names = new HashSet<String>();
             for (var declaration : catalog) {
                 names.add(declaration.path("name").asText());
@@ -165,7 +165,7 @@ class StdioSmokeTest {
                         declaration.path("annotations").path("openWorldHint").asBoolean());
                 assertEquals("object", declaration.path("inputSchema").path("type").asText());
             }
-            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics", "exportLogs")), names);
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "exportLogs")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
             assertEquals(List.of("connection"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
@@ -187,12 +187,12 @@ class StdioSmokeTest {
             }
             // Oversized payloads and the minimum budget traverse the real outbound transport.
             for (int i = 0; i < 16; i++) {
-                String name = i % 4 == 2 ? "queryMetrics" : i % 4 == 3 ? "discoverLogs" : "queryLogs";
+                String name = i % 4 == 2 ? "countLogs" : i % 4 == 3 ? "discoverLogs" : "queryLogs";
                 var args = new HashMap<String, Object>();
                 args.put("connection", i % 4 == 0 ? "tiny" : "test");
                 args.put("start", "1700000000000000000");
                 args.put("end", "1700000001000000000");
-                if (name.equals("queryMetrics")) args.put("query", "sum(rate({kind=\"large\"}[1m]))");
+                if (name.equals("countLogs")) args.put("query", "{kind=\"large\"}");
                 else if (name.equals("discoverLogs")) args.put("selector", "{kind=\"large\"}");
                 else {
                     args.put("query", "{kind=\"large\"}");
@@ -220,18 +220,20 @@ class StdioSmokeTest {
                         assertTrue(text.contains("Ошибка 🐈"), text);
                         assertFalse(text.contains("\"message\""), text);
                     }
-                    if (index % 4 == 2) assertTrue(text.contains("{kind=\"test\"}\n  ") && text.contains("NaN"), text);
+                    if (index % 4 == 2) assertTrue(text.startsWith("3 lines match {kind=\"large\"}"), text);
                     if (index % 4 == 3)
                         assertTrue(text.startsWith("Streams matching {kind=\"large\"} in 2023-11-14") && text.contains("Next: use countLogs"), text);
                 }
             }
             for (int id = 35; id < 51; id++) {
-                String name = id % 4 == 0 ? "queryLogs" : id % 4 == 1 ? "countLogs" : id % 4 == 2 ? "queryMetrics" : id % 8 == 3 ? "summarizeLogs" : "queryLogs";
-                var arguments = new HashMap<String, Object>(Map.of("connection", "test", "start", "1700000000000000000", "end", "1700000001000000000"));
-                if (name.equals("queryMetrics")) {
-                    arguments.put("query", "count_over_time({kind=\"test\"}[1s])");
-                    arguments.put("step", "1s");
-                } else arguments.put("query", "{kind=\"test\"}");
+                String name = id % 4 == 0 ? "queryLogs" : id % 4 == 1 ? "countLogs" : id % 4 == 2 ? "getLogContext" : id % 8 == 3 ? "summarizeLogs" : "queryLogs";
+                var arguments = new HashMap<String, Object>(Map.of("connection", "test"));
+                if (name.equals("getLogContext")) {
+                    arguments.put("selector", "{kind=\"test\"}");
+                    arguments.put("time", "2023-11-14T22:13:20.123Z");
+                } else {
+                    arguments.putAll(Map.of("query", "{kind=\"test\"}", "start", "1700000000000000000", "end", "1700000001000000000"));
+                }
                 if (id % 8 == 1) arguments.put("groupBy", "kind");
                 if (id % 8 == 7) arguments.put("raw", true);
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
@@ -249,11 +251,10 @@ class StdioSmokeTest {
                     assertTrue(text.startsWith("3 lines match {kind=\"test\"} in 2023-11-14 22:13:20–22:13:21 (Z) (test)."), text);
                     assertEquals(id % 8 == 1, text.contains("By kind:\n  test    3"), text);
                 } else if (id % 4 == 2) {
-                    assertTrue(text.startsWith("count_over_time({kind=\"test\"}[1s]) — test, 2023-11-14 22:13:20–22:13:21 (Z), step 1s, 1 series:\n{kind=\"test\"}\n  22:13:20  NaN"), text);
+                    assertTrue(text.startsWith("Context in {kind=\"test\"} around 2023-11-14 22:13:20.123"), text);
                 } else if (id % 8 == 3) {
                     assertTrue(text.startsWith("Summary of {kind=\"test\"} — test, 2023-11-14 22:13:20–22:13:21 (Z): all 1 lines, spanning 22:13:20.123–22:13:20.123, 1 distinct message.\n"), text);
-                    assertTrue(text.contains("\nCompared with the 7 days before (lines of this query with the same text): 1 group new, 0 more than usual, 0 seen before.\n"), text);
-                    assertTrue(text.contains("\n    1×  22:13:20.123  ERROR test  Ошибка 🐈\n         new: not seen in the 7 days before\nCounts are for the 1 sampled lines only;"), text);
+                    assertTrue(text.contains("\n    1×  22:13:20.123  ERROR test  Ошибка 🐈\nCounts are for the 1 sampled lines only;"), text);
                 } else if (id % 8 == 7) {
                     assertTrue(text.contains("\n22:13:20.123 {kind=\"test\", level=\"error\"}  Ошибка 🐈\nShown all 1 matching lines."), text);
                 } else {

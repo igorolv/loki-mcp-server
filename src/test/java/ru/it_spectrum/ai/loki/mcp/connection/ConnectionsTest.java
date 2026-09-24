@@ -39,7 +39,7 @@ class ConnectionsTest {
         var entries = load("""
                 {"connections":{
                   "a":{"url":"${URL}","auth":{"type":"BEARER","token":"${TOKEN}"},
-                       "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7,"maxMetricSeries":2,"maxMetricPoints":9}},
+                       "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7,"maxExportLines":2,"maxExportBytes":9}},
                   "b":{"url":"http://localhost:1","description":"Test", "auth":{
                        "type":"BASIC","username":"reader","password":"${PASSWORD}"}},
                   "c":{"url":"http://localhost:2","applicationPackages":["ru.it_spectrum.asv","com.example"]}
@@ -52,8 +52,8 @@ class ConnectionsTest {
         assertEquals("Europe/Moscow", registry.require("a").timezone().getId());
         assertEquals("team-a", registry.require("a").tenant());
         assertEquals(7, registry.require("a").limits().maxEntries());
-        assertEquals(2, registry.require("a").limits().maxMetricSeries());
-        assertEquals(9, registry.require("a").limits().maxMetricPoints());
+        assertEquals(2, registry.require("a").limits().maxExportLines());
+        assertEquals(9, registry.require("a").limits().maxExportBytes());
         assertEquals(ConnectionLimits.DEFAULTS, registry.require("b").limits());
         assertEquals("p$ass\\word", registry.require("b").auth().password());
         assertEquals(ConnectionAuth.NONE, registry.require("c").auth());
@@ -260,9 +260,9 @@ class ConnectionsTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"\"maxMetricSeries\":0", "\"maxMetricPoints\":-1",
-            "\"maxMetricPoints\":1.5", "\"maxMetricSeries\":\"2\""})
-    void rejectsInvalidMetricLimits(String limits) {
+    @ValueSource(strings = {"\"maxExportLines\":0", "\"maxExportBytes\":-1",
+            "\"maxExportLines\":1.5", "\"maxExportLines\":\"2\"", "\"maxMetricSeries\":2"})
+    void rejectsInvalidOrUnknownLimits(String limits) {
         assertSafeConfigurationError(assertThrows(LokiOperationException.class, () -> load(
                 "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{" + limits + "}}}}")));
     }

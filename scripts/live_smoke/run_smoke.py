@@ -23,7 +23,7 @@ import threading
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics", "exportLogs"}
+TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "exportLogs"}
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)}")
 
 
@@ -142,8 +142,6 @@ class Smoke:
         self.check("getLogContext rejects a pipeline", err and "stream selector only" in pipeline, first_line(pipeline))
         broken, err = self.call("queryLogs", query=selector + " |= ", start=self.window)
         self.check("Loki parse error is passed on as text", err and "Loki rejected the query" in broken, first_line(broken))
-        metric, err = self.call("queryMetrics", query=f"sum(count_over_time({selector}[5m]))", start=self.window)
-        self.check("queryMetrics", not err and (", step " in metric), first_line(metric))
 
 
 def first_line(text: str) -> str:

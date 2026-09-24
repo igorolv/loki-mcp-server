@@ -37,7 +37,6 @@ public final class LogSummary {
     static final String FRAMES_EXAMPLE = "stack trace frame lines (at ...); read them with getLogContext around an error line";
     static final int WRAPPERS_SHOWN = 3;
     static final int NOISE_MESSAGE_CHARS = 120;
-    static final int LINKS_PER_GROUP = 2;
     private static final Pattern UUID = Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     private static final Pattern DATE_TIME_TEXT = Pattern.compile("\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}(?::\\d{2}(?:[.,]\\d+)?)?(?:Z|[+-]\\d{2}:?\\d{2})?)?");
     private static final Pattern TIME_TEXT = Pattern.compile("\\b\\d{1,2}:\\d{2}(?::\\d{2}(?:[.,]\\d+)?)?\\b");
@@ -72,7 +71,6 @@ public final class LogSummary {
     static List<Group> group(List<LogEvent> events, EventNormalizer normalizer, List<String> serviceLabels,
                              List<String> applicationPackages, List<LogRule> rules, Function<LogEvent, ServiceStarts.Start> startOf) {
         var groups = new LinkedHashMap<String, Group>();
-        var occurrences = new HashMap<CorrelationKeys.Key, List<Group>>();
         for (var event : events) {
             var view = normalizer.view(event, serviceLabels);
             var signature = signature(view, applicationPackages);
@@ -83,62 +81,15 @@ public final class LogSummary {
             group.lastSignature = signature;
             var match = LogRules.match(rules, view, signature);
             if (match != null) group.rule = match;
-            group.lastKeys = CorrelationKeys.of(view);
-            serviceLabel(group, event, serviceLabels);
-            group.events.add(event);
-            if (view.service() != null) group.services.add(view.service());
             var start = startOf.apply(event);
             if (start != null) {
                 group.whileStarting++;
                 group.start = start;
             }
-            for (var key : group.lastKeys) occurrences.computeIfAbsent(key, k -> new ArrayList<>()).add(group);
         }
-        for (var group : groups.values()) link(group, occurrences);
         var sorted = new ArrayList<>(groups.values());
         sorted.sort(Comparator.<Group>comparingInt(g -> g.count).reversed().thenComparing(g -> g.last.nanos(), Comparator.reverseOrder()));
         return sorted;
-    }
-
-    private static void serviceLabel(Group group, LogEvent event, List<String> serviceLabels) {
-        if (group.serviceMixed) return;
-        String label = null;
-        for (String name : serviceLabels)
-            if (event.labels().get(name) != null && !event.labels().get(name).isBlank()) {
-                label = name;
-                break;
-            }
-        if (label == null || (group.serviceLabel != null && !group.serviceLabel.equals(label))) {
-            group.serviceMixed = true;
-            group.serviceLabel = null;
-            group.serviceValues.clear();
-            return;
-        }
-        group.serviceLabel = label;
-        group.serviceValues.add(event.labels().get(label));
-    }
-
-    /**
-     * Keys of the group's newest line that lines of other groups carry too, counted by the service of those groups.
-     */
-    private static void link(Group group, Map<CorrelationKeys.Key, List<Group>> occurrences) {
-        for (var key : group.lastKeys) {
-            if (group.links.size() == LINKS_PER_GROUP) return;
-            var byService = new LinkedHashMap<String, Integer>();
-            for (var other : occurrences.getOrDefault(key, List.of())) {
-                if (other == group) continue;
-                group.linked.add(other);
-                other.linked.add(group);
-                if (group.linkKey == null) group.linkKey = key.text();
-                String service = other.lastView.service() == null ? "-" : other.lastView.service();
-                byService.merge(service, 1, Integer::sum);
-            }
-            if (byService.isEmpty()) continue;
-            var parts = new ArrayList<String>();
-            for (var entry : byService.entrySet())
-                parts.add(entry.getKey() + " " + entry.getValue() + (entry.getValue() == 1 ? " line" : " lines"));
-            group.links.add(key.text() + " → " + String.join(", ", parts));
-        }
     }
 
     /**
@@ -204,7 +155,6 @@ public final class LogSummary {
                 : truncate(SPACES.matcher(view.message()).replaceAll(" ").strip(), SUMMARY_MESSAGE_CHARS));
         lines.add(text.toString());
         lines.addAll(causeLines(view, group.lastSignature, group.rule, true));
-        if (!group.links.isEmpty()) lines.add("         linked: " + String.join("; ", group.links));
         if (group.whileStarting > 0) {
             var start = group.start;
             lines.add("         logged while starting: " + group.whileStarting + " of " + group.count + (group.count == 1 ? " line" : " lines")
@@ -212,8 +162,6 @@ public final class LogSummary {
                     + (start.end() == null ? "(did not finish)" : TIME.format(start.end().atZone(zone)))
                     + (start.version() == null ? "" : ", version " + start.version()));
         }
-        if (group.history != null) lines.add("         " + group.history);
-        lines.addAll(group.fields);
         return lines;
     }
 
@@ -249,18 +197,6 @@ public final class LogSummary {
     }
 
     /**
-     * One line of a group that is no longer there: {@code     2×  scheduler-main  SocketTimeoutException: Connect timed out}.
-     */
-    public static String renderGone(Group group) {
-        var view = group.lastView;
-        var signature = group.lastSignature;
-        String what = signature == null ? view.message()
-                : signature.rootType() + (signature.rootMessage().isBlank() ? "" : ": " + signature.rootMessage());
-        return String.format("%5d×  ", group.count) + (view.service() == null ? "-" : view.service()) + "  "
-                + truncate(SPACES.matcher(what).replaceAll(" ").strip(), NOISE_MESSAGE_CHARS);
-    }
-
-    /**
      * One line: {@code  436×  12:18:11.304–00:06:46.360  sec-main  missing-endpoint  <short message>}.
      */
     public static String renderNoise(Group group, ZoneId zone) {
@@ -274,49 +210,16 @@ public final class LogSummary {
 
     public static final class Group {
         final String template;
-        /**
-         * {@code taskExecutionId=13548 → scheduler-main 2 lines}: keys of the newest line found in lines of other groups.
-         */
-        final List<String> links = new ArrayList<>();
-        /**
-         * The groups whose lines carry a key of this group's newest line, and the first such key.
-         */
-        final Set<Group> linked = new LinkedHashSet<>();
-        final Set<String> serviceValues = new TreeSet<>();
-        /**
-         * The sampled lines of the group and the services they came from, for {@link FieldContrast}; its findings.
-         */
-        final List<LogEvent> events = new ArrayList<>();
-        final Set<String> services = new TreeSet<>();
         int count;
         LogEvent first, last;
         EventNormalizer.View lastView;
         ErrorSignature lastSignature;
         LogRules.Match rule;
-        List<CorrelationKeys.Key> lastKeys = List.of();
-        String linkKey;
         /**
          * Lines logged by a service while it was starting, and the newest such start.
          */
         int whileStarting;
         ServiceStarts.Start start;
-        /**
-         * The stream label every line's service came from and its values; null when a line took its service from the
-         * JSON or from another label, so that no label can narrow a query to the group's services.
-         */
-        String serviceLabel;
-        /**
-         * One line of {@link GroupHistory}, printed under the group when set.
-         */
-        String history;
-        /**
-         * The verdict behind {@link #history}; null when the history was not checked.
-         */
-        GroupHistory.Verdict verdict;
-        List<String> fields = List.of();
-        List<FieldContrast.Finding> findings = List.of();
-        private boolean serviceMixed;
-
         Group(String template) {
             this.template = template;
         }

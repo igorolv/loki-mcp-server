@@ -62,13 +62,9 @@ class LineFormatTest {
         // An empty message on the first line: the report below it is the message.
         assertEquals("Error starting ApplicationContext.", report.message());
         assertEquals("INFO", report.level());
-        // A shipper that sends every line apart leaves nothing after the colon; the history counts the logger, which the
-        // raw line holds.
+        // A shipper that sends every line apart leaves nothing after the colon.
         var empty = event("2026-09-24T15:26:11.242+03:00 ERROR 1 --- [           main] o.s.b.d.LoggingFailureAnalysisReporter   : ");
         assertEquals("(empty message, logger o.s.b.d.LoggingFailureAnalysisReporter)", normalizer.view(empty, List.of("instance")).message());
-        var group = LogSummary.group(List.of(empty), normalizer, List.of("instance"), List.of()).getFirst();
-        assertEquals("o.s.b.d.LoggingFailureAnalysisReporter", GroupHistory.fragment(group));
-        assertTrue(empty.line().contains(GroupHistory.fragment(group)));
     }
 
     @Test
@@ -82,10 +78,6 @@ class LineFormatTest {
         assertEquals(1, groups.size());
         assertEquals(3, groups.getFirst().count);
         assertEquals("[configuration: orders]", groups.getFirst().rule.tag());
-        // The thread is a field for the contrast, its pool numbers folded; time and pid are not fields.
-        var fields = FieldContrast.fields(events.getLast(), normalizer);
-        assertEquals("http-nio-*-exec-*", fields.get("thread"));
-        assertFalse(fields.containsKey("time") || fields.containsKey("pid") || fields.containsKey("message"), fields.toString());
     }
 
     @Test

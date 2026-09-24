@@ -27,7 +27,7 @@ MCP client"). With several stands the separate `loki-dev`, `loki-tst` servers be
 | mcp-loki | loki-mcp-server | Differences |
 |---|---|---|
 | `loki_query` (log query) | `queryLogs(connection, query, start, end, limit, raw)` | lines print in chronological order as `HH:mm:ss.SSS LEVEL service message` in the connection's timezone; stack traces are compacted; `raw=true` gives the original line with stream labels. No `direction`: always the newest lines of the window; older ones by repeating with `end` from the footer |
-| `loki_query` (metric query) | `queryMetrics(connection, query, start, end, step)` | a table per series; no instant mode |
+| `loki_query` (metric query) | none | arbitrary metric LogQL is not offered; `countLogs` covers totals, a breakdown by label and counts over time |
 | `loki_query` used for counting | `countLogs(connection, query, start, end, groupBy)` | the server builds the metric expression; `groupBy="time"` gives buckets with spike markers |
 | `loki_labels` (no `name`) | `discoverLogs(connection)` | label names together with values, line format, JSON fields and a ready-made selector |
 | `loki_labels` (`name=app`) | `discoverLogs(connection, label="app")` | up to 200 values, alphabetically |
@@ -48,7 +48,7 @@ descriptions and the server `instructions` play their role (the flow `listConnec
 discoverLogs → countLogs → summarizeLogs → queryLogs → getLogContext → raw`).
 `error_logs(app)` is `countLogs {applicationName="app", level="error"}` followed by
 `queryLogs`; `top_label_values` is `countLogs` with `groupBy="<label>"`; `rate_query` is
-`queryMetrics` with `sum(rate(...))`.
+`countLogs` with `groupBy="time"`.
 
 ## What changes for the model
 

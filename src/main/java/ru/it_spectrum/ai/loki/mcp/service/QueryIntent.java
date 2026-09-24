@@ -4,6 +4,7 @@ import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * A LogQL log query built from what the model asks for instead of written by it: the connection's scope, the service
@@ -13,12 +14,21 @@ import java.util.*;
 final class QueryIntent {
     static final int TEXT_CHARS = 500;
     static final int SERVICE_CHARS = 200;
+    private static final Pattern REGEX_META = Pattern.compile("[\\\\.^$|?*+()\\[\\]{}]");
 
     private QueryIntent() {
     }
 
     static boolean given(String service, String level, String text) {
         return present(service) || present(level) || present(text);
+    }
+
+    static String regexEscape(String text) {
+        return REGEX_META.matcher(text).replaceAll("\\\\$0");
+    }
+
+    static String logqlEscape(String text) {
+        return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static boolean present(String value) {
@@ -56,7 +66,7 @@ final class QueryIntent {
         if (present(text)) {
             if (text.length() > TEXT_CHARS || text.chars().anyMatch(Character::isISOControl))
                 throw Errors.invalid("text must be up to " + TEXT_CHARS + " characters on one line.");
-            built.append(" |= \"").append(GroupHistory.logqlEscape(text)).append('"');
+            built.append(" |= \"").append(logqlEscape(text)).append('"');
         }
         return built.toString();
     }
@@ -93,7 +103,7 @@ final class QueryIntent {
     }
 
     private static String matcher(String label, List<String> names) {
-        if (names.size() == 1) return label + "=\"" + GroupHistory.logqlEscape(names.getFirst()) + "\"";
-        return label + "=~\"" + GroupHistory.logqlEscape(String.join("|", names.stream().map(GroupHistory::regexEscape).toList())) + "\"";
+        if (names.size() == 1) return label + "=\"" + logqlEscape(names.getFirst()) + "\"";
+        return label + "=~\"" + logqlEscape(String.join("|", names.stream().map(QueryIntent::regexEscape).toList())) + "\"";
     }
 }

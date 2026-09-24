@@ -23,15 +23,15 @@ class QueryServiceTest {
     private final Instant now = Instant.parse("2026-09-13T12:00:00.123456789Z");
     private final ConnectionRegistry registry = new ConnectionRegistry(List.of(
             new ConnectionDefinition("one", null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null,
-                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 4096, 3, 7200, 2, 25)),
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 4096, 3, 7200)),
             new ConnectionDefinition("two", null, URI.create("http://localhost:2"), ConnectionAuth.NONE, null,
-                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 1024, 100, 86400, 100, 1000)),
+                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 1024, 100, 86400)),
             new ConnectionDefinition("three", null, URI.create("http://localhost:3"), ConnectionAuth.NONE, null,
-                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 65536, 1000, 86400, 100, 1000)),
+                    ZoneId.of("Europe/Moscow"), new ConnectionLimits(100, 100, 10000, 65536, 1000, 86400)),
             new ConnectionDefinition("tight", null, URI.create("http://localhost:4"), ConnectionAuth.NONE, null,
-                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 2048, 1000, 86400, 100, 1000)),
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 10000, 2048, 1000, 86400)),
             new ConnectionDefinition("paged", null, URI.create("http://localhost:5"), ConnectionAuth.NONE, null,
-                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 200000, 65536, 1000, 86400, 100, 1000))));
+                    ZoneId.of("UTC"), new ConnectionLimits(100, 100, 200000, 65536, 1000, 86400))));
     private final QueryService service = new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
 
     private static LogEntry entry(String nanos, String line) {
@@ -41,9 +41,6 @@ class QueryServiceTest {
     private void range(QueryData data, List<String> warnings) {
         doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
-        // The history counts of summarizeLogs name a separate text for the log.
-        doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
-                .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any(), anyString());
     }
 
     /**
@@ -59,8 +56,6 @@ class QueryServiceTest {
             if (page.size() > limit) page = new java.util.ArrayList<>(page.subList(0, limit));
             return new QueryResponse(new Streams(List.of(new LogStream(labels, page))), new QueryStats(999L), List.of());
         }).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
-        doReturn(new QueryResponse(new Matrix(List.of()), new QueryStats(0L), List.of()))
-                .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any(), anyString());
     }
 
     @Test
@@ -119,7 +114,7 @@ class QueryServiceTest {
         assertTrue(assertThrows(LokiOperationException.class, () -> service.logs("one", "{a=\"b\"}", null, null, 4, null))
                 .getMessage().contains("between 1 and 3"));
         assertTrue(assertThrows(LokiOperationException.class, () -> service.logs("one", "sum(rate({a=\"b\"}[1m]))", null, null, null, null))
-                .getMessage().contains("queryMetrics"));
+                .getMessage().contains("countLogs"));
         assertThrows(LokiOperationException.class, () -> service.logs("one", " ", null, null, null, null));
         assertTrue(assertThrows(LokiOperationException.class, () -> service.logs("one", "{a=\"b\"}", "yesterday", null, null, null))
                 .getMessage().contains("now-15m"));
@@ -178,46 +173,12 @@ class QueryServiceTest {
     }
 
     @Test
-    void metricsRenderSeriesTablesWithNiceStepsAndConnectionCaps() {
-        long t0 = now.minusSeconds(600).getEpochSecond();
-        var samples = List.of(new MetricSample(new BigDecimal(t0 + ".5"), "0.5"), new MetricSample(BigDecimal.valueOf(t0 + 60), "NaN"),
-                new MetricSample(BigDecimal.valueOf(t0 + 120), "+Inf"));
-        range(new Matrix(List.of(new MetricSeries(Map.of("level", "error"), samples), new MetricSeries(Map.of("level", "warn"), samples),
-                new MetricSeries(Map.of("level", "info"), samples))), List.of());
-        var text = service.metrics("one", "sum by (level) (rate({app=\"x\"}[1m]))", "now-10m", "now", null);
-        verify(client).queryRange("one", "sum by (level) (rate({app=\"x\"}[1m]))", now.minusSeconds(600), now, 3,
-                LokiHttpClient.Direction.FORWARD, new BigDecimal("30.000"));
-        assertTrue(text.startsWith("sum by (level) (rate({app=\"x\"}[1m])) — one, 2026-09-13 11:50:00–12:00:00 (Z), step 30s, 3 series:"), text);
-        assertTrue(text.contains("""
-                
-                {level="error"}
-                  11:50:00  0.5
-                  11:51:00  NaN
-                  11:52:00  +Inf
-                {level="warn"}
-                  11:50:00  0.5
-                  11:51:00  NaN
-                  11:52:00  +Inf
-                Output trimmed"""), text);
-        assertTrue(text.contains("Output trimmed to 2 series / 6 points"), text);
-        service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "5m");
-        verify(client).queryRange("one", "rate({a=\"b\"}[1m])", now.minusSeconds(600), now, 3, LokiHttpClient.Direction.FORWARD, new BigDecimal("300.000"));
-        range(new Matrix(List.of()), List.of());
-        assertTrue(service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "5m").endsWith("no series. The expression matched no data in this window."));
-        assertTrue(assertThrows(LokiOperationException.class, () -> service.metrics("one", "{a=\"b\"}", null, null, null)).getMessage().contains("log query"));
-        assertTrue(assertThrows(LokiOperationException.class, () -> service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "1s")).getMessage().contains("points per series"));
-        assertThrows(LokiOperationException.class, () -> service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "5x"));
-        range(new Streams(List.of()), List.of());
-        assertThrows(LokiOperationException.class, () -> service.metrics("one", "rate({a=\"b\"}[1m])", "now-10m", "now", "5m"));
-    }
-
-    @Test
-    void niceStepCoversTheWindowWithAboutTwentyPoints() {
-        assertEquals(Duration.ofSeconds(30), QueryService.niceStep(Duration.ofMinutes(10)));
-        assertEquals(Duration.ofMinutes(5), QueryService.niceStep(Duration.ofHours(1)));
-        assertEquals(Duration.ofHours(1), QueryService.niceStep(Duration.ofHours(20)));
-        assertEquals(Duration.ofDays(1), QueryService.niceStep(Duration.ofDays(60)));
-        assertEquals(Duration.ofSeconds(1), QueryService.niceStep(Duration.ofSeconds(5)));
+    void niceStepCoversTheWindowWithTheAskedPoints() {
+        assertEquals(Duration.ofSeconds(30), QueryService.niceStep(Duration.ofMinutes(10), 20));
+        assertEquals(Duration.ofMinutes(5), QueryService.niceStep(Duration.ofHours(1), 20));
+        assertEquals(Duration.ofHours(1), QueryService.niceStep(Duration.ofHours(20), 20));
+        assertEquals(Duration.ofDays(1), QueryService.niceStep(Duration.ofDays(60), 20));
+        assertEquals(Duration.ofSeconds(1), QueryService.niceStep(Duration.ofSeconds(5), 20));
     }
 
     @Test
@@ -397,7 +358,7 @@ class QueryServiceTest {
         var empty = service.summarize("two", "{app=\"x\"}", null, null, null);
         assertTrue(empty.startsWith("Summary of {app=\"x\"} — two, ") && empty.contains("no matching lines.\nNo lines match in this window."), empty);
         assertTrue(assertThrows(LokiOperationException.class, () -> service.summarize("one", "{app=\"x\"}", null, null, 4)).getMessage().contains("between 1 and 3"));
-        assertTrue(assertThrows(LokiOperationException.class, () -> service.summarize("one", "sum(rate({a=\"b\"}[1m]))", null, null, null)).getMessage().contains("queryMetrics"));
+        assertTrue(assertThrows(LokiOperationException.class, () -> service.summarize("one", "sum(rate({a=\"b\"}[1m]))", null, null, null)).getMessage().contains("countLogs"));
     }
 
     @Test

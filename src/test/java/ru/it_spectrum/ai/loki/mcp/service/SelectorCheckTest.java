@@ -97,7 +97,6 @@ class SelectorCheckTest {
         assertTrue(service.logs("dev", "{app=\"bakend\"}", null, null, null, null).endsWith(why));
         assertTrue(service.summarize("dev", "{app=\"bakend\"}", null, null, null).endsWith(why));
         assertTrue(service.count("dev", "{app=\"bakend\"}", null, null, null).endsWith(why));
-        assertTrue(service.followKey("dev", "{app=\"bakend\"}", "taskId=1700", null, null, null).endsWith(why));
         assertTrue(service.context("dev", "{app=\"bakend\"}", "10:00:00", null, null).endsWith(why));
     }
 }

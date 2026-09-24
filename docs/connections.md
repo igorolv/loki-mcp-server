@@ -3,7 +3,7 @@
 The server loads the configuration once at start-up. `listConnections` returns text — one
 line per connection: name, description and the operator's hint — and never contacts Loki.
 Reading goes through [queryLogs, countLogs, summarizeLogs, getLogContext,
-queryMetrics, exportLogs](queries.md) and [discoverLogs](discovery.md). A connection being listed does
+exportLogs](queries.md) and [discoverLogs](discovery.md). A connection being listed does
 not confirm that its endpoint is reachable.
 
 The default file is `~/.loki-mcp-server/connections.json`. `LOKI_MCP_DATA_DIR` changes the
@@ -78,8 +78,7 @@ match wins. The asva2 starting set is
 [examples/java-rules.json](../examples/java-rules.json) is a generic set of Java client
 failures (JDBC connections, Redis, Kafka, HTTP 5xx, connect and read timeouts, Flyway, a
 failed Spring context, out of memory) without stand names, meant to go after a stand's own
-file. The incident picture of `summarizeLogs` joins groups by the subject of their
-`dependency` rule.
+file.
 
 ```json
 {
@@ -212,15 +211,13 @@ The `limits` object is optional; every omitted field takes its default:
 | `maxResponseBytes` | 65536 | int, at least 1024 |
 | `maxEntries` | 1000 | positive int |
 | `maxIntervalSeconds` | 86400 | positive long |
-| `maxMetricSeries` | 100 | positive int |
-| `maxMetricPoints` | 10000 | positive int |
 | `maxExportLines` | 500000 | positive int |
 | `maxExportBytes` | 268435456 | positive long |
 
 The HTTP client applies auth/tenant, `connectTimeoutMs`, `requestTimeoutMs` and
 `maxHttpResponseBytes` (see [http-client.md](http-client.md)); the services apply
-`maxEntries` (also the cap of `sample` and the page of `exportLogs`), `maxIntervalSeconds`,
-`maxMetricSeries`, `maxMetricPoints`, and `maxExportLines` / `maxExportBytes` (where one
+`maxEntries` (also the cap of `sample` and the page of `exportLogs`), `maxIntervalSeconds`
+and `maxExportLines` / `maxExportBytes` (where one
 `exportLogs` call stops and offers a continuation). `maxResponseBytes` is the response text limit:
 [contract](queries.md#size-limit). `listConnections` returns the full list within 65536
 bytes or an error. The file itself is limited to 1 MiB. Unknown fields are rejected.

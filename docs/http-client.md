@@ -1,7 +1,7 @@
 # HTTP client
 
 `LokiHttpClient` is the internal transport layer under [queryLogs, countLogs,
-summarizeLogs, getLogContext, queryMetrics](queries.md) and [discoverLogs](discovery.md);
+summarizeLogs, getLogContext, exportLogs](queries.md) and [discoverLogs](discovery.md);
 `listConnections` does not use HTTP. Spring creates the client as a bean; creation makes no
 network requests.
 

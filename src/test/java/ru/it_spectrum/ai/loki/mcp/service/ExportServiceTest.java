@@ -38,7 +38,7 @@ class ExportServiceTest {
     }
 
     private ExportService service(int maxEntries, int maxExportLines, List<LineFormat> formats, List<LineLayout> layouts) {
-        var limits = new ConnectionLimits(100, 100, 1_000_000, 4096, maxEntries, 86400, 100, 1000, maxExportLines, 1_000_000);
+        var limits = new ConnectionLimits(100, 100, 1_000_000, 4096, maxEntries, 86400, maxExportLines, 1_000_000);
         var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null,
                 ZoneId.of("Europe/Moscow"), limits, List.of("app"), List.of(), List.of(), null, Map.of(), formats, layouts);
         return new ExportService(new ConnectionRegistry(List.of(definition)), client, new ExportRoots(List.of(root)),
