@@ -90,6 +90,9 @@ final class GroupHistory {
         var view = group.lastView;
         var signature = group.lastSignature;
         if (group.template.equals(LogSummary.FRAMES_TEMPLATE)) return null;
+        // An empty message is not in the raw line; its logger is.
+        if (signature == null && view.message().startsWith(EventNormalizer.EMPTY_MESSAGE))
+            return view.logger() == null || view.logger().length() < FRAGMENT_MIN ? null : view.logger();
         String message = signature != null ? signature.rootMessage() : view.message();
         String best = longestRun(message == null ? "" : message.strip().lines().findFirst().orElse(""));
         if (best.length() < FRAGMENT_MIN) {

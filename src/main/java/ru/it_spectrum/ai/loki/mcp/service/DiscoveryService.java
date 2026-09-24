@@ -28,7 +28,14 @@ public class DiscoveryService {
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
     private final Clock clock;
-    private final EventNormalizer normalizer = new EventNormalizer();
+    private final java.util.concurrent.ConcurrentHashMap<String, EventNormalizer> normalizers = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
+     */
+    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
+        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
+    }
 
     @Autowired
     public DiscoveryService(ConnectionRegistry registry, LokiHttpClient client) {
@@ -173,7 +180,7 @@ public class DiscoveryService {
         var levels = new TreeSet<String>();
         int json = 0, plain = 0;
         for (var event : events) {
-            var view = normalizer.view(event, definition.serviceLabels());
+            var view = normalizer(definition).view(event, definition.serviceLabels());
             if (view.format() == EventNormalizer.Format.JSON) json++;
             else plain++;
             for (String path : view.jsonFields().keySet())

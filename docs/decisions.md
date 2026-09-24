@@ -558,12 +558,26 @@ that 4 streams matched and the filter left nothing. Label values and series answ
 20–45 ms. `summarizeLogs(level="error")` over the whole scope for 2 hours read 334 lines in
 29 s: the scope holds more than the Java services.
 
+## Plain-text line formats (2026-09-24)
+
+Plain Spring Boot console lines (`ais-ui-develop` and `config-server` on DEV) kept their
+time, level, pid and thread in the message: a group's headline read `2026-09-24T15:10:16.432
++03:00 WARN 1 --- [ main] …`, the logger was unknown to rules, and one message logged from
+different threads made different groups. As asked by the user, the layout is data: a rules
+catalogue may hold `formats`, regular expressions whose named groups become the line's
+fields (`message`, `level`, `logger`, `service`/`application`; any other group is a field).
+`examples/java-rules.json` holds the Spring Boot console layout; the code knows only the
+engine. DEV showed both layouts of Boot 3: without the application name
+(`ais-ui-develop`) and with it before the thread (`config-server`, Boot 3.4+).
+
+The live run added two engine rules. `LoggingFailureAnalysisReporter` logs an empty message
+and its report on the next lines, which promtail ships as separate entries: an empty message
+is the rest of the line when there is one, else `(empty message, logger <logger>)`. That
+text is not in the raw line, so the history of such a group counts its logger instead; with
+the message text it came out "new" on DEV although it failed on every start of the week.
+
 ## Open items
 
-- Plain Spring Boot pattern lines (`ais-ui-develop` on DEV) keep their timestamp, level
-  and thread prefix in the message, so a group's headline starts with
-  `2026-09-24T15:10:16.432+03:00 WARN 1 --- [ main] …`; the plain branch of
-  `EventNormalizer` could strip the default Spring Boot console prefix.
 - Docker image: deferred; the stdio server is launched by a local MCP client.
 - Grafana Explore links, Grafana proxy transport: only if a real need appears.
 - asva2 side, not ours: the DEV promtail lacks the JSON stage (no `applicationName` /

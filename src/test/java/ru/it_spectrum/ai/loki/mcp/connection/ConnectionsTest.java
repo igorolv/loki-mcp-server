@@ -105,6 +105,22 @@ class ConnectionsTest {
     }
 
     @Test
+    void lineFormatsComeWithTheRulesFilesInOrder() throws Exception {
+        Files.writeString(directory.resolve("stand.json"),
+                "{\"formats\":[{\"id\":\"stand\",\"pattern\":\"^(?<level>\\\\w+) (?<message>.*)\"}],\"rules\":[]}");
+        Files.writeString(directory.resolve("java.json"), "{\"formats\":[{\"id\":\"console\",\"pattern\":\"(?<message>.*)\"}],\"rules\":[]}");
+        var entries = load("{\"connections\":{\"a\":{\"url\":\"http://localhost:1\",\"rulesFile\":[\"stand.json\",\"java.json\"]}}}");
+        assertEquals(List.of("stand", "console"), entries.getFirst().formats().stream().map(LineFormat::id).toList());
+        // A format without a message group, an invalid pattern and the same id in two files stop the start-up.
+        Files.writeString(directory.resolve("again.json"), "{\"formats\":[{\"id\":\"stand\",\"pattern\":\"(?<message>.*)\"}],\"rules\":[]}");
+        Files.writeString(directory.resolve("nomessage.json"), "{\"formats\":[{\"id\":\"x\",\"pattern\":\"(?<SECRET>.*)\"}],\"rules\":[]}");
+        Files.writeString(directory.resolve("broken.json"), "{\"formats\":[{\"id\":\"x\",\"pattern\":\"(?<message>SECRET\"}],\"rules\":[]}");
+        for (String files : List.of("[\"stand.json\",\"again.json\"]", "\"nomessage.json\"", "\"broken.json\""))
+            assertSafeConfigurationError(assertThrows(LokiOperationException.class,
+                    () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":" + files + "}}}")));
+    }
+
+    @Test
     void severalRulesFilesAreTriedInTheirOrderWithIdsUniqueAcrossThem() throws Exception {
         Files.writeString(directory.resolve("stand.json"), "{\"rules\":[" + RULE + "]}");
         Files.writeString(directory.resolve("java.json"),

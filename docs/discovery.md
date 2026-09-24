@@ -90,6 +90,18 @@ expanded to depth 20, at most 100 fields, lines no longer than 256 KiB. Dotted k
 Arrays are not expanded. Everything else is plain text. The level is upper-cased. Nothing
 is guessed.
 
+A plain-text line is split by the first `formats` entry of the connection's rules catalogue
+([connections.md](connections.md#line-formats)) whose regular expression finds a match in
+its first line (up to 256 KiB). The named groups become the line's values, as if they were
+JSON fields of those names: `message` replaces the first line as the message (the rest of a
+multi-line line stays; a stack trace stays the stack trace; an empty one is the rest of the
+line, or `(empty message, logger <logger>)` when nothing follows, as when a shipper sends
+every line of a report apart), `level`, `logger` and `service`
+(`application` too) fill those fields, and any other group (`thread`, `pid`, …) is a field of
+the line for the field contrast of `summarizeLogs`. The code knows no layout; the Spring Boot
+console layout is a format of `examples/java-rules.json`. Without a matching format the line
+is handled as above. `jsonFields` stays empty for such a line.
+
 ## Verification
 
 `gradlew.bat build --console=plain`: `EventNormalizerTest` (ECS, flat keys, label

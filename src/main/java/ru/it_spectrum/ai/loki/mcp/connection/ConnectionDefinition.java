@@ -13,17 +13,19 @@ import java.util.TreeMap;
  * applicationPackages tell which stack frames belong to the stand's own code (empty: none are recognised);
  * rules say what known kinds of lines mean, in the order they are tried; scope is the stream selector of the stand's
  * services that a query built from service, level and text starts from (null: none); levels map a level name to the
- * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}.
+ * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}; formats split plain-text lines into fields,
+ * in the order they are tried.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits,
                                    List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules,
-                                   String scope, Map<String, String> levels) {
+                                   String scope, Map<String, String> levels, List<LineFormat> formats) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
             "applicationName", "service_name", "service", "app", "container", "job");
     public static final int MAX_APPLICATION_PACKAGES = 32;
     public static final int MAX_RULES = 200;
     public static final int MAX_FILTER_CHARS = 300;
+    public static final int MAX_FORMATS = 32;
     /**
      * Line filters of a level when the profile names none: the level word as Java and most loggers print it, and for
      * errors the exception lines of a stack trace.
@@ -36,6 +38,12 @@ public record ConnectionDefinition(String name, String description, String hint,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
                                 List<String> applicationPackages, List<LogRule> rules) {
         this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, null, Map.of());
+    }
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<String> applicationPackages, List<LogRule> rules, String scope, Map<String, String> levels) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, scope, levels, List.of());
     }
 
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
@@ -77,7 +85,9 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || levels == null || levels.size() > 16
                 || levels.entrySet().stream().anyMatch(l -> l.getKey() == null || !l.getKey().matches("[a-z]{1,16}") || l.getValue() == null
                 || !l.getValue().strip().startsWith("|") || l.getValue().length() > MAX_FILTER_CHARS
-                || l.getValue().chars().anyMatch(Character::isISOControl))) {
+                || l.getValue().chars().anyMatch(Character::isISOControl))
+                || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(java.util.Objects::isNull)
+                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
@@ -85,6 +95,7 @@ public record ConnectionDefinition(String name, String description, String hint,
         rules = List.copyOf(rules);
         scope = scope == null ? null : scope.strip();
         levels = java.util.Collections.unmodifiableMap(new TreeMap<>(levels));
+        formats = List.copyOf(formats);
     }
 
     /**

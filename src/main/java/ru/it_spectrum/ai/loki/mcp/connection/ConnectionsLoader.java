@@ -40,13 +40,14 @@ public final class ConnectionsLoader {
                 throw Errors.configuration();
             }
             var definitions = new ArrayList<ConnectionDefinition>();
-            var rulesByFile = new HashMap<Path, List<LogRule>>();
+            var rulesByFile = new HashMap<Path, Catalogue>();
             for (var pair : config.connections().entrySet()) {
                 Entry e = pair.getValue();
                 if (e == null) throw Errors.configuration();
                 Auth a = e.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
+                var catalogue = catalogue(path, e.rulesFile(), environment, rulesByFile);
                 Limits l = e.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : e.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
@@ -59,8 +60,7 @@ public final class ConnectionsLoader {
                         ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits,
                         e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels(),
                         e.applicationPackages() == null ? List.of() : e.applicationPackages(),
-                        rules(path, e.rulesFile(), environment, rulesByFile), e.scope(),
-                        e.levels() == null ? Map.of() : e.levels()));
+                        catalogue.rules(), e.scope(), e.levels() == null ? Map.of() : e.levels(), catalogue.formats()));
             }
             return List.copyOf(definitions);
         } catch (Exception ignored) {
@@ -70,12 +70,19 @@ public final class ConnectionsLoader {
     }
 
     /**
-     * The rules of every file of {@code rulesFile} (one path or a list), in order: the stand's own file first, then
-     * generic sets. A file shared by connections is loaded once.
+     * What a rules catalogue holds: the rules, tried in order, and the plain-text line formats, tried in order.
      */
-    private static List<LogRule> rules(Path connections, JsonNode rulesFile, UnaryOperator<String> environment,
-                                       Map<Path, List<LogRule>> loaded) {
-        if (rulesFile == null || rulesFile.isNull()) return List.of();
+    public record Catalogue(List<LogRule> rules, List<LineFormat> formats) {
+        static final Catalogue EMPTY = new Catalogue(List.of(), List.of());
+    }
+
+    /**
+     * The rules and formats of every file of {@code rulesFile} (one path or a list), in order: the stand's own file
+     * first, then generic sets. A file shared by connections is loaded once.
+     */
+    private static Catalogue catalogue(Path connections, JsonNode rulesFile, UnaryOperator<String> environment,
+                                       Map<Path, Catalogue> loaded) {
+        if (rulesFile == null || rulesFile.isNull()) return Catalogue.EMPTY;
         var files = new ArrayList<String>();
         if (rulesFile.isString()) files.add(rulesFile.asString());
         else if (rulesFile.isArray() && !rulesFile.isEmpty()) for (var file : rulesFile) {
@@ -84,12 +91,15 @@ public final class ConnectionsLoader {
         }
         else throw Errors.configuration();
         var rules = new ArrayList<LogRule>();
+        var formats = new ArrayList<LineFormat>();
         for (String file : files) {
             if (file.isBlank()) throw Errors.configuration();
-            rules.addAll(loaded.computeIfAbsent(rulesPath(connections, resolve(file, environment)), ConnectionsLoader::loadRules));
+            var catalogue = loaded.computeIfAbsent(rulesPath(connections, resolve(file, environment)), ConnectionsLoader::loadCatalogue);
+            rules.addAll(catalogue.rules());
+            formats.addAll(catalogue.formats());
         }
-        // One file: its shared copy, so that connections naming it hold the same list.
-        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : rules;
+        // One file: its shared copy, so that connections naming it hold the same lists.
+        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : new Catalogue(rules, formats);
     }
 
     /**
@@ -103,11 +113,21 @@ public final class ConnectionsLoader {
     }
 
     public static List<LogRule> loadRules(Path path) {
+        return loadCatalogue(path).rules();
+    }
+
+    public static Catalogue loadCatalogue(Path path) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
             if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
             RulesFile file = MAPPER.readValue(bytes, RulesFile.class);
             if (file == null || file.rules() == null) throw Errors.configuration();
+            var formats = new ArrayList<LineFormat>();
+            if (file.formats() != null)
+                for (Format f : file.formats()) {
+                    if (f == null) throw Errors.configuration();
+                    formats.add(new LineFormat(f.id(), LogRule.compile(f.pattern())));
+                }
             var rules = new ArrayList<LogRule>();
             for (Rule r : file.rules()) {
                 if (r == null || r.category() == null) throw Errors.configuration();
@@ -116,7 +136,7 @@ public final class ConnectionsLoader {
                         LogRule.compile(m.exception()), LogRule.compile(m.message()), LogRule.compile(m.logger()),
                         r.subject(), r.advice(), r.filter()));
             }
-            return List.copyOf(rules);
+            return new Catalogue(List.copyOf(rules), List.copyOf(formats));
         } catch (Exception ignored) {
             // Same policy as the connections file: never retain parser messages that quote the source.
             throw Errors.configuration();
@@ -151,7 +171,10 @@ public final class ConnectionsLoader {
                          JsonNode rulesFile, String scope, Map<String, String> levels) {
     }
 
-    private record RulesFile(List<Rule> rules) {
+    private record RulesFile(List<Rule> rules, List<Format> formats) {
+    }
+
+    private record Format(String id, String pattern) {
     }
 
     private record Rule(String id, String category, Match match, String subject, String advice, String filter) {

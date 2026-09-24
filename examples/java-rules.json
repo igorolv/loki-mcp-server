@@ -1,4 +1,10 @@
 {
+  "formats": [
+    {
+      "id": "spring-boot-console",
+      "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<application>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\s*\\]\\s+(?<logger>\\S+)\\s*:\\s?(?<message>.*)$"
+    }
+  ],
   "rules": [
     {
       "id": "java-jdbc-connection",

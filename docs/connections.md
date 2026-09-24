@@ -103,6 +103,33 @@ file. The incident picture of `summarizeLogs` joins groups by the subject of the
 - `filter` — for noise: LogQL line filters that drop these lines (`!= "..."`, `!~ "..."`,
   several allowed), offered when noise crowds a sample.
 
+### Line formats
+
+A catalogue may also hold `formats`: how plain-text (not JSON) lines of the stand are laid
+out, so that their level, logger, thread and message are read like JSON fields.
+
+```json
+{
+  "formats": [
+    {
+      "id": "spring-boot-console",
+      "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<application>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\s*\\]\\s+(?<logger>\\S+)\\s*:\\s?(?<message>.*)$"
+    }
+  ],
+  "rules": []
+}
+```
+
+- `id` — like a rule id, unique across the files of a connection.
+- `pattern` — a Java regular expression searched in the first line of the line; the named
+  group `message` is required. `level`, `logger`, `service` / `application` and `message`
+  are read like the JSON fields of those names; other groups are fields of the line; `time`
+  and `pid` are never compared.
+
+Formats of all files are tried in order, the first match wins; up to 32 per connection.
+`examples/java-rules.json` holds the Spring Boot console layout (Boot 2, 3 and 3.4+ with the
+application name before the thread).
+
 Up to 200 rules per connection, ids unique across its files; unknown fields, an invalid pattern or category, a missing `advice` or a
 file above 1 MB stop the start-up with the same message as a bad connections file.
 Rules name causes outside the code; bugs of the application are left to the root-cause

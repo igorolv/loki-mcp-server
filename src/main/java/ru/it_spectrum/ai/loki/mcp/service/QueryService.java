@@ -35,7 +35,14 @@ public class QueryService {
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
     private final Clock clock;
-    private final EventNormalizer normalizer = new EventNormalizer();
+    private final java.util.concurrent.ConcurrentHashMap<String, EventNormalizer> normalizers = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
+     */
+    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
+        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
+    }
     private final SelectorCheck check;
 
     @Autowired
@@ -82,7 +89,7 @@ public class QueryService {
         ZoneId zone = definition.timezone();
         var lines = new ArrayList<String>(events.size());
         for (var event : events)
-            lines.add(line(event, normalizer.view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
+            lines.add(line(event, normalizer(definition).view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
         String header = query.strip() + " — " + connection + ", " + window(window, zone) + ", "
                 + (events.isEmpty() ? "no matching lines." : more ? "newest " + events.size() + " of more:" : "all " + events.size() + " lines:");
         var marked = withDateMarkers(events, lines, zone);
@@ -137,7 +144,7 @@ public class QueryService {
         boolean more = events.size() >= usedSample || sampled.cutByBytes();
         var starts = starts(connection, query, window);
         if (starts != null) starts.count(events);
-        var groups = LogSummary.group(events, normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules(),
+        var groups = LogSummary.group(events, normalizer(definition), definition.serviceLabels(), definition.applicationPackages(), definition.rules(),
                 starts == null ? event -> null : starts::startOf);
         String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
                 + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
@@ -297,7 +304,7 @@ public class QueryService {
             return new Past(header, title + ": not checked (Loki did not answer in time or failed).", null, incidents);
         }
         var gone = new ArrayList<LogSummary.Group>();
-        for (var group : LogSummary.group(sampled.events(), normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules()))
+        for (var group : LogSummary.group(sampled.events(), normalizer(definition), definition.serviceLabels(), definition.applicationPackages(), definition.rules()))
             if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS) gone.add(group);
         if (gone.isEmpty()) return new Past(header, null, null, incidents);
         return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):",
@@ -313,10 +320,10 @@ public class QueryService {
                         List<LogEvent> sample, long deadline) {
         if (incidents.isEmpty()) return;
         var definition = registry.require(connection);
-        java.util.function.Function<LogEvent, String> serviceOf = event -> normalizer.view(event, definition.serviceLabels()).service();
+        java.util.function.Function<LogEvent, String> serviceOf = event -> normalizer(definition).view(event, definition.serviceLabels()).service();
         java.util.function.Function<LogEvent, String> nameOf = event -> {
             var values = new LinkedHashMap<String, String>();
-            normalizer.parse(event.line(), values, new LinkedHashMap<>());
+            normalizer(definition).parse(event.line(), values, new LinkedHashMap<>());
             return ServiceStarts.service(event, values, definition.serviceLabels());
         };
         if (wholeWindow) {
@@ -372,20 +379,20 @@ public class QueryService {
                 break;
             }
             for (var event : events) {
-                var view = normalizer.view(event, definition.serviceLabels());
+                var view = normalizer(definition).view(event, definition.serviceLabels());
                 if (view.service() != null && FieldContrast.background(view))
-                    background.add(new FieldContrast.Line(view.service(), FieldContrast.fields(event, normalizer)));
+                    background.add(new FieldContrast.Line(view.service(), FieldContrast.fields(event, normalizer(definition))));
             }
         }
         var sampleValues = new HashMap<String, Map<String, Set<String>>>();
         for (var event : sample) {
-            String service = normalizer.view(event, definition.serviceLabels()).service();
+            String service = normalizer(definition).view(event, definition.serviceLabels()).service();
             if (service == null) continue;
-            for (var field : FieldContrast.fields(event, normalizer).entrySet())
+            for (var field : FieldContrast.fields(event, normalizer(definition)).entrySet())
                 sampleValues.computeIfAbsent(service, k -> new HashMap<>()).computeIfAbsent(field.getKey(), k -> new HashSet<>()).add(field.getValue());
         }
         for (var group : targets) {
-            group.findings = FieldContrast.analyse(group, normalizer, background, sampleValues);
+            group.findings = FieldContrast.analyse(group, normalizer(definition), background, sampleValues);
             group.fields = group.findings.stream().map(f -> "         " + FieldContrast.render(f, group.services, FieldContrast.PARTS)).toList();
         }
     }
@@ -418,7 +425,7 @@ public class QueryService {
         int limit = definition.limits().maxEntries();
         try {
             var events = fetch(connection, selector + ServiceStarts.FILTER, window, limit, LokiHttpClient.Direction.BACKWARD);
-            return ServiceStarts.of(selector, events, events.size() >= limit, normalizer, definition.serviceLabels(), window.end());
+            return ServiceStarts.of(selector, events, events.size() >= limit, normalizer(definition), definition.serviceLabels(), window.end());
         } catch (LokiOperationException e) {
             if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
             return ServiceStarts.failed(selector, e.error().code());
@@ -505,7 +512,7 @@ public class QueryService {
         String firstError = null;
         var advised = new HashSet<String>();
         for (var event : events) {
-            var view = normalizer.view(event, definition.serviceLabels());
+            var view = normalizer(definition).view(event, definition.serviceLabels());
             var signature = LogSummary.signature(view, definition.applicationPackages());
             var rule = LogRules.match(definition.rules(), view, signature);
             String service = view.service() == null ? "-" : view.service();
@@ -581,7 +588,7 @@ public class QueryService {
         events.addAll(later);
         var lines = new ArrayList<String>(events.size());
         for (int i = 0; i < events.size(); i++) {
-            String text = line(events.get(i), normalizer.view(events.get(i), definition.serviceLabels()), zone, false);
+            String text = line(events.get(i), normalizer(definition).view(events.get(i), definition.serviceLabels()), zone, false);
             lines.add(i >= beforeCount && i < earlier.size() ? ">>> " + text : text);
         }
         String moment = DATE_TIME.format(point.at().atZone(zone)) + (point.precision().compareTo(Duration.ofSeconds(1)) < 0

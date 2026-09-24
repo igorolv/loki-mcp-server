@@ -170,9 +170,10 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
   removed and do not come back without a new decision from the user. Internal models stay
   records (`model/LogEvent`, `model/ToolError`).
 - `EventNormalizer` produces `View(level, service, message, traceId, stackTrace,
-  jsonFields)` from labels, structured metadata and the JSON line; rules and priorities are
-  in [docs/discovery.md](docs/discovery.md#line-normalization). Labels are never overridden
-  by the line.
+  jsonFields)` from labels, structured metadata and the JSON line, or a plain line split by
+  the `formats` of the connection's rules catalogue (one normalizer per connection); rules
+  and priorities are in [docs/discovery.md](docs/discovery.md#line-normalization). Labels
+  are never overridden by the line, and no line layout lives in the code.
 - `LogText` is the only place that formats lines: `HH:mm:ss.SSS LEVEL service  message`,
   stack trace compaction, day-change markers, `fit` under the byte budget (drops the oldest
   lines, never cuts JSON). `DiscoveryLimits` centralizes discovery caps.
