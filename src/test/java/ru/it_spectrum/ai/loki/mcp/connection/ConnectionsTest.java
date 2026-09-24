@@ -120,6 +120,35 @@ class ConnectionsTest {
     }
 
     @Test
+    void layoutsExportRootsAndExportLimitsAreLoadedAndChecked() throws Exception {
+        Files.writeString(directory.resolve("stand.json"), "{\"layouts\":[{\"id\":\"spring\",\"template\":\"{level} {message}\"}],\"rules\":[]}");
+        Files.writeString(directory.resolve("java.json"), "{\"layouts\":[{\"id\":\"spring\",\"template\":\"{message}\"},"
+                + "{\"id\":\"short\",\"template\":\"{time:HH:mm} {message}\"}],\"rules\":[]}");
+        Path path = directory.resolve("connections.json");
+        Files.writeString(path, "{\"exportRoots\":[\"exports\",\"${ROOT}\"],\"connections\":{\"a\":{\"url\":\"http://localhost:1\","
+                + "\"rulesFile\":[\"stand.json\",\"java.json\"],\"limits\":{\"maxExportLines\":10,\"maxExportBytes\":20}}}}");
+        Path absolute = directory.resolve("elsewhere").toAbsolutePath();
+        var config = ConnectionsLoader.loadConfig(path, name -> name.equals("ROOT") ? absolute.toString() : null);
+        var a = config.connections().getFirst();
+        // The stand's own file names the layout first; a generic file cannot replace it.
+        assertEquals(List.of("spring:{level} {message}", "short:{time:HH:mm} {message}"),
+                a.layouts().stream().map(l -> l.id() + ":" + l.template()).toList());
+        assertEquals(10, a.limits().maxExportLines());
+        assertEquals(20, a.limits().maxExportBytes());
+        assertEquals(List.of(directory.resolve("exports").toAbsolutePath().normalize(), absolute), config.exportRoots());
+        Files.writeString(path, "{\"connections\":{\"a\":{\"url\":\"http://localhost:1\"}}}");
+        assertEquals(List.of(), ConnectionsLoader.loadConfig(path, name -> null).exportRoots());
+        Files.writeString(directory.resolve("bad.json"), "{\"layouts\":[{\"id\":\"x\",\"template\":\"{message\"}],\"rules\":[]}");
+        Files.writeString(directory.resolve("raw.json"), "{\"layouts\":[{\"id\":\"raw\",\"template\":\"{message}\"}],\"rules\":[]}");
+        for (String json : List.of("{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":\"bad.json\"}}}",
+                "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":\"raw.json\"}}}",
+                "{\"exportRoots\":[],\"connections\":{\"a\":{\"url\":\"http://localhost\"}}}",
+                "{\"exportRoots\":[\" \"],\"connections\":{\"a\":{\"url\":\"http://localhost\"}}}",
+                "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxExportLines\":0}}}}"))
+            assertSafeConfigurationError(assertThrows(LokiOperationException.class, () -> load(json), json));
+    }
+
+    @Test
     void severalRulesFilesAreTriedInTheirOrderWithIdsUniqueAcrossThem() throws Exception {
         Files.writeString(directory.resolve("stand.json"), "{\"rules\":[" + RULE + "]}");
         Files.writeString(directory.resolve("java.json"),

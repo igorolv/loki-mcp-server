@@ -14,18 +14,20 @@ import java.util.TreeMap;
  * rules say what known kinds of lines mean, in the order they are tried; scope is the stream selector of the stand's
  * services that a query built from service, level and text starts from (null: none); levels map a level name to the
  * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}; formats split plain-text lines into fields,
- * in the order they are tried.
+ * in the order they are tried; layouts are the named line templates exportLogs can write lines in.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits,
                                    List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules,
-                                   String scope, Map<String, String> levels, List<LineFormat> formats) {
+                                   String scope, Map<String, String> levels, List<LineFormat> formats,
+                                   List<LineLayout> layouts) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
             "applicationName", "service_name", "service", "app", "container", "job");
     public static final int MAX_APPLICATION_PACKAGES = 32;
     public static final int MAX_RULES = 200;
     public static final int MAX_FILTER_CHARS = 300;
     public static final int MAX_FORMATS = 32;
+    public static final int MAX_LAYOUTS = 32;
     /**
      * Line filters of a level when the profile names none: the level word as Java and most loggers print it, and for
      * errors the exception lines of a stack trace.
@@ -33,6 +35,14 @@ public record ConnectionDefinition(String name, String description, String hint,
     public static final Map<String, String> DEFAULT_LEVELS = Map.of(
             "error", "|~ \"ERROR|FATAL|Exception|Caused by\"",
             "warn", "|~ \"WARN\"");
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<String> applicationPackages, List<LogRule> rules, String scope, Map<String, String> levels,
+                                List<LineFormat> formats) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, scope, levels,
+                formats, List.of());
+    }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
@@ -83,7 +93,9 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || !l.getValue().strip().startsWith("|") || l.getValue().length() > MAX_FILTER_CHARS
                 || l.getValue().chars().anyMatch(Character::isISOControl))
                 || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(java.util.Objects::isNull)
-                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()) {
+                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()
+                || layouts == null || layouts.size() > MAX_LAYOUTS || layouts.stream().anyMatch(java.util.Objects::isNull)
+                || layouts.stream().map(LineLayout::id).distinct().count() != layouts.size()) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
@@ -92,6 +104,7 @@ public record ConnectionDefinition(String name, String description, String hint,
         scope = scope == null ? null : scope.strip();
         levels = java.util.Collections.unmodifiableMap(new TreeMap<>(levels));
         formats = List.copyOf(formats);
+        layouts = List.copyOf(layouts);
     }
 
     public static boolean validName(String name) {

@@ -11,6 +11,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
 import ru.it_spectrum.ai.loki.mcp.service.DiscoveryService;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.service.ExportService;
 import ru.it_spectrum.ai.loki.mcp.service.QueryService;
 
 import java.net.URI;
@@ -26,7 +27,8 @@ class QueryToolsConfigTest {
             URI.create("http://localhost:1"), ConnectionAuth.NONE, null, ZoneOffset.UTC, new ConnectionLimits(100, 100, 10000, 1024, 10, 3600))));
     private final QueryService service = mock(QueryService.class);
     private final List<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> specs =
-            new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class), registry);
+            new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class),
+                    mock(ExportService.class), registry);
 
     private static String text(CallToolResult result) {
         return ((TextContent) result.content().getFirst()).text();
@@ -38,11 +40,12 @@ class QueryToolsConfigTest {
 
     @Test
     void toolsAreTextOnlyWithShortInstructionLikeDescriptions() {
-        assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs", "getLogContext", "summarizeLogs", "followKey"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(java.util.Set.of("queryLogs", "countLogs", "queryMetrics", "listConnections", "discoverLogs", "getLogContext", "summarizeLogs", "followKey", "exportLogs"), specs.stream().map(s -> s.tool().name()).collect(java.util.stream.Collectors.toSet()));
         for (var spec : specs) {
             assertNull(spec.tool().outputSchema(), spec.tool().name());
             assertTrue(spec.tool().description().length() < 700, spec.tool().name() + " description too long");
-            assertTrue(spec.tool().annotations().readOnlyHint());
+            // exportLogs writes files on the local disk; every other tool only reads.
+            assertEquals(!spec.tool().name().equals("exportLogs"), spec.tool().annotations().readOnlyHint(), spec.tool().name());
         }
     }
 

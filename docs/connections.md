@@ -3,7 +3,7 @@
 The server loads the configuration once at start-up. `listConnections` returns text — one
 line per connection: name, description and the operator's hint — and never contacts Loki.
 Reading goes through [queryLogs, countLogs, summarizeLogs, getLogContext,
-queryMetrics](queries.md) and [discoverLogs](discovery.md). A connection being listed does
+queryMetrics, exportLogs](queries.md) and [discoverLogs](discovery.md). A connection being listed does
 not confirm that its endpoint is reachable.
 
 The default file is `~/.loki-mcp-server/connections.json`. `LOKI_MCP_DATA_DIR` changes the
@@ -51,6 +51,23 @@ of up to 16 level names (lower-case letters) to the LogQL line filter that selec
 it overrides the defaults `error` → `|~ "ERROR|FATAL|Exception|Caused by"` and `warn` →
 `|~ "WARN"`. `listConnections` names the levels and the scope of every connection. The registry never picks a default connection, even
 with a single entry, and never trims names.
+
+### Export directories
+
+`exportRoots` at the top level of the file (next to `connections`) lists up to 16
+directories `exportLogs` may write into; the first one is the default. A relative path is
+resolved against the directory of the connections file, `${VARIABLES}` are substituted; an
+empty list or a blank entry stops the start-up. Without `exportRoots` the only directory is
+`exports` in the data directory (`~/.loki-mcp-server/exports`). Directories are created on
+the first export. A directory the model passes must lie inside one of them after
+normalization and after symbolic links are resolved; the error message lists them.
+
+```json
+{
+  "exportRoots": ["C:/logs/loki", "exports"],
+  "connections": { "dev": { "url": "http://localhost:3100" } }
+}
+```
 
 ### Rules catalogue
 
@@ -128,7 +145,44 @@ out, so that their level, logger, thread and message are read like JSON fields.
 
 Formats of all files are tried in order, the first match wins; up to 32 per connection.
 `examples/java-rules.json` holds the Spring Boot console layout (Boot 2, 3 and 3.4+ with the
-application name before the thread).
+application name before the thread) and the classic logback one
+(`2026-09-24 23:08:46 [scheduling-1] ERROR a.b.TaskService - message`).
+
+### Line layouts
+
+`layouts` are the reverse of `formats`: named templates `exportLogs` writes lines in
+(`format="spring"`). `listConnections` names them.
+
+```json
+{
+  "layouts": [
+    {
+      "id": "spring",
+      "template": "{time} {level:5} {process.pid|pid} --- [{service}] [{process.thread.name|thread_name|thread}] {logger} : {message}{stack}"
+    }
+  ],
+  "rules": []
+}
+```
+
+- `id` — lower-case letters, digits and dashes, not `raw`. When two files of a connection
+  name the same id, the earlier file (the stand's own) wins.
+- `template` — up to 500 characters on one line. `{time}` (`yyyy-MM-dd'T'HH:mm:ss.SSSXXX`
+  in the connection's timezone, or `{time:<pattern>}`), `{level}`, `{service}`,
+  `{logger}`, `{message}`, `{traceId}` and `{line}` (the original line) are the normalized
+  fields; `{stack}` is a newline and the full stack trace, or nothing. Any other name is a
+  field of the line (a dotted JSON path, `process.thread.name`, or a group of a line
+  format, `thread`), then a stream label, then structured metadata. `{a|b}` takes the first
+  name that has a value; `{level:5}` pads on the left, `{logger:-40}` on the right; `{{`
+  and `}}` are literal braces; a missing value is empty. An invalid template stops the
+  start-up; in a call it is an argument error.
+- A plain-text line that no format of the connection splits (an nginx access line, a stack
+  frame logged as its own line) is written unchanged: a layout rewrites the fields it knows,
+  never text it cannot read. A template holding `{line}` (`{time} {service} {line}`) is
+  applied to every line. An empty message stays empty.
+
+Up to 32 layouts per connection. The same template syntax is accepted as `format` in an
+`exportLogs` call.
 
 Up to 200 rules per connection, ids unique across its files; unknown fields, an invalid pattern or category, a missing `advice` or a
 file above 1 MB stop the start-up with the same message as a bad connections file.
@@ -160,11 +214,14 @@ The `limits` object is optional; every omitted field takes its default:
 | `maxIntervalSeconds` | 86400 | positive long |
 | `maxMetricSeries` | 100 | positive int |
 | `maxMetricPoints` | 10000 | positive int |
+| `maxExportLines` | 500000 | positive int |
+| `maxExportBytes` | 268435456 | positive long |
 
 The HTTP client applies auth/tenant, `connectTimeoutMs`, `requestTimeoutMs` and
 `maxHttpResponseBytes` (see [http-client.md](http-client.md)); the services apply
-`maxEntries` (also the cap of `sample`), `maxIntervalSeconds`, `maxMetricSeries` and
-`maxMetricPoints`. `maxResponseBytes` is the response text limit:
+`maxEntries` (also the cap of `sample` and the page of `exportLogs`), `maxIntervalSeconds`,
+`maxMetricSeries`, `maxMetricPoints`, and `maxExportLines` / `maxExportBytes` (where one
+`exportLogs` call stops and offers a continuation). `maxResponseBytes` is the response text limit:
 [contract](queries.md#size-limit). `listConnections` returns the full list within 65536
 bytes or an error. The file itself is limited to 1 MiB. Unknown fields are rejected.
 

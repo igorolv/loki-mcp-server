@@ -100,6 +100,6 @@ class LineFormatTest {
     void aFormatNeedsAMessageGroup() {
         assertThrows(LokiOperationException.class, () -> new LineFormat("x", Pattern.compile("^(?<level>\\w+)")));
         assertThrows(LokiOperationException.class, () -> new LineFormat("Bad id", Pattern.compile("(?<message>.*)")));
-        assertEquals(List.of("spring-boot-console"), JAVA.formats().stream().map(LineFormat::id).toList());
+        assertEquals(List.of("spring-boot-console", "logback-classic"), JAVA.formats().stream().map(LineFormat::id).toList());
     }
 }

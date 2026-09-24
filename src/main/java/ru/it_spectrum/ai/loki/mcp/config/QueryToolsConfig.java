@@ -15,6 +15,7 @@ import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 import ru.it_spectrum.ai.loki.mcp.service.*;
 import ru.it_spectrum.ai.loki.mcp.tools.ConnectionTools;
 import ru.it_spectrum.ai.loki.mcp.tools.DiscoveryTools;
+import ru.it_spectrum.ai.loki.mcp.tools.ExportTools;
 import ru.it_spectrum.ai.loki.mcp.tools.QueryTools;
 
 import java.nio.charset.StandardCharsets;
@@ -46,8 +47,10 @@ public class QueryToolsConfig {
 
     @Bean
     public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections,
-                                                               DiscoveryService discovery, ConnectionRegistry registry) {
-        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections), new DiscoveryTools(discovery))) {
+                                                               DiscoveryService discovery, ExportService export,
+                                                               ConnectionRegistry registry) {
+        var provider = new SyncMcpToolProvider(List.of(new QueryTools(service), new ConnectionTools(connections),
+                new DiscoveryTools(discovery), new ExportTools(export))) {
             @Override
             protected Class<? extends Throwable> doGetToolCallException() {
                 return Error.class;

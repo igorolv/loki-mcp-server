@@ -152,19 +152,20 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(8, catalog.size());
+            assertEquals(9, catalog.size());
             var names = new HashSet<String>();
             for (var declaration : catalog) {
                 names.add(declaration.path("name").asText());
                 assertFalse(declaration.has("outputSchema"), declaration.toString());
                 assertTrue(declaration.path("description").asText().length() > 80, declaration.toString());
-                assertTrue(declaration.path("annotations").path("readOnlyHint").asBoolean());
+                // exportLogs writes files into the export directories; every other tool only reads.
+                assertEquals(!declaration.path("name").asText().equals("exportLogs"), declaration.path("annotations").path("readOnlyHint").asBoolean());
                 assertFalse(declaration.path("annotations").path("destructiveHint").asBoolean());
                 assertEquals(!declaration.path("name").asText().equals("listConnections"),
                         declaration.path("annotations").path("openWorldHint").asBoolean());
                 assertEquals("object", declaration.path("inputSchema").path("type").asText());
             }
-            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics")), names);
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics", "exportLogs")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
             assertEquals(List.of("connection"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
@@ -308,6 +309,21 @@ class StdioSmokeTest {
                 assertTrue(text(result).startsWith(errors[index]), text(result));
                 assertNoSecrets(call.toString());
             }
+            // exportLogs writes the lines into the default export directory and answers with the path, never the lines;
+            // {line} decorates a plain line no format splits, which a template without it would write unchanged.
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 90, "method", "tools/call", "params", Map.of("name", "exportLogs",
+                    "arguments", Map.of("connection", "test", "query", "{kind=\"test\"}", "start", "now-1s", "format", "{level} {line}")))));
+            var exported = response(stdout, stderr);
+            String report = text(exported.path("result"));
+            assertFalse(exported.path("result").path("isError").asBoolean(), report);
+            Path exports = temporaryDirectory.resolve("data").toAbsolutePath().resolve("exports");
+            try (var files = Files.list(exports)) {
+                var file = files.findFirst().orElseThrow();
+                assertEquals(List.of("ERROR Ошибка 🐈"), Files.readAllLines(file, StandardCharsets.UTF_8));
+                assertTrue(report.contains("File: " + file), report);
+            }
+            assertFalse(report.contains("Ошибка"), report);
+            assertNoSecrets(exported.toString());
         } finally {
             upstream.stop(0);
             process.destroy();

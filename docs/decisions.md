@@ -576,6 +576,45 @@ is the rest of the line when there is one, else `(empty message, logger <logger>
 text is not in the raw line, so the history of such a group counts its logger instead; with
 the message text it came out "new" on DEV although it failed on every start of the week.
 
+## Export to local files (2026-09-25)
+
+The user lost track of the analysis tools and asked for a plain way to pull the logs of a
+window to disk — for an agent's own tools or for reading by eye, in the Spring Boot console
+layout instead of the ECS JSON the stand stores, or in a layout of one's own. Decided with
+the user:
+
+- **`exportLogs`** — the ninth tool and the only one that writes, only on the local disk
+  (Loki is still only read). Filters are those of `queryLogs` (`service`/`level`/`text` or
+  `query`, the window up to `maxIntervalSeconds`: hours, not weeks). Lines go oldest first
+  and in full (no message cut, no stack compaction); the answer is the path, counts and a
+  `start` to continue with, never the lines.
+- **Where** — only inside `exportRoots` of the connections file (default
+  `<data dir>/exports`); a directory the model names must lie inside one of them after
+  normalization and symbolic links, so that text in the logs cannot steer a write
+  elsewhere. Existing files are never overwritten: a taken name gets `-2`, `-3`.
+- **Format** — `raw` (the original line), a named layout of the rules catalogue
+  (`layouts`, the reverse of `formats`: `spring` in `examples/java-rules.json`), or a
+  template in the call. No layout lives in the code; the template engine knows only the
+  normalized fields, line fields, labels and structured metadata.
+- **Paging** — forward pages starting at the time of the last written line; lines of that
+  nanosecond already written are skipped by stream and text with their multiplicity. A
+  nanosecond holding a whole page of lines cannot be paged inside, so it is stepped over and
+  the answer says so. `maxExportLines` (500000) and `maxExportBytes` (256 MiB) stop an
+  export with a continuation; a Loki error after the first line keeps what was written.
+- **DEV run (2026-09-25)**, read-only, 15 minutes to an hour: 277 lines of `ssj-main` in
+  0.4 s, 151 error lines of the scope into 4 service files in 0.8 s; ECS JSON (`sec-main`)
+  came out as Spring console lines with the full stack trace, the stand URL reached neither
+  answers nor diagnostics. It showed that a layout must not wrap text it cannot read: nginx
+  lines of `ssj-main` and stack frames the `ais-service-*` log as separate entries got an
+  empty Spring prefix, and the empty message of `LoggingFailureAnalysisReporter` was
+  written as the summaries' `(empty message, …)`. Unsplit plain lines are now written
+  unchanged (unless the template holds `{line}`), the empty message stays empty, and the classic logback layout of
+  `ais-service-*` went into `examples/java-rules.json` (it also gives the summaries their
+  logger and thread).
+- Not done: a CLI entry for people without an agent (only the tool, as asked), a normalized
+  JSONL format (raw + layouts + template are enough), a deadline of its own (the limits bound
+  the time; revisit if an MCP client times out on a busy stand).
+
 ## Open items
 
 - Docker image: deferred; the stdio server is launched by a local MCP client.

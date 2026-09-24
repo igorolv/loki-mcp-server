@@ -34,7 +34,9 @@ deferred. No embedded LLM is needed.
   to MCP JSON-RPC. Never use `System.out`, a stdout appender or the start-up banner; own
   logs go to stderr and a rolling file.
 - The runtime reads real Loki instances. Do not add push, delete, management tools or a
-  full `/config` dump. Test ingestion is allowed only into test containers.
+  full `/config` dump. Test ingestion is allowed only into test containers. The only write
+  is `exportLogs` on the local disk: inside the configured `exportRoots` (checked after
+  normalization and symbolic links), never overwriting a file.
 - Every data operation takes an explicit `connection`. Never pick a default stand.
   Connections and their errors must be isolated from each other.
 - Connection settings live in an external `connections.json`, without real credentials or
@@ -55,8 +57,9 @@ from the Redmine donor without a separate reason.
 
 Current stack: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0. Tools: `listConnections`,
 `discoverLogs` (with `label`), `countLogs`, `summarizeLogs`, `queryLogs` (`raw` with
-labels), `getLogContext`, `followKey`, `queryMetrics` — all return text; the first three
-take `service`/`level`/`text` instead of LogQL (`QueryIntent`, profile `scope`/`levels`),
+labels), `getLogContext`, `followKey`, `queryMetrics`, `exportLogs` (files on the local
+disk, inside `exportRoots` only) — all return text; `countLogs`, `summarizeLogs`,
+`queryLogs` and `exportLogs` take `service`/`level`/`text` instead of LogQL (`QueryIntent`, profile `scope`/`levels`),
 and an empty result says why (`SelectorCheck`); external configuration is
 mandatory, the registry is immutable. Contract: [docs/queries.md](docs/queries.md),
 [docs/discovery.md](docs/discovery.md). Standard Windows PowerShell commands:
@@ -106,7 +109,8 @@ oldest lines, `summarizeLogs` drops rare groups, `discoverLogs` shortens the exa
 and checks initialize with `instructions`, 16 outstanding pings and 16 `listConnections`
 calls, 16 calls with different budgets, 16 outstanding
 `queryLogs`/`countLogs`/`queryMetrics`/`summarizeLogs`, 16 `discoverLogs`, tools/list
-without output schema, text errors and the Loki 400 text. It covers the default and
+without output schema, text errors, the Loki 400 text and one `exportLogs` into the default
+export directory. It covers the default and
 override configuration paths, a clean stdout, the absence of secrets in responses and in
 stderr/file logs, and a safe start-up refusal on an invalid file. The working directory and
 the fixture `connections.json` are temporary; the mock Loki is a loopback HTTP server

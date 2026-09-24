@@ -152,7 +152,7 @@ public class QueryService {
         return NICE_STEPS.getLast();
     }
 
-    private static void requireLogQuery(String query) {
+    static void requireLogQuery(String query) {
         if (query == null || query.isBlank())
             throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\", or pass service/level/text instead, "
                     + "e.g. service=\"backend\", level=\"error\".");

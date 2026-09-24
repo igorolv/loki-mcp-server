@@ -2,8 +2,10 @@
 
 A local MCP server (stdio) that lets an agent read logs from Grafana Loki: overview of the
 stand → count → summary → lines → context around an event → the lines of one id across
-services → the full original line. Eight tools, every response is readable text; built for small models (target: DeepSeek 4.1
-Flash). Read-only: push, delete, `/config` and other management endpoints are never exposed.
+services → the full original line, and saving the lines of a window to disk. Nine tools, every response is readable
+text; built for small models (target: DeepSeek 4.1 Flash). Loki is only read: push, delete, `/config` and other
+management endpoints are never exposed; the only thing written is an `exportLogs` file inside the configured export
+directories.
 
 | Tool | What it does |
 |---|---|
@@ -15,6 +17,7 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
 | `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
+| `exportLogs` | Every matching line of a window saved to a file on the local disk, oldest first and in full: the original lines, a layout such as `spring` (the Spring Boot console line from ECS JSON), or a template of one's own; one file or one per service |
 
 Loki 2.6.1 and 3.x are supported. The response contract is in
 [docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md);
@@ -60,6 +63,9 @@ start-up failures, configuration errors, noise — which `summarizeLogs` applies
 one file or a list, the stand's own first (the asva2 set is
 [examples/asva2-rules.json](examples/asva2-rules.json), a generic Java set
 [examples/java-rules.json](examples/java-rules.json)).
+`exportRoots` at the top level lists the directories `exportLogs` may write into (default
+`~/.loki-mcp-server/exports`), and a catalogue's `layouts` name the line templates it
+writes (`spring` in the generic Java set).
 Credentials go through `auth` (`BASIC` or `BEARER`) and `${VARIABLES}`, `tenant` becomes
 `X-Scope-OrgID`; none of it is ever printed in responses or logs. The full format, defaults
 and loading errors are in [docs/connections.md](docs/connections.md).
@@ -82,7 +88,8 @@ The connection's `limits` object (all fields optional): `maxEntries` (1000) — 
 drops the oldest lines and `summarizeLogs` drops rare groups, the gone groups, noise and restarted services
 before the top groups, and the output says so;
 `requestTimeoutMs` (30000) and `maxHttpResponseBytes` (8 MiB) — the limit of one request
-to Loki. Time: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 with an offset
+to Loki; `maxExportLines` (500000) and `maxExportBytes` (256 MiB) — where one `exportLogs`
+call stops and gives a `start` to continue with. Time: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 with an offset
 (`2026-09-13T10:00:00+03:00`), local time in the connection's `timezone`, or epoch
 nanoseconds; `getLogContext` additionally accepts a time of day from a page
 (`10:12:03.123`). Responses print time in the connection's `timezone`.

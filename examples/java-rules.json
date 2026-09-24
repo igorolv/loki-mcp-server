@@ -3,6 +3,16 @@
     {
       "id": "spring-boot-console",
       "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<application>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\s*\\]\\s+(?<logger>\\S+)\\s*:\\s?(?<message>.*)$"
+    },
+    {
+      "id": "logback-classic",
+      "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?)\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<logger>\\S+)\\s+-\\s?(?<message>.*)$"
+    }
+  ],
+  "layouts": [
+    {
+      "id": "spring",
+      "template": "{time} {level:5} {process.pid|pid} --- [{service}] [{process.thread.name|thread_name|thread}] {logger} : {message}{stack}"
     }
   ],
   "rules": [
