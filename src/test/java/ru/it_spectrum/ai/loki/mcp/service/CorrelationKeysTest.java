@@ -25,13 +25,13 @@ class CorrelationKeysTest {
     private final EventNormalizer normalizer = new EventNormalizer();
     private final LokiHttpClient client = mock(LokiHttpClient.class);
 
+    private static EventNormalizer.View message(String text) {
+        return new EventNormalizer.View(EventNormalizer.Format.PLAIN, null, null, null, text, null, null, Map.of());
+    }
+
     private List<String> keys(String text) {
         return CorrelationKeys.of(normalizer.view(Fixtures.containing(events, text), List.of("applicationName")))
                 .stream().map(CorrelationKeys.Key::text).toList();
-    }
-
-    private static EventNormalizer.View message(String text) {
-        return new EventNormalizer.View(EventNormalizer.Format.PLAIN, null, null, null, text, null, null, Map.of());
     }
 
     @Test
@@ -77,7 +77,8 @@ class CorrelationKeysTest {
 
     private List<LogEntry> containing(String value) {
         var entries = new ArrayList<LogEntry>();
-        for (var event : events) if (event.line().contains(value)) entries.add(new LogEntry(event.timestampNanos(), event.line(), Map.of()));
+        for (var event : events)
+            if (event.line().contains(value)) entries.add(new LogEntry(event.timestampNanos(), event.line(), Map.of()));
         return entries;
     }
 

@@ -52,50 +52,6 @@ final class IncidentPicture {
     }
 
     /**
-     * How the onset was found: from every line of the window, from counts in steps, or from the sample only.
-     */
-    enum Source {LINES, COUNTS, SAMPLE}
-
-    static final class Incident {
-        /**
-         * The groups of the incident, most lines first; the new or growing ones among them; the biggest of those.
-         */
-        final List<LogSummary.Group> groups;
-        final List<LogSummary.Group> growing;
-        final LogSummary.Group lead;
-        final boolean linked;
-        Instant onset;
-        Source source = Source.LINES;
-        Duration step;
-        /**
-         * Services in the order they began, with the time.
-         */
-        final Map<String, Instant> services = new LinkedHashMap<>();
-        /**
-         * The services as start lines name them ({@code ssj-backend [ssj-main]}, see {@link ServiceStarts#service}), oldest
-         * line first, with the newest line of each: a release label alone would pick the restarts of its other services.
-         */
-        final Map<String, Instant> named = new LinkedHashMap<>();
-        final Map<String, Instant> last = new HashMap<>();
-
-        Incident(List<LogSummary.Group> groups, List<LogSummary.Group> growing, boolean linked) {
-            this.groups = groups;
-            this.growing = growing;
-            this.linked = linked;
-            this.lead = growing.stream().max(Comparator.<LogSummary.Group>comparingInt(g -> g.count)
-                    .thenComparing(g -> g.first.nanos(), Comparator.reverseOrder())).orElseThrow();
-        }
-
-        int lines() {
-            return groups.stream().mapToInt(g -> g.count).sum();
-        }
-
-        int weight() {
-            return growing.stream().mapToInt(g -> g.count).sum();
-        }
-    }
-
-    /**
      * A group is new or growing, or its history is unknown; frame lines never are.
      */
     static boolean growing(LogSummary.Group group) {
@@ -153,7 +109,8 @@ final class IncidentPicture {
      * wrappers or its message; null when neither is known.
      */
     static String dependency(LogSummary.Group group) {
-        if (group.rule != null && group.rule.category() == LogRule.Category.DEPENDENCY) return "rule " + group.rule.subject();
+        if (group.rule != null && group.rule.category() == LogRule.Category.DEPENDENCY)
+            return "rule " + group.rule.subject();
         String endpoint = endpoint(group);
         return endpoint == null ? null : "endpoint " + endpoint;
     }
@@ -341,8 +298,9 @@ final class IncidentPicture {
         var lines = new ArrayList<String>();
         boolean checked = printed.stream().anyMatch(g -> g.verdict != null);
         if (incidents.isEmpty()) {
-            if (checked) lines.add("Incident picture: nothing new or growing, every group below was seen before at its usual rate. "
-                    + "If something is broken now, its lines may be outside this query: widen the selector or the filter.");
+            if (checked)
+                lines.add("Incident picture: nothing new or growing, every group below was seen before at its usual rate. "
+                        + "If something is broken now, its lines may be outside this query: widen the selector or the filter.");
             return lines;
         }
         lines.add(checked ? "Incident picture: new or growing errors, oldest first (the groups below are the evidence):"
@@ -403,8 +361,10 @@ final class IncidentPicture {
     private static String since(Incident incident, QueryTime.Range window, ZoneId zone, boolean days) {
         String text = switch (incident.source) {
             case LINES -> "since " + at(incident.onset, zone, TIME, days);
-            case COUNTS -> "since about " + at(incident.onset, zone, incident.step.toSeconds() < 60 ? SECONDS : MINUTES, days);
-            case SAMPLE -> "first in the sample at " + at(incident.onset, zone, TIME, days) + " (older lines of the window were not read)";
+            case COUNTS ->
+                    "since about " + at(incident.onset, zone, incident.step.toSeconds() < 60 ? SECONDS : MINUTES, days);
+            case SAMPLE ->
+                    "first in the sample at " + at(incident.onset, zone, TIME, days) + " (older lines of the window were not read)";
         };
         boolean atStart = incident.source != Source.SAMPLE
                 && Duration.between(window.start(), incident.onset).compareTo(window.duration().dividedBy(TIMELINE_STEPS)) <= 0;
@@ -447,12 +407,14 @@ final class IncidentPicture {
             parts.add((parts.isEmpty() ? "" : "then ") + String.join(" and ", step.getValue())
                     + (services.size() == 1 ? "" : " " + prefix + at(step.getKey(), zone, format, days)));
         var text = new StringBuilder(parts.isEmpty() ? "-" : String.join(", ", parts));
-        if (services.size() > SERVICES_SHOWN) text.append(" (+").append(services.size() - SERVICES_SHOWN).append(" more)");
+        if (services.size() > SERVICES_SHOWN)
+            text.append(" (+").append(services.size() - SERVICES_SHOWN).append(" more)");
         int lines = incident.lines();
         text.append("; ").append(lines).append(incident.source == Source.LINES ? "" : " sampled").append(lines == 1 ? " line" : " lines");
         if (incident.groups.size() > 1) text.append(" in ").append(incident.groups.size()).append(" groups");
         String key = incident.linked ? incident.groups.stream().map(g -> g.linkKey).filter(Objects::nonNull).findFirst().orElse(null) : null;
-        if (key != null) text.append(", one failure across services by ").append(key).append(" (followKey shows its lines in order)");
+        if (key != null)
+            text.append(", one failure across services by ").append(key).append(" (followKey shows its lines in order)");
         return text.toString();
     }
 
@@ -500,5 +462,49 @@ final class IncidentPicture {
     private static String deploy(ServiceStarts starts, ServiceStarts.Start start) {
         var deploy = starts.deployOf(start);
         return deploy == null ? "" : " (deploy: " + deploy.after().changeFrom(deploy.before()) + ")";
+    }
+
+    /**
+     * How the onset was found: from every line of the window, from counts in steps, or from the sample only.
+     */
+    enum Source {LINES, COUNTS, SAMPLE}
+
+    static final class Incident {
+        /**
+         * The groups of the incident, most lines first; the new or growing ones among them; the biggest of those.
+         */
+        final List<LogSummary.Group> groups;
+        final List<LogSummary.Group> growing;
+        final LogSummary.Group lead;
+        final boolean linked;
+        /**
+         * Services in the order they began, with the time.
+         */
+        final Map<String, Instant> services = new LinkedHashMap<>();
+        /**
+         * The services as start lines name them ({@code ssj-backend [ssj-main]}, see {@link ServiceStarts#service}), oldest
+         * line first, with the newest line of each: a release label alone would pick the restarts of its other services.
+         */
+        final Map<String, Instant> named = new LinkedHashMap<>();
+        final Map<String, Instant> last = new HashMap<>();
+        Instant onset;
+        Source source = Source.LINES;
+        Duration step;
+
+        Incident(List<LogSummary.Group> groups, List<LogSummary.Group> growing, boolean linked) {
+            this.groups = groups;
+            this.growing = growing;
+            this.linked = linked;
+            this.lead = growing.stream().max(Comparator.<LogSummary.Group>comparingInt(g -> g.count)
+                    .thenComparing(g -> g.first.nanos(), Comparator.reverseOrder())).orElseThrow();
+        }
+
+        int lines() {
+            return groups.stream().mapToInt(g -> g.count).sum();
+        }
+
+        int weight() {
+            return growing.stream().mapToInt(g -> g.count).sum();
+        }
     }
 }

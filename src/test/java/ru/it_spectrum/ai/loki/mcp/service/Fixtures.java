@@ -32,7 +32,8 @@ final class Fixtures {
                 if (line.isBlank()) continue;
                 JsonNode node = MAPPER.readTree(line);
                 var labels = new LinkedHashMap<String, String>();
-                for (var label : node.get("labels").properties()) labels.put(label.getKey(), label.getValue().asString());
+                for (var label : node.get("labels").properties())
+                    labels.put(label.getKey(), label.getValue().asString());
                 events.add(new LogEvent(node.get("ts").asString(), labels, node.get("line").asString(), Map.of()));
             }
             return events;

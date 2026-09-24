@@ -18,13 +18,13 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class LineFormatTest {
     private static final ConnectionsLoader.Catalogue JAVA = ConnectionsLoader.loadCatalogue(Path.of("examples/java-rules.json"));
-    private final EventNormalizer normalizer = new EventNormalizer(JAVA.formats());
     // Spring Boot 3 (no application name), 3.4+ (application name before the thread) and 2 (a space instead of T).
     private static final String BOOT3 = "2026-09-24T15:10:16.432+03:00  WARN 1 --- [           main] ConfigServletWebServerApplicationContext : "
             + "Exception encountered during context initialization - cancelling refresh attempt";
     private static final String BOOT34 = "2026-09-24T12:27:01.057Z  INFO 1 --- [config-server] [nio-8888-exec-6] o.s.c.c.s.e.NativeEnvironmentRepository  : "
             + "Adding property source: Config resource 'file [/tmp/config-repo-17/dev/application.yaml]'";
     private static final String BOOT2 = "2021-03-01 10:00:00.123 ERROR 12345 --- [scheduling-1] c.e.orders.OrderJob : Order 17 failed";
+    private final EventNormalizer normalizer = new EventNormalizer(JAVA.formats());
 
     private static LogEvent event(String line) {
         return new LogEvent("1", Map.of("instance", "app-main"), line, Map.of());

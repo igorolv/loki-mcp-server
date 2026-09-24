@@ -23,9 +23,6 @@ final class SelectorCheck {
         this.client = client;
     }
 
-    record Label(String name, String operator, String value) {
-    }
-
     /**
      * The matchers of the query's stream selector, values unescaped; empty when the query does not start with one.
      */
@@ -37,6 +34,39 @@ final class SelectorCheck {
         while (matcher.find())
             result.add(new Label(matcher.group(1), matcher.group(2), matcher.group(3).replaceAll("\\\\(.)", "$1")));
         return result;
+    }
+
+    /**
+     * Values nearest to {@code wanted}: holding it or held by it first (ignoring case), then by edit distance.
+     */
+    static List<String> closest(String wanted, Collection<String> values) {
+        String lower = wanted.toLowerCase(Locale.ROOT);
+        var sorted = new ArrayList<>(new TreeSet<>(values));
+        sorted.sort(Comparator.comparingInt((String v) -> {
+                    String candidate = v.toLowerCase(Locale.ROOT);
+                    return candidate.contains(lower) || (!candidate.isEmpty() && lower.contains(candidate)) ? 0 : 1;
+                })
+                .thenComparingInt(v -> distance(lower, v.toLowerCase(Locale.ROOT))));
+        return sorted.subList(0, Math.min(CLOSEST, sorted.size()));
+    }
+
+    static int distance(String a, String b) {
+        int[] previous = new int[b.length() + 1], current = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) previous[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= b.length(); j++)
+                current[j] = Math.min(Math.min(current[j - 1], previous[j]) + 1, previous[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
+            var swap = previous;
+            previous = current;
+            current = swap;
+        }
+        return previous[b.length()];
+    }
+
+    private static String list(List<String> values, int shown) {
+        return String.join(", ", values.subList(0, Math.min(shown, values.size())))
+                + (values.size() > shown ? " (+" + (values.size() - shown) + " more)" : "");
     }
 
     /**
@@ -90,36 +120,6 @@ final class SelectorCheck {
         }
     }
 
-    /**
-     * Values nearest to {@code wanted}: holding it or held by it first (ignoring case), then by edit distance.
-     */
-    static List<String> closest(String wanted, Collection<String> values) {
-        String lower = wanted.toLowerCase(Locale.ROOT);
-        var sorted = new ArrayList<>(new TreeSet<>(values));
-        sorted.sort(Comparator.comparingInt((String v) -> {
-                    String candidate = v.toLowerCase(Locale.ROOT);
-                    return candidate.contains(lower) || (!candidate.isEmpty() && lower.contains(candidate)) ? 0 : 1;
-                })
-                .thenComparingInt(v -> distance(lower, v.toLowerCase(Locale.ROOT))));
-        return sorted.subList(0, Math.min(CLOSEST, sorted.size()));
-    }
-
-    static int distance(String a, String b) {
-        int[] previous = new int[b.length() + 1], current = new int[b.length() + 1];
-        for (int j = 0; j <= b.length(); j++) previous[j] = j;
-        for (int i = 1; i <= a.length(); i++) {
-            current[0] = i;
-            for (int j = 1; j <= b.length(); j++)
-                current[j] = Math.min(Math.min(current[j - 1], previous[j]) + 1, previous[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
-            var swap = previous;
-            previous = current;
-            current = swap;
-        }
-        return previous[b.length()];
-    }
-
-    private static String list(List<String> values, int shown) {
-        return String.join(", ", values.subList(0, Math.min(shown, values.size())))
-                + (values.size() > shown ? " (+" + (values.size() - shown) + " more)" : "");
+    record Label(String name, String operator, String value) {
     }
 }

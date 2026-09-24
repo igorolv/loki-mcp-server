@@ -86,7 +86,8 @@ class LogRulesTest {
         for (var event : events) entries.add(new LogEntry(event.timestampNanos(), event.line(), Map.of()));
         String noise = Fixtures.containing(events, "No static resource api/selectedDateTime").line();
         long base = Instant.parse("2026-09-21T20:40:00Z").getEpochSecond() * 1_000_000_000L;
-        for (int i = 0; i < 100; i++) entries.add(new LogEntry(Long.toString(base + i * 1_000_000_000L), noise, Map.of()));
+        for (int i = 0; i < 100; i++)
+            entries.add(new LogEntry(Long.toString(base + i * 1_000_000_000L), noise, Map.of()));
         entries.sort(java.util.Comparator.comparing((LogEntry e) -> Long.parseLong(e.timestampNanos())).reversed());
         doAnswer(invocation -> {
             Instant end = invocation.getArgument(3);

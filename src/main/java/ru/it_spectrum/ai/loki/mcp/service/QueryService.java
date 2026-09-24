@@ -28,21 +28,19 @@ public class QueryService {
     public static final int DEFAULT_CONTEXT = 20;
     public static final int TIME_BUCKETS = 12;
     public static final int METRIC_STEPS = 20;
+    public static final int DEFAULT_FOLLOW = 100;
+    static final int KNOWN_CAUSES = 10;
+    static final int GONE_GROUPS = 5;
+    static final int FIRST_PAGE = 50;
     private static final List<Duration> NICE_STEPS = List.of(Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(10),
             Duration.ofSeconds(30), Duration.ofMinutes(1), Duration.ofMinutes(2), Duration.ofMinutes(5), Duration.ofMinutes(10),
             Duration.ofMinutes(15), Duration.ofMinutes(30), Duration.ofHours(1), Duration.ofHours(2), Duration.ofHours(3),
             Duration.ofHours(6), Duration.ofHours(12), Duration.ofDays(1));
+    private static final java.util.regex.Pattern KEY_PAIR = java.util.regex.Pattern.compile("\\s*([A-Za-z][\\w.]{0,63})\\s*[=:]\\s*(.+?)\\s*");
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
     private final Clock clock;
     private final java.util.concurrent.ConcurrentHashMap<String, EventNormalizer> normalizers = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /**
-     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
-     */
-    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
-        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
-    }
     private final SelectorCheck check;
 
     @Autowired
@@ -55,6 +53,146 @@ public class QueryService {
         this.client = client;
         this.clock = clock;
         this.check = new SelectorCheck(client);
+    }
+
+    private static String footer(List<LogEvent> events, List<String> marked, int dropped, boolean more, int limit, ZoneId zone) {
+        if (events.isEmpty()) return "No lines match in this window. Try a wider window (e.g. start=\"now-6h\"), "
+                + "check labels and fields with discoverLogs, or simplify the filter.";
+        int markers = (int) marked.subList(0, Math.min(dropped, marked.size())).stream().filter(l -> l.startsWith("--- ")).count();
+        int shown = events.size() - (dropped - markers);
+        if (shown < 1) shown = 1;
+        var oldest = QueryTime.fromNanos(events.get(events.size() - shown).timestampNanos());
+        var text = new StringBuilder();
+        if (dropped > 0)
+            text.append("Output limit reached: showing ").append(shown).append(" newest of ").append(events.size()).append(" fetched lines. ");
+        if (more || dropped > 0) {
+            text.append("Shown ").append(shown).append(" newest lines; oldest shown ").append(iso(oldest, zone)).append(". ");
+            text.append("Older: repeat with end=\"").append(iso(QueryTime.ceilMillis(oldest), zone)).append("\". ");
+            text.append("Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.");
+        } else text.append("Shown all ").append(shown).append(" matching lines.");
+        return text.toString();
+    }
+
+    /**
+     * {@code   dependency     SMEV  3 lines}: matched rules other than noise, summed by category and subject.
+     */
+    private static List<String> knownCauses(List<LogSummary.Group> groups) {
+        var lines = new LinkedHashMap<String, Integer>();
+        for (var group : groups) {
+            if (group.rule == null) continue;
+            String key = String.format("  %-13s  %s", group.rule.category().text(),
+                    group.rule.subject() == null ? group.rule.rule().id() : group.rule.subject());
+            lines.merge(key, group.count, Integer::sum);
+        }
+        var sorted = new ArrayList<>(lines.entrySet());
+        sorted.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+        var result = new ArrayList<String>();
+        for (var entry : sorted.subList(0, Math.min(KNOWN_CAUSES, sorted.size())))
+            result.add(entry.getKey() + "  " + entry.getValue() + (entry.getValue() == 1 ? " line" : " lines"));
+        if (sorted.size() > KNOWN_CAUSES) result.add("  (+" + (sorted.size() - KNOWN_CAUSES) + " more)");
+        return result;
+    }
+
+    /**
+     * Filters of the noise rules that hold at least a tenth of the sample, biggest first: a short query to retry with.
+     */
+    private static String noiseFilters(List<LogSummary.Group> noise, int sampled) {
+        var lines = new LinkedHashMap<String, Integer>();
+        for (var group : noise)
+            if (group.rule.rule().filter() != null)
+                lines.merge(group.rule.rule().filter().strip(), group.count, Integer::sum);
+        var filters = new ArrayList<>(lines.entrySet());
+        filters.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+        var result = new ArrayList<String>();
+        for (var filter : filters) if (filter.getValue() * 10 >= sampled) result.add(filter.getKey());
+        return String.join(" ", result);
+    }
+
+    private static String contextFooter(List<LogEvent> earlier, List<LogEvent> later, int targets, int wantBefore, int wantAfter,
+                                        int keepBefore, int keepAfter, int dropped, QueryTime.Point point, Duration reach, ZoneId zone) {
+        var text = new StringBuilder();
+        int beforeCount = earlier.size() - targets;
+        if (dropped > 0)
+            text.append("Output limit reached: showing ").append(keepBefore).append(" before and ").append(keepAfter)
+                    .append(" after of ").append(earlier.size() + later.size()).append(" fetched lines. ");
+        String span = QueryTime.human(reach);
+        if (targets > 0 && targets == earlier.size() && targets > wantBefore)
+            text.append("All ").append(targets).append(" fetched lines are at this time; ")
+                    .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs"
+                            : "repeat with a larger before (e.g. before=" + Math.min(wantBefore * 5 + 5, 200) + ")")
+                    .append(" to see what came before. ");
+        else if (beforeCount < wantBefore)
+            text.append("No earlier lines within ").append(span).append(" before this time. ");
+        else if (keepBefore > 0)
+            text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
+        if (wantAfter > 0 && later.size() < wantAfter)
+            text.append("No later lines within ").append(span).append(" after this time. ");
+        else if (keepAfter > 0)
+            text.append("Later: repeat with time=\"").append(iso(QueryTime.fromNanos(later.get(keepAfter - 1).timestampNanos()), zone)).append("\", before=0. ");
+        text.append("Full original line: queryLogs with raw=true and a narrow filter.");
+        return text.toString();
+    }
+
+    private static String megabytes(long bytes) {
+        return BigDecimal.valueOf(bytes).divide(BigDecimal.valueOf(1024 * 1024), 1, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    static String countExpression(String query, Duration range, String by) {
+        String inner = "count_over_time(" + query.strip() + " [" + QueryTime.lokiDuration(range) + "])";
+        return by == null ? "sum(" + inner + ")" : "sum by (" + by + ") (" + inner + ")";
+    }
+
+    static Duration niceStep(Duration window) {
+        return niceStep(window, METRIC_STEPS);
+    }
+
+    static Duration niceStep(Duration window, int points) {
+        Duration minimum = window.dividedBy(points);
+        for (var candidate : NICE_STEPS) if (candidate.compareTo(minimum) >= 0) return candidate;
+        return NICE_STEPS.getLast();
+    }
+
+    private static void requireLogQuery(String query) {
+        if (query == null || query.isBlank())
+            throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\", or pass service/level/text instead, "
+                    + "e.g. service=\"backend\", level=\"error\".");
+        if (!query.strip().startsWith("{"))
+            throw Errors.invalid("A log query starts with a stream selector in braces, e.g. {app=\"backend\"} |= \"ERROR\". "
+                    + "For metric expressions use queryMetrics.");
+    }
+
+    private static List<LokiResponses.VectorSample> vector(LokiResponses.QueryResponse response) {
+        if (!(response.data() instanceof LokiResponses.Vector vector)) throw notMetric();
+        return vector.samples();
+    }
+
+    private static long sum(List<LokiResponses.VectorSample> samples) {
+        long total = 0;
+        for (var sample : samples) total += value(sample.sample().value());
+        return total;
+    }
+
+    private static long value(String metricValue) {
+        try {
+            return new BigDecimal(metricValue).setScale(0, RoundingMode.HALF_UP).longValueExact();
+        } catch (NumberFormatException | ArithmeticException ignored) {
+            return 0;
+        }
+    }
+
+    private static BigDecimal stepSeconds(Duration step) {
+        return BigDecimal.valueOf(step.toMillis(), 3);
+    }
+
+    private static LokiOperationException notMetric() {
+        return Errors.invalid("Loki returned a result type this tool cannot show. Check that the expression is what the tool expects.");
+    }
+
+    /**
+     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
+     */
+    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
+        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
     }
 
     /**
@@ -99,24 +237,6 @@ public class QueryService {
         return events.isEmpty() ? why(text, connection, query, window) : text;
     }
 
-    private static String footer(List<LogEvent> events, List<String> marked, int dropped, boolean more, int limit, ZoneId zone) {
-        if (events.isEmpty()) return "No lines match in this window. Try a wider window (e.g. start=\"now-6h\"), "
-                + "check labels and fields with discoverLogs, or simplify the filter.";
-        int markers = (int) marked.subList(0, Math.min(dropped, marked.size())).stream().filter(l -> l.startsWith("--- ")).count();
-        int shown = events.size() - (dropped - markers);
-        if (shown < 1) shown = 1;
-        var oldest = QueryTime.fromNanos(events.get(events.size() - shown).timestampNanos());
-        var text = new StringBuilder();
-        if (dropped > 0)
-            text.append("Output limit reached: showing ").append(shown).append(" newest of ").append(events.size()).append(" fetched lines. ");
-        if (more || dropped > 0) {
-            text.append("Shown ").append(shown).append(" newest lines; oldest shown ").append(iso(oldest, zone)).append(". ");
-            text.append("Older: repeat with end=\"").append(iso(QueryTime.ceilMillis(oldest), zone)).append("\". ");
-            text.append("Too many lines? Narrow the query (add a filter or level) or use countLogs / summarizeLogs.");
-        } else text.append("Shown all ").append(shown).append(" matching lines.");
-        return text.toString();
-    }
-
     /**
      * Groups of repeated messages in the newest {@code sample} lines: count, first/last time and the newest example.
      * The numbers describe the sample, never the window; the footer says so and names countLogs for the total.
@@ -139,8 +259,9 @@ public class QueryService {
         var events = sampled.events();
         ZoneId zone = definition.timezone();
         String where = query.strip() + " — " + connection + ", " + window(window, zone);
-        if (events.isEmpty()) return why("Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
-                + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.", connection, query, window);
+        if (events.isEmpty())
+            return why("Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
+                    + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.", connection, query, window);
         boolean more = events.size() >= usedSample || sampled.cutByBytes();
         var starts = starts(connection, query, window);
         if (starts != null) starts.count(events);
@@ -149,7 +270,7 @@ public class QueryService {
         String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
                 + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
         String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist"
-                + (sampled.cutByBytes() ? "; stopped at " + megabytes(sampled.bytes()) + " MB of log text" : "") + "), "
+                                                               + (sampled.cutByBytes() ? "; stopped at " + megabytes(sampled.bytes()) + " MB of log text" : "") + "), "
                 : "all " + events.size() + " lines, ") + "spanning " + span + ", " + groups.size()
                 + (groups.size() == 1 ? " distinct message." : " distinct messages.");
         // Noise groups (by the connection's rules) are listed apart and never take a place in the top or rare lists.
@@ -200,14 +321,16 @@ public class QueryService {
                 lines.add("  (+" + hiddenGroups + " more groups, " + hiddenLines + " lines: narrow the query to see them)");
             if (past.goneTitle() != null && (past.gone() == null || keepGone > 0)) {
                 lines.add(past.goneTitle());
-                if (past.gone() != null) for (var group : past.gone().subList(0, keepGone)) lines.add(LogSummary.renderGone(group));
+                if (past.gone() != null)
+                    for (var group : past.gone().subList(0, keepGone)) lines.add(LogSummary.renderGone(group));
             }
             if (!noise.isEmpty()) {
                 lines.add("Noise by the rules of this connection (" + noiseLines + " of " + events.size() + " sampled lines, not listed above):");
                 for (var group : noise.subList(0, keepNoise)) lines.add(LogSummary.renderNoise(group, zone));
                 int hiddenNoise = noise.size() - keepNoise, hiddenNoiseLines = 0;
                 for (var group : noise.subList(keepNoise, noise.size())) hiddenNoiseLines += group.count;
-                if (hiddenNoise > 0) lines.add("  (+" + hiddenNoise + " more noise groups, " + hiddenNoiseLines + " lines)");
+                if (hiddenNoise > 0)
+                    lines.add("  (+" + hiddenNoise + " more noise groups, " + hiddenNoiseLines + " lines)");
                 String filters = noiseFilters(noise, events.size());
                 // Noise that crowds a cut sample hides the rest of the window: offer the filters that drop it.
                 if (more && noiseLines * 3 >= events.size() && !filters.isEmpty())
@@ -236,17 +359,6 @@ public class QueryService {
         }
     }
 
-    static final int KNOWN_CAUSES = 10;
-    static final int GONE_GROUPS = 5;
-
-    /**
-     * The header line of the groups' history (null when no group could be counted), and the groups of the same hours a
-     * day earlier that are gone: {@code goneTitle} is null when there is nothing to say, {@code gone} null when the
-     * request failed.
-     */
-    record Past(String header, String goneTitle, List<LogSummary.Group> gone, List<IncidentPicture.Incident> incidents) {
-    }
-
     /**
      * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups), the onset of the
      * incidents ({@link IncidentPicture}), the background of {@link FieldContrast} and the "not now" page of a day
@@ -263,15 +375,18 @@ public class QueryService {
         var previous = new HashMap<LogSummary.Group, long[]>();
         var same = new HashMap<LogSummary.Group, long[]>();
         for (var batch : batches)
-            if (System.nanoTime() < deadline) previous.putAll(counts(connection, batch, GroupHistory.previousDays(batch, window)));
+            if (System.nanoTime() < deadline)
+                previous.putAll(counts(connection, batch, GroupHistory.previousDays(batch, window)));
         boolean longWindow = window.duration().compareTo(GroupHistory.SAME_HOURS) > 0;
         for (var batch : batches) {
             // Groups never seen before need no comparison with the same hours.
             boolean seen = batch.fragments().keySet().stream().anyMatch(g -> previous.containsKey(g) && Arrays.stream(previous.get(g)).sum() > 0);
             if (!seen) continue;
             // A long window read whole needs no count of itself: the sample holds every line of each group.
-            if (longWindow && wholeWindow) for (var group : batch.fragments().keySet()) same.put(group, new long[]{group.count, 0});
-            else if (System.nanoTime() < deadline) same.putAll(counts(connection, batch, GroupHistory.sameHours(batch, window)));
+            if (longWindow && wholeWindow)
+                for (var group : batch.fragments().keySet()) same.put(group, new long[]{group.count, 0});
+            else if (System.nanoTime() < deadline)
+                same.putAll(counts(connection, batch, GroupHistory.sameHours(batch, window)));
         }
         var verdicts = new ArrayList<GroupHistory.Verdict>();
         int notChecked = 0;
@@ -292,7 +407,8 @@ public class QueryService {
         onsets(connection, query, window, incidents, wholeWindow, sample, deadline);
         contrast(connection, query, window, printed, sample, deadline);
         // The groups of a day earlier can only be "gone" when the sample of this window saw every line of it.
-        if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS) return new Past(header, null, null, incidents);
+        if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS)
+            return new Past(header, null, null, incidents);
         String title = "Seen at these hours a day earlier, not now";
         var dayBefore = new QueryTime.Range(window.start().minus(Duration.ofDays(1)), window.end().minus(Duration.ofDays(1)));
         Sample sampled;
@@ -305,11 +421,16 @@ public class QueryService {
         }
         var gone = new ArrayList<LogSummary.Group>();
         for (var group : LogSummary.group(sampled.events(), normalizer(definition), definition.serviceLabels(), definition.applicationPackages(), definition.rules()))
-            if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS) gone.add(group);
+            if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS)
+                gone.add(group);
         if (gone.isEmpty()) return new Past(header, null, null, incidents);
         return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):",
                 gone, incidents);
     }
+
+    /**
+     * Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD.
+     */
 
     /**
      * When each incident began and in which order its services joined: from the sampled lines when they are every
@@ -327,7 +448,8 @@ public class QueryService {
             return ServiceStarts.service(event, values, definition.serviceLabels());
         };
         if (wholeWindow) {
-            for (var incident : incidents) IncidentPicture.fromLines(incident, window, IncidentPicture.Source.LINES, serviceOf, nameOf);
+            for (var incident : incidents)
+                IncidentPicture.fromLines(incident, window, IncidentPicture.Source.LINES, serviceOf, nameOf);
             return;
         }
         Duration step = IncidentPicture.timelineStep(window);
@@ -433,43 +555,6 @@ public class QueryService {
     }
 
     /**
-     * {@code   dependency     SMEV  3 lines}: matched rules other than noise, summed by category and subject.
-     */
-    private static List<String> knownCauses(List<LogSummary.Group> groups) {
-        var lines = new LinkedHashMap<String, Integer>();
-        for (var group : groups) {
-            if (group.rule == null) continue;
-            String key = String.format("  %-13s  %s", group.rule.category().text(),
-                    group.rule.subject() == null ? group.rule.rule().id() : group.rule.subject());
-            lines.merge(key, group.count, Integer::sum);
-        }
-        var sorted = new ArrayList<>(lines.entrySet());
-        sorted.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
-        var result = new ArrayList<String>();
-        for (var entry : sorted.subList(0, Math.min(KNOWN_CAUSES, sorted.size())))
-            result.add(entry.getKey() + "  " + entry.getValue() + (entry.getValue() == 1 ? " line" : " lines"));
-        if (sorted.size() > KNOWN_CAUSES) result.add("  (+" + (sorted.size() - KNOWN_CAUSES) + " more)");
-        return result;
-    }
-
-    /**
-     * Filters of the noise rules that hold at least a tenth of the sample, biggest first: a short query to retry with.
-     */
-    private static String noiseFilters(List<LogSummary.Group> noise, int sampled) {
-        var lines = new LinkedHashMap<String, Integer>();
-        for (var group : noise)
-            if (group.rule.rule().filter() != null) lines.merge(group.rule.rule().filter().strip(), group.count, Integer::sum);
-        var filters = new ArrayList<>(lines.entrySet());
-        filters.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
-        var result = new ArrayList<String>();
-        for (var filter : filters) if (filter.getValue() * 10 >= sampled) result.add(filter.getKey());
-        return String.join(" ", result);
-    }
-
-    public static final int DEFAULT_FOLLOW = 100;
-    private static final java.util.regex.Pattern KEY_PAIR = java.util.regex.Pattern.compile("\\s*([A-Za-z][\\w.]{0,63})\\s*[=:]\\s*(.+?)\\s*");
-
-    /**
      * Every line of a stream selector that holds one identifier, oldest first, across services: what happened to one
      * task, request or message on a stand without tracing. The key is filtered in Loki by its value and then matched
      * as a whole token here; errors show their root cause and the rule that knows them.
@@ -503,10 +588,11 @@ public class QueryService {
         String what = pair.matches() ? pair.group(1) + "=" + value : value;
         String where = "Lines with " + what + " in " + scope + " — " + connection + ", " + window(window, zone);
         String partialNote = partial == 0 ? "" : " " + partial + (partial == 1 ? " line" : " lines")
-                + " holding " + value + " only inside a longer word were left out.";
-        if (events.isEmpty()) return why(where + ": no lines." + partialNote + "\nNo line of the window holds this value. Widen the window "
-                + "around the time the key was seen (start=\"...\", end=\"...\"), or use a selector that covers every service.",
-                connection, scope + " |= \"" + value + "\"", window);
+                                                 + " holding " + value + " only inside a longer word were left out.";
+        if (events.isEmpty())
+            return why(where + ": no lines." + partialNote + "\nNo line of the window holds this value. Widen the window "
+                            + "around the time the key was seen (start=\"...\", end=\"...\"), or use a selector that covers every service.",
+                    connection, scope + " |= \"" + value + "\"", window);
         var lines = new ArrayList<String>();
         var services = new LinkedHashSet<String>();
         String firstError = null;
@@ -613,31 +699,6 @@ public class QueryService {
             if (keepAfter > keepBefore) keepAfter--;
             else keepBefore--;
         }
-    }
-
-    private static String contextFooter(List<LogEvent> earlier, List<LogEvent> later, int targets, int wantBefore, int wantAfter,
-                                        int keepBefore, int keepAfter, int dropped, QueryTime.Point point, Duration reach, ZoneId zone) {
-        var text = new StringBuilder();
-        int beforeCount = earlier.size() - targets;
-        if (dropped > 0)
-            text.append("Output limit reached: showing ").append(keepBefore).append(" before and ").append(keepAfter)
-                    .append(" after of ").append(earlier.size() + later.size()).append(" fetched lines. ");
-        String span = QueryTime.human(reach);
-        if (targets > 0 && targets == earlier.size() && targets > wantBefore)
-            text.append("All ").append(targets).append(" fetched lines are at this time; ")
-                    .append(point.precision().compareTo(Duration.ofMillis(1)) > 0 ? "pass the time with milliseconds as printed by queryLogs"
-                            : "repeat with a larger before (e.g. before=" + Math.min(wantBefore * 5 + 5, 200) + ")")
-                    .append(" to see what came before. ");
-        else if (beforeCount < wantBefore)
-            text.append("No earlier lines within ").append(span).append(" before this time. ");
-        else if (keepBefore > 0)
-            text.append("Earlier: repeat with time=\"").append(iso(QueryTime.fromNanos(earlier.get(beforeCount - keepBefore).timestampNanos()), zone)).append("\", after=0. ");
-        if (wantAfter > 0 && later.size() < wantAfter)
-            text.append("No later lines within ").append(span).append(" after this time. ");
-        else if (keepAfter > 0)
-            text.append("Later: repeat with time=\"").append(iso(QueryTime.fromNanos(later.get(keepAfter - 1).timestampNanos()), zone)).append("\", before=0. ");
-        text.append("Full original line: queryLogs with raw=true and a narrow filter.");
-        return text.toString();
     }
 
     /**
@@ -770,19 +831,6 @@ public class QueryService {
         return fit(text.toString(), List.of(), ignored -> "", definition.limits().maxResponseBytes() - ENVELOPE_BYTES);
     }
 
-    /**
-     * Chronological page of at most {@code limit} entries: the newest ones for BACKWARD, the oldest ones for FORWARD.
-     */
-    /**
-     * The newest lines of a window, read in pages sized by the lines seen so far, so that a sample of 16 KB error
-     * lines never asks Loki for one response above maxHttpResponseBytes. Stops at {@code wanted} lines, at the end
-     * of the window, or when the lines read reach the connection's HTTP byte limit ({@code cutByBytes}).
-     */
-    record Sample(List<LogEvent> events, long bytes, boolean cutByBytes) {
-    }
-
-    static final int FIRST_PAGE = 50;
-
     Sample sample(String connection, String query, QueryTime.Range window, int wanted, int maxHttpResponseBytes) {
         var collected = new ArrayList<LogEvent>();
         long bytes = 0;
@@ -795,7 +843,9 @@ public class QueryService {
             var held = new ArrayList<LogEvent>();
             if (!collected.isEmpty()) {
                 long boundary = collected.getFirst().nanos();
-                for (var event : collected) if (event.nanos() == boundary) held.add(event); else break;
+                for (var event : collected)
+                    if (event.nanos() == boundary) held.add(event);
+                    else break;
             }
             int limit = page + held.size();
             var events = fetch(connection, query, new QueryTime.Range(window.start(), end), limit, LokiHttpClient.Direction.BACKWARD);
@@ -821,10 +871,6 @@ public class QueryService {
         return new Sample(collected, bytes, false);
     }
 
-    private static String megabytes(long bytes) {
-        return BigDecimal.valueOf(bytes).divide(BigDecimal.valueOf(1024 * 1024), 1, RoundingMode.HALF_UP).toPlainString();
-    }
-
     List<LogEvent> fetch(String connection, String query, QueryTime.Range window, int limit, LokiHttpClient.Direction direction) {
         var response = client.queryRange(connection, query, window.start(), window.end(), limit, direction, null);
         if (!(response.data() instanceof LokiResponses.Streams streams))
@@ -839,54 +885,20 @@ public class QueryService {
         return new ArrayList<>(direction == LokiHttpClient.Direction.BACKWARD ? events.subList(events.size() - limit, events.size()) : events.subList(0, limit));
     }
 
-    static String countExpression(String query, Duration range, String by) {
-        String inner = "count_over_time(" + query.strip() + " [" + QueryTime.lokiDuration(range) + "])";
-        return by == null ? "sum(" + inner + ")" : "sum by (" + by + ") (" + inner + ")";
+    /**
+     * The header line of the groups' history (null when no group could be counted), and the groups of the same hours a
+     * day earlier that are gone: {@code goneTitle} is null when there is nothing to say, {@code gone} null when the
+     * request failed.
+     */
+    record Past(String header, String goneTitle, List<LogSummary.Group> gone,
+                List<IncidentPicture.Incident> incidents) {
     }
 
-    static Duration niceStep(Duration window) {
-        return niceStep(window, METRIC_STEPS);
-    }
-
-    static Duration niceStep(Duration window, int points) {
-        Duration minimum = window.dividedBy(points);
-        for (var candidate : NICE_STEPS) if (candidate.compareTo(minimum) >= 0) return candidate;
-        return NICE_STEPS.getLast();
-    }
-
-    private static void requireLogQuery(String query) {
-        if (query == null || query.isBlank())
-            throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\", or pass service/level/text instead, "
-                    + "e.g. service=\"backend\", level=\"error\".");
-        if (!query.strip().startsWith("{"))
-            throw Errors.invalid("A log query starts with a stream selector in braces, e.g. {app=\"backend\"} |= \"ERROR\". "
-                    + "For metric expressions use queryMetrics.");
-    }
-
-    private static List<LokiResponses.VectorSample> vector(LokiResponses.QueryResponse response) {
-        if (!(response.data() instanceof LokiResponses.Vector vector)) throw notMetric();
-        return vector.samples();
-    }
-
-    private static long sum(List<LokiResponses.VectorSample> samples) {
-        long total = 0;
-        for (var sample : samples) total += value(sample.sample().value());
-        return total;
-    }
-
-    private static long value(String metricValue) {
-        try {
-            return new BigDecimal(metricValue).setScale(0, RoundingMode.HALF_UP).longValueExact();
-        } catch (NumberFormatException | ArithmeticException ignored) {
-            return 0;
-        }
-    }
-
-    private static BigDecimal stepSeconds(Duration step) {
-        return BigDecimal.valueOf(step.toMillis(), 3);
-    }
-
-    private static LokiOperationException notMetric() {
-        return Errors.invalid("Loki returned a result type this tool cannot show. Check that the expression is what the tool expects.");
+    /**
+     * The newest lines of a window, read in pages sized by the lines seen so far, so that a sample of 16 KB error
+     * lines never asks Loki for one response above maxHttpResponseBytes. Stops at {@code wanted} lines, at the end
+     * of the window, or when the lines read reach the connection's HTTP byte limit ({@code cutByBytes}).
+     */
+    record Sample(List<LogEvent> events, long bytes, boolean cutByBytes) {
     }
 }

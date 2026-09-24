@@ -104,7 +104,8 @@ class StackTraceTest {
             var signature = ErrorSignature.of(view.stackTrace(), PACKAGES);
             assertNotNull(signature, view.message());
             assertNotNull(signature.rootType(), view.message());
-            if (signature.appFrame() != null) assertFalse(signature.appFrame().plainMethod().startsWith("doFilter"), signature.appFrame().text());
+            if (signature.appFrame() != null)
+                assertFalse(signature.appFrame().plainMethod().startsWith("doFilter"), signature.appFrame().text());
         }
         assertEquals(23, traces);
     }

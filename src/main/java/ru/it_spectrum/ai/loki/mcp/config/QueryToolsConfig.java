@@ -26,11 +26,23 @@ import java.util.Map;
  */
 @Configuration(proxyBeanMethods = false)
 public class QueryToolsConfig {
-    private static final Logger log = LoggerFactory.getLogger(QueryToolsConfig.class);
     /**
      * listConnections has no connection; its text is bounded by configuration size.
      */
     static final int CATALOG_BYTES = 65_536;
+    private static final Logger log = LoggerFactory.getLogger(QueryToolsConfig.class);
+
+    static CallToolResult error(ToolError error) {
+        return CallToolResult.builder().isError(true).addTextContent(error.text()).build();
+    }
+
+    static int size(CallToolResult result) {
+        int total = 0;
+        if (result.content() != null) for (var content : result.content())
+            if (content instanceof TextContent text && text.text() != null)
+                total += text.text().getBytes(StandardCharsets.UTF_8).length;
+        return total;
+    }
 
     @Bean
     public List<SyncToolSpecification> queryToolSpecifications(QueryService service, ConnectionsService connections,
@@ -81,17 +93,5 @@ public class QueryToolsConfig {
                         Diagnostics.leave(previous);
                     }
                 }).build()).toList();
-    }
-
-    static CallToolResult error(ToolError error) {
-        return CallToolResult.builder().isError(true).addTextContent(error.text()).build();
-    }
-
-    static int size(CallToolResult result) {
-        int total = 0;
-        if (result.content() != null) for (var content : result.content())
-            if (content instanceof TextContent text && text.text() != null)
-                total += text.text().getBytes(StandardCharsets.UTF_8).length;
-        return total;
     }
 }

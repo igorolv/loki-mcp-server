@@ -155,6 +155,24 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
 `McpClient`. On the development machine Gradle found Java 21 in
 `C:\Program Files\BellSoft\LibericaJDK-21`; the path is not hard-coded in the project.
 
+## Code style
+
+- Formatting follows the IntelliJ IDEA default Java style as fixed in `.editorconfig`
+  (4 spaces, 120 columns, LF; `.gitattributes` keeps LF in the repository). Reformat only
+  the code you change; a whole-file reformat goes into its own change, never mixed with
+  logic.
+- Reformat Java and Kotlin DSL only. Never run the IDE formatter over Markdown, JSON or
+  JSONL: it hard-wraps prose, pads table rules, re-nests lists and splits `.jsonl`
+  fixtures (one event per line) into multi-line JSON that the tests cannot read.
+- Import types; never write fully qualified names in code unless two types clash.
+- One statement per line. `if`/`for` without braces only for a single short statement on
+  the same line (`if (x == null) return;`); otherwise braces. No `} else statement;`.
+- Prefer small named methods over long ones; a class that grows past ~500 lines is a sign
+  to split out a collaborator (as `LogSummary` and `GroupHistory` were split from
+  `QueryService`).
+- Match the surrounding comment density: a short Javadoc on non-obvious members, no
+  comments that repeat the code.
+
 ## Architecture and models
 
 - MCP tool classes are thin adapters: arguments with defaults, a service call, a `String`

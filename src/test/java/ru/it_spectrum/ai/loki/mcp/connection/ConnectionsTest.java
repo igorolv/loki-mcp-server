@@ -17,6 +17,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConnectionsTest {
+    private static final String RULE = """
+            {"id":"flyway","category":"startup","match":{"message":"Schema \\"(?<schema>[^\\"]+)\\""},
+             "subject":"schema ${schema}","advice":"Schema ${schema} is ahead.","filter":"!= \\"x\\""}""";
     @TempDir
     Path directory;
 
@@ -62,10 +65,6 @@ class ConnectionsTest {
         assertFalse(entries.getFirst().auth().toString().contains("private-token"));
         assertThrows(LokiOperationException.class, () -> new ConnectionRegistry(List.of(entries.getFirst(), entries.getFirst())));
     }
-
-    private static final String RULE = """
-            {"id":"flyway","category":"startup","match":{"message":"Schema \\"(?<schema>[^\\"]+)\\""},
-             "subject":"schema ${schema}","advice":"Schema ${schema} is ahead.","filter":"!= \\"x\\""}""";
 
     @Test
     void loadsRulesFileRelativeToTheConnectionsFileOnceForSeveralConnections() throws Exception {

@@ -14,7 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -28,6 +29,11 @@ class QueryIntentTest {
     private static ConnectionDefinition definition(String scope, Map<String, String> levels) {
         return new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null, ZoneId.of("UTC"),
                 ConnectionLimits.DEFAULTS, List.of("applicationName", "instance"), List.of(), List.of(), scope, levels);
+    }
+
+    private static String message(Runnable call) {
+        var failure = assertThrows(LokiOperationException.class, call::run);
+        return failure.error().message();
     }
 
     private void values(String label, String... values) {
@@ -68,11 +74,6 @@ class QueryIntentTest {
         assertEquals("level must be one of: error, warn.", message(() -> resolve(dev, null, null, "debug", null)));
         assertTrue(message(() -> resolve(definition(null, Map.of()), null, null, "error", null)).startsWith("This connection has no scope"));
         assertTrue(message(() -> resolve(dev, null, "a\"b", null, null)).startsWith("service must be names"));
-    }
-
-    private static String message(Runnable call) {
-        var failure = assertThrows(LokiOperationException.class, call::run);
-        return failure.error().message();
     }
 
     @Test

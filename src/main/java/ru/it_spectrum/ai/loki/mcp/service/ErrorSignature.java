@@ -8,10 +8,10 @@ import java.util.Set;
  * What a stack trace says once the wrappers are peeled off: the root exception, its message, the nearest frame of
  * the application's own code and the chain of wrappers. Two lines with the same signature are one failure.
  *
- * @param rootType    simple class name of the root cause
- * @param rootMessage first line of the root cause message, as logged
- * @param appFrame    the application frame closest to the throw site, or null when the trace has none
- * @param wrappers    simple class names of the exceptions that wrapped the root, outermost first
+ * @param rootType        simple class name of the root cause
+ * @param rootMessage     first line of the root cause message, as logged
+ * @param appFrame        the application frame closest to the throw site, or null when the trace has none
+ * @param wrappers        simple class names of the exceptions that wrapped the root, outermost first
  * @param wrapperMessages first message lines of those wrappers, in the same order (a URL or a recipient is often there)
  */
 public record ErrorSignature(String rootType, String rootMessage, StackTrace.Frame appFrame, List<String> wrappers,

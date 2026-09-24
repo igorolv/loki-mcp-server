@@ -46,12 +46,23 @@ class LokiHttpClientTest {
     private static final Instant START = Instant.parse("2024-07-03T09:46:40.123456789Z");
     private static final Instant END = START.plusSeconds(30);
     private static final String EMPTY = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[]}}";
-    private HttpServer server;
-    private ExecutorService executor;
     private final List<LokiHttpClient> clients = new ArrayList<>();
     private final BlockingQueue<Captured> requests = new LinkedBlockingQueue<>();
-    private volatile HttpHandler handler;
     private final CountDownLatch release = new CountDownLatch(1);
+    private HttpServer server;
+    private ExecutorService executor;
+    private volatile HttpHandler handler;
+
+    private static void respond(HttpExchange exchange, int status, String body, boolean chunked) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        if (status == 204) {
+            exchange.sendResponseHeaders(status, -1);
+            return;
+        }
+        exchange.sendResponseHeaders(status, chunked ? 0 : bytes.length);
+        exchange.getResponseBody().write(bytes);
+    }
 
     @BeforeEach
     void start() throws IOException {
@@ -331,17 +342,6 @@ class LokiHttpClientTest {
         var client = plain(8192, 3000);
         server.stop(0);
         assertSafe(assertThrows(LokiOperationException.class, () -> range(client)), UPSTREAM_CONNECTION_ERROR);
-    }
-
-    private static void respond(HttpExchange exchange, int status, String body, boolean chunked) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        if (status == 204) {
-            exchange.sendResponseHeaders(status, -1);
-            return;
-        }
-        exchange.sendResponseHeaders(status, chunked ? 0 : bytes.length);
-        exchange.getResponseBody().write(bytes);
     }
 
     private void awaitRelease() {

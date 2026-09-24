@@ -12,84 +12,14 @@ import java.util.regex.Pattern;
  * trace without sections.
  */
 public record StackTrace(List<Section> sections) {
-    public enum Kind {OUTER, CAUSED_BY, SUPPRESSED, WRAPPED_BY}
-
-    public record Frame(String className, String method, String location) {
-        /**
-         * {@code Class.method(File.java:12)} with lambda and CGLIB decorations removed: {@code lambda$find$1} is
-         * {@code find}, {@code Service$$SpringCGLIB$$0} is {@code Service}.
-         */
-        public String plainClassName() {
-            int proxy = className.indexOf("$$");
-            return proxy > 0 ? className.substring(0, proxy) : className;
-        }
-
-        public String plainMethod() {
-            var matcher = LAMBDA.matcher(method);
-            return matcher.matches() ? matcher.group(1) : method;
-        }
-
-        public String text() {
-            return plainClassName() + "." + plainMethod() + "(" + location + ")";
-        }
-    }
-
-    public static final class Section {
-        final Kind kind;
-        final String type;
-        final StringBuilder message = new StringBuilder();
-        final List<Frame> frames = new ArrayList<>();
-        int omitted;
-
-        Section(Kind kind, String type, String message) {
-            this.kind = kind;
-            this.type = type;
-            this.message.append(message);
-        }
-
-        public Kind kind() {
-            return kind;
-        }
-
-        /**
-         * Fully qualified exception class, or null when the header had no class-like token.
-         */
-        public String type() {
-            return type;
-        }
-
-        public String simpleType() {
-            if (type == null) return null;
-            return type.substring(type.lastIndexOf('.') + 1);
-        }
-
-        public String message() {
-            return message.toString();
-        }
-
-        public String firstMessageLine() {
-            String text = message();
-            int newline = text.indexOf('\n');
-            return (newline < 0 ? text : text.substring(0, newline)).strip();
-        }
-
-        public List<Frame> frames() {
-            return frames;
-        }
-
-        public int omitted() {
-            return omitted;
-        }
-    }
-
-    public StackTrace {
-        sections = List.copyOf(sections);
-    }
-
     private static final Pattern FRAME = Pattern.compile("at (?:[\\w.\\-]+/)?([\\w$.]+)\\.([\\w$<>]+)\\(([^)]*)\\).*");
     private static final Pattern OMITTED = Pattern.compile("\\.\\.\\. (\\d+) (?:more|common frames omitted).*");
     private static final Pattern TYPE = Pattern.compile("([a-zA-Z_$][\\w$]*(?:\\.[a-zA-Z_$][\\w$]*)+)(?::\\s?(.*))?", Pattern.DOTALL);
     private static final Pattern LAMBDA = Pattern.compile("lambda\\$([\\w<>]+)\\$\\d+");
+
+    public StackTrace {
+        sections = List.copyOf(sections);
+    }
 
     public static StackTrace parse(String text) {
         var sections = new ArrayList<Section>();
@@ -161,5 +91,75 @@ public record StackTrace(List<Section> sections) {
         if (root != null && root.kind == Kind.OUTER && !result.isEmpty() && result.getFirst().kind == Kind.WRAPPED_BY)
             java.util.Collections.reverse(result);
         return result;
+    }
+
+    public enum Kind {OUTER, CAUSED_BY, SUPPRESSED, WRAPPED_BY}
+
+    public record Frame(String className, String method, String location) {
+        /**
+         * {@code Class.method(File.java:12)} with lambda and CGLIB decorations removed: {@code lambda$find$1} is
+         * {@code find}, {@code Service$$SpringCGLIB$$0} is {@code Service}.
+         */
+        public String plainClassName() {
+            int proxy = className.indexOf("$$");
+            return proxy > 0 ? className.substring(0, proxy) : className;
+        }
+
+        public String plainMethod() {
+            var matcher = LAMBDA.matcher(method);
+            return matcher.matches() ? matcher.group(1) : method;
+        }
+
+        public String text() {
+            return plainClassName() + "." + plainMethod() + "(" + location + ")";
+        }
+    }
+
+    public static final class Section {
+        final Kind kind;
+        final String type;
+        final StringBuilder message = new StringBuilder();
+        final List<Frame> frames = new ArrayList<>();
+        int omitted;
+
+        Section(Kind kind, String type, String message) {
+            this.kind = kind;
+            this.type = type;
+            this.message.append(message);
+        }
+
+        public Kind kind() {
+            return kind;
+        }
+
+        /**
+         * Fully qualified exception class, or null when the header had no class-like token.
+         */
+        public String type() {
+            return type;
+        }
+
+        public String simpleType() {
+            if (type == null) return null;
+            return type.substring(type.lastIndexOf('.') + 1);
+        }
+
+        public String message() {
+            return message.toString();
+        }
+
+        public String firstMessageLine() {
+            String text = message();
+            int newline = text.indexOf('\n');
+            return (newline < 0 ? text : text.substring(0, newline)).strip();
+        }
+
+        public List<Frame> frames() {
+            return frames;
+        }
+
+        public int omitted() {
+            return omitted;
+        }
     }
 }

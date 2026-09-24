@@ -70,13 +70,6 @@ public final class ConnectionsLoader {
     }
 
     /**
-     * What a rules catalogue holds: the rules, tried in order, and the plain-text line formats, tried in order.
-     */
-    public record Catalogue(List<LogRule> rules, List<LineFormat> formats) {
-        static final Catalogue EMPTY = new Catalogue(List.of(), List.of());
-    }
-
-    /**
      * The rules and formats of every file of {@code rulesFile} (one path or a list), in order: the stand's own file
      * first, then generic sets. A file shared by connections is loaded once.
      */
@@ -161,6 +154,13 @@ public final class ConnectionsLoader {
         result.append(value, end, value.length());
         if (result.indexOf("${") >= 0) throw Errors.configuration();
         return result.toString();
+    }
+
+    /**
+     * What a rules catalogue holds: the rules, tried in order, and the plain-text line formats, tried in order.
+     */
+    public record Catalogue(List<LogRule> rules, List<LineFormat> formats) {
+        static final Catalogue EMPTY = new Catalogue(List.of(), List.of());
     }
 
     private record FileConfig(Map<String, Entry> connections) {

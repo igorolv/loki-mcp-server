@@ -12,17 +12,10 @@ import java.util.regex.Pattern;
  * knows no stand's vocabulary. On a stand without tracing, such keys are what ties the lines of one failure together.
  */
 public final class CorrelationKeys {
-    public record Key(String name, String value) {
-        public String text() {
-            return name + "=" + value;
-        }
-    }
-
     static final int KEYS_PER_LINE = 5;
     static final int MESSAGE_CHARS = 2000;
     private static final Pattern PAIR = Pattern.compile(
             "(?<![\\w.])([A-Za-z][A-Za-z0-9_]{0,40}?(?:Id|ID|_id))\\s*[=:]\\s*\"?([A-Za-z0-9][A-Za-z0-9_\\-]{2,63})(?![\\w\\-])");
-
     private CorrelationKeys() {
     }
 
@@ -41,5 +34,11 @@ public final class CorrelationKeys {
      */
     public static Pattern token(String value) {
         return Pattern.compile("(?<![A-Za-z0-9_\\-])" + Pattern.quote(value) + "(?![A-Za-z0-9_\\-])");
+    }
+
+    public record Key(String name, String value) {
+        public String text() {
+            return name + "=" + value;
+        }
     }
 }

@@ -159,7 +159,7 @@ class LokiCompatibilityTest {
                         java.util.Map.of("stream", java.util.Map.of("fixture", "s04", "shard", "b", "day", "before"), "values",
                                 List.of(List.of(QueryTime.nanos(dayBefore.plusMillis(100)), "same timestamp other stream"))))));
                 assertEquals(204, http.send(HttpRequest.newBuilder(url.resolve("/loki/api/v1/push")).timeout(Duration.ofSeconds(15))
-                        .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(old)).build(),
+                                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(old)).build(),
                         HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(204, http.send(HttpRequest.newBuilder(url.resolve("/flush")).timeout(Duration.ofSeconds(15))
                         .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString()).statusCode());

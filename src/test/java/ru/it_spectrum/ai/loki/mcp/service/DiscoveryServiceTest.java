@@ -21,6 +21,7 @@ import static org.mockito.Mockito.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
 
 class DiscoveryServiceTest {
+    private static final String SELECTOR = "{job=\"test\"}";
     private final LokiHttpClient client = mock(LokiHttpClient.class);
     private final Instant now = Instant.parse("2026-09-13T12:00:00.123456789Z");
     private final ConnectionRegistry registry = new ConnectionRegistry(List.of(
@@ -29,7 +30,6 @@ class DiscoveryServiceTest {
             new ConnectionDefinition("two", null, URI.create("http://localhost:2"), ConnectionAuth.NONE, null,
                     ZoneOffset.UTC, new ConnectionLimits(100, 100, 10000, 1024, 1, 10))));
     private final DiscoveryService service = new DiscoveryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
-    private static final String SELECTOR = "{job=\"test\"}";
 
     private void series(List<Map<String, String>> streams) {
         when(client.series(anyString(), anyList(), any(), any())).thenReturn(new SeriesResponse(streams, List.of()));

@@ -15,6 +15,10 @@ class FieldContrastTest {
     private static final List<String> PACKAGES = List.of("ru.it_spectrum.asv", "ru.it_spectrum.core");
     private final EventNormalizer normalizer = new EventNormalizer();
 
+    private static List<String> of(Map<String, List<String>> findings, String part) {
+        return findings.entrySet().stream().filter(e -> e.getKey().contains(part)).findFirst().orElseThrow().getValue();
+    }
+
     private List<FieldContrast.Line> background(List<LogEvent> events) {
         var lines = new ArrayList<FieldContrast.Line>();
         for (var event : events) {
@@ -41,10 +45,6 @@ class FieldContrastTest {
         for (var group : LogSummary.group(window, normalizer, SERVICE_LABELS, PACKAGES))
             result.put(group.template.split("\n")[0], FieldContrast.findings(group, normalizer, lines, values));
         return result;
-    }
-
-    private static List<String> of(Map<String, List<String>> findings, String part) {
-        return findings.entrySet().stream().filter(e -> e.getKey().contains(part)).findFirst().orElseThrow().getValue();
     }
 
     @Test
@@ -76,7 +76,8 @@ class FieldContrastTest {
             window.add(new LogEvent(Integer.toString(i), Map.of("instance", "a", "pod", "a-1"),
                     "{\"log\":{\"level\":\"ERROR\"},\"build\":{\"version\":\"7\"},\"message\":\"Failed to store the document " + i + "\"}", Map.of()));
         var plain = new ArrayList<LogEvent>();
-        for (int i = 0; i < 25; i++) plain.add(new LogEvent(Integer.toString(i), Map.of("instance", "a", "pod", i < 20 ? "a-2" : "a-1"), "INFO started " + i, Map.of()));
+        for (int i = 0; i < 25; i++)
+            plain.add(new LogEvent(Integer.toString(i), Map.of("instance", "a", "pod", i < 20 ? "a-2" : "a-1"), "INFO started " + i, Map.of()));
         var findings = findings(window, plain);
         // The pod is a label every line carries; the build is carried by no other line and does not vary.
         assertEquals(List.of("         all 3 lines: pod a-1 (20% in other lines of a)"), findings.values().iterator().next());

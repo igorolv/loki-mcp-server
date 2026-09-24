@@ -6,14 +6,13 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.*;
 import java.util.List;
 import java.util.Map;
-
-import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -35,16 +34,16 @@ class QueryServiceTest {
                     ZoneId.of("UTC"), new ConnectionLimits(100, 100, 200000, 65536, 1000, 86400, 100, 1000))));
     private final QueryService service = new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
 
+    private static LogEntry entry(String nanos, String line) {
+        return new LogEntry(nanos, line, Map.of());
+    }
+
     private void range(QueryData data, List<String> warnings) {
         doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
         // The history counts of summarizeLogs name a separate text for the log.
         doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any(), anyString());
-    }
-
-    private static LogEntry entry(String nanos, String line) {
-        return new LogEntry(nanos, line, Map.of());
     }
 
     /**
@@ -311,6 +310,7 @@ class QueryServiceTest {
         assertTrue(text.contains("Output limit reached: showing "), text);
         assertTrue(text.contains("Earlier: repeat with time=\"2026-09-13T11:59:5") && text.contains("Later: repeat with time=\"2026-09-13T12:00:0"), text);
     }
+
     @Test
     void summaryGroupsRepeatedMessagesKeepsRareOnesAndDescribesTheSample() {
         var lines = new java.util.ArrayList<LogEntry>();
@@ -348,7 +348,8 @@ class QueryServiceTest {
         // limit, and reading stops once the lines read reach the limit.
         Instant base = now.minusSeconds(600);
         var big = new java.util.ArrayList<LogEntry>();
-        for (int i = 0; i < 300; i++) big.add(entry(QueryTime.nanos(base.plusSeconds(i)), "big line " + i + " " + "z".repeat(1000)));
+        for (int i = 0; i < 300; i++)
+            big.add(entry(QueryTime.nanos(base.plusSeconds(i)), "big line " + i + " " + "z".repeat(1000)));
         pagedRange(Map.of("app", "x"), big);
         var text = service.summarize("paged", "{app=\"x\"}", "now-1h", "now", 500);
         var limits = org.mockito.ArgumentCaptor.forClass(Integer.class);
@@ -373,8 +374,10 @@ class QueryServiceTest {
         Instant base = now.minusSeconds(2000);
         var many = new java.util.ArrayList<LogEntry>();
         for (int g = 0; g < 25; g++)
-            for (int i = 0; i < 25 - g; i++) many.add(entry(QueryTime.nanos(base.plusSeconds(g * 30L + i)), "group " + (char) ('a' + g) + " line " + i));
-        for (int r = 0; r < 25; r++) many.add(entry(QueryTime.nanos(base.plusSeconds(1000 + r)), "rare " + (char) ('a' + r) + " once"));
+            for (int i = 0; i < 25 - g; i++)
+                many.add(entry(QueryTime.nanos(base.plusSeconds(g * 30L + i)), "group " + (char) ('a' + g) + " line " + i));
+        for (int r = 0; r < 25; r++)
+            many.add(entry(QueryTime.nanos(base.plusSeconds(1000 + r)), "rare " + (char) ('a' + r) + " once"));
         pagedRange(Map.of("app", "x"), many);
         var text = service.summarize("three", "{app=\"x\"}", "now-1h", "now", null);
         assertTrue(text.contains("all " + many.size() + " lines, "), text);

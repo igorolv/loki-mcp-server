@@ -38,31 +38,6 @@ final class ServiceStarts {
     private static final Pattern STARTING = Pattern.compile("\\bStarting \\S+ (?:v(\\S+) )?using Java");
     private static final Pattern STOPPED = Pattern.compile("\\bGraceful shutdown complete\\b");
     private static final Pattern MATCHER = Pattern.compile(DiscoveryService.MATCHER);
-
-    enum Kind {STARTING, STARTED, STOPPED}
-
-    record Mark(Kind kind, Instant at, Map<String, String> stream, String service, Version version, Duration running) {
-    }
-
-    /**
-     * {@code end} is null for a start without its {@code Started} line in the window.
-     */
-    record Start(String service, Map<String, String> stream, Instant begin, Instant end, Version version) {
-        boolean contains(LogEvent event, Instant windowEnd) {
-            Instant at = QueryTime.fromNanos(event.timestampNanos());
-            if (at.isBefore(begin) || at.isAfter(end == null ? windowEnd : end)) return false;
-            for (var label : stream.entrySet())
-                if (!label.getValue().equals(event.labels().get(label.getKey()))) return false;
-            return true;
-        }
-    }
-
-    record Stop(String service, Map<String, String> stream, Instant at, Version version) {
-    }
-
-    record Deploy(Instant at, Version before, Version after) {
-    }
-
     private final String selector;
     private final ErrorCode failure;
     private final boolean cut;
@@ -71,7 +46,6 @@ final class ServiceStarts {
     private final List<Start> starts = new ArrayList<>();
     private final List<Stop> stops = new ArrayList<>();
     private final Map<String, Integer> whileStarting = new HashMap<>();
-
     private ServiceStarts(String selector, ErrorCode failure, boolean cut, int lines, Instant windowEnd) {
         this.selector = selector;
         this.failure = failure;
@@ -118,7 +92,8 @@ final class ServiceStarts {
             for (var mark : marks) {
                 switch (mark.kind()) {
                     case STARTING -> {
-                        if (pending != null) result.starts.add(new Start(pending.service(), pending.stream(), pending.at(), null, pending.version()));
+                        if (pending != null)
+                            result.starts.add(new Start(pending.service(), pending.stream(), pending.at(), null, pending.version()));
                         pending = mark;
                     }
                     case STARTED -> {
@@ -128,10 +103,12 @@ final class ServiceStarts {
                         result.starts.add(new Start(mark.service(), mark.stream(), begin, mark.at(), version));
                         pending = null;
                     }
-                    case STOPPED -> result.stops.add(new Stop(mark.service(), mark.stream(), mark.at(), mark.version()));
+                    case STOPPED ->
+                            result.stops.add(new Stop(mark.service(), mark.stream(), mark.at(), mark.version()));
                 }
             }
-            if (pending != null) result.starts.add(new Start(pending.service(), pending.stream(), pending.at(), null, pending.version()));
+            if (pending != null)
+                result.starts.add(new Start(pending.service(), pending.stream(), pending.at(), null, pending.version()));
         }
         result.starts.sort(Comparator.comparing(Start::begin));
         return result;
@@ -148,7 +125,8 @@ final class ServiceStarts {
         Matcher matcher;
         if ((matcher = STARTED.matcher(message)).find()) {
             kind = Kind.STARTED;
-            if (matcher.group(1) != null) running = Duration.ofMillis(new BigDecimal(matcher.group(1)).movePointRight(3).longValue());
+            if (matcher.group(1) != null)
+                running = Duration.ofMillis(new BigDecimal(matcher.group(1)).movePointRight(3).longValue());
         } else if ((matcher = STARTING.matcher(message)).find()) {
             kind = Kind.STARTING;
             appVersion = matcher.group(1);
@@ -169,45 +147,11 @@ final class ServiceStarts {
         return label == null || label.equals(named) ? named : named + " [" + label + "]";
     }
 
-    /**
-     * ECS service.version, build.version and git.commit (10 characters), else the {@code v1.0.4} of a Starting line.
-     */
-    record Version(String release, String build, String commit, String app) {
-        /**
-         * {@code main build 2790 commit c000000002}.
-         */
-        @Override
-        public String toString() {
-            var parts = new ArrayList<String>();
-            if (release != null) parts.add(release);
-            if (build != null) parts.add("build " + build);
-            if (commit != null) parts.add("commit " + commit);
-            if (app != null) parts.add("v" + app);
-            return String.join(" ", parts);
-        }
-
-        /**
-         * {@code build 2790 → 2791, commit c000000002 → c000000003}: only the parts that changed.
-         */
-        String changeFrom(Version before) {
-            var parts = new ArrayList<String>();
-            change(parts, "", before.release, release);
-            change(parts, "build ", before.build, build);
-            change(parts, "commit ", before.commit, commit);
-            change(parts, "", before.app == null ? null : "v" + before.app, app == null ? null : "v" + app);
-            return String.join(", ", parts);
-        }
-
-        private static void change(List<String> parts, String name, String before, String after) {
-            if (!Objects.equals(before, after))
-                parts.add(name + (before == null ? "(none)" : before) + " → " + (after == null ? "(none)" : after));
-        }
-    }
-
     static Version version(Map<String, String> values, String appVersion) {
         String release = present(values.get("service.version")), build = present(values.get("build.version")),
                 commit = present(values.get("git.commit"));
-        if (commit != null) commit = commit.equals("unknown") ? null : commit.substring(0, Math.min(10, commit.length()));
+        if (commit != null)
+            commit = commit.equals("unknown") ? null : commit.substring(0, Math.min(10, commit.length()));
         if (release == null && build == null && commit == null)
             return appVersion == null ? null : new Version(null, null, null, appVersion);
         return new Version(release, build, commit, null);
@@ -293,6 +237,85 @@ final class ServiceStarts {
         return lines;
     }
 
+    /**
+     * Services with sampled lines logged while starting first, then those with deploys, unfinished starts or lone
+     * stops, then the most recent.
+     */
+    private List<Summary> summaries() {
+        var byName = new LinkedHashMap<String, Summary>();
+        for (var start : starts) byName.computeIfAbsent(start.service(), Summary::new).starts.add(start);
+        for (var stop : stops) byName.computeIfAbsent(stop.service(), Summary::new).stops.add(stop);
+        var result = new ArrayList<>(byName.values());
+        for (var summary : result) {
+            summary.stops.sort(Comparator.comparing(Stop::at));
+            summary.whileStarting = whileStarting.getOrDefault(summary.name, 0);
+            summary.analyse();
+        }
+        result.sort(Comparator.<Summary>comparingInt(s -> s.whileStarting).reversed()
+                .thenComparing(s -> !s.notable())
+                .thenComparing(s -> s.latest, Comparator.reverseOrder()));
+        return result;
+    }
+
+    enum Kind {STARTING, STARTED, STOPPED}
+
+    record Mark(Kind kind, Instant at, Map<String, String> stream, String service, Version version, Duration running) {
+    }
+
+    /**
+     * {@code end} is null for a start without its {@code Started} line in the window.
+     */
+    record Start(String service, Map<String, String> stream, Instant begin, Instant end, Version version) {
+        boolean contains(LogEvent event, Instant windowEnd) {
+            Instant at = QueryTime.fromNanos(event.timestampNanos());
+            if (at.isBefore(begin) || at.isAfter(end == null ? windowEnd : end)) return false;
+            for (var label : stream.entrySet())
+                if (!label.getValue().equals(event.labels().get(label.getKey()))) return false;
+            return true;
+        }
+    }
+
+    record Stop(String service, Map<String, String> stream, Instant at, Version version) {
+    }
+
+    record Deploy(Instant at, Version before, Version after) {
+    }
+
+    /**
+     * ECS service.version, build.version and git.commit (10 characters), else the {@code v1.0.4} of a Starting line.
+     */
+    record Version(String release, String build, String commit, String app) {
+        private static void change(List<String> parts, String name, String before, String after) {
+            if (!Objects.equals(before, after))
+                parts.add(name + (before == null ? "(none)" : before) + " → " + (after == null ? "(none)" : after));
+        }
+
+        /**
+         * {@code main build 2790 commit c000000002}.
+         */
+        @Override
+        public String toString() {
+            var parts = new ArrayList<String>();
+            if (release != null) parts.add(release);
+            if (build != null) parts.add("build " + build);
+            if (commit != null) parts.add("commit " + commit);
+            if (app != null) parts.add("v" + app);
+            return String.join(" ", parts);
+        }
+
+        /**
+         * {@code build 2790 → 2791, commit c000000002 → c000000003}: only the parts that changed.
+         */
+        String changeFrom(Version before) {
+            var parts = new ArrayList<String>();
+            change(parts, "", before.release, release);
+            change(parts, "build ", before.build, build);
+            change(parts, "commit ", before.commit, commit);
+            change(parts, "", before.app == null ? null : "v" + before.app, app == null ? null : "v" + app);
+            return String.join(", ", parts);
+        }
+    }
+
     private final class Summary {
         final String name;
         final List<Start> starts = new ArrayList<>();
@@ -354,42 +377,24 @@ final class ServiceStarts {
                 // "unchanged" only when every finished start printed the same version; an unknown one proves nothing.
                 Version shown = version;
                 boolean same = shown != null && finished.size() > 1 && finished.stream().allMatch(s -> shown.equals(s.version()));
-                if (version != null && !finished.isEmpty()) parts.add("version " + version + (same ? ", unchanged" : ""));
+                if (version != null && !finished.isEmpty())
+                    parts.add("version " + version + (same ? ", unchanged" : ""));
             } else {
                 var shown = new ArrayList<String>();
                 for (var deploy : deploys.subList(Math.max(0, deploys.size() - DEPLOYS_SHOWN), deploys.size()))
                     shown.add(TIME.format(deploy.at().atZone(zone)) + " " + deploy.after().changeFrom(deploy.before()));
                 parts.add((deploys.size() == 1 ? "deploy at " : deploys.size() + " deploys, last " + (shown.size() == 1 ? "" : shown.size() + " ")
-                        + "at ") + String.join("; ", shown));
+                                                                + "at ") + String.join("; ", shown));
                 parts.add("now " + version);
             }
             for (var start : starts)
                 if (start.end() == null) parts.add("start at " + TIME.format(start.begin().atZone(zone))
                         + " did not finish (no \"Started\" line after it in its stream)");
-            for (var stop : alone) parts.add("stopped at " + TIME.format(stop.at().atZone(zone)) + " with no start nearby");
+            for (var stop : alone)
+                parts.add("stopped at " + TIME.format(stop.at().atZone(zone)) + " with no start nearby");
             if (whileStarting > 0)
                 parts.add(whileStarting + (whileStarting == 1 ? " sampled line" : " sampled lines") + " logged while starting");
             return text.append(String.join("; ", parts)).toString();
         }
-    }
-
-    /**
-     * Services with sampled lines logged while starting first, then those with deploys, unfinished starts or lone
-     * stops, then the most recent.
-     */
-    private List<Summary> summaries() {
-        var byName = new LinkedHashMap<String, Summary>();
-        for (var start : starts) byName.computeIfAbsent(start.service(), Summary::new).starts.add(start);
-        for (var stop : stops) byName.computeIfAbsent(stop.service(), Summary::new).stops.add(stop);
-        var result = new ArrayList<>(byName.values());
-        for (var summary : result) {
-            summary.stops.sort(Comparator.comparing(Stop::at));
-            summary.whileStarting = whileStarting.getOrDefault(summary.name, 0);
-            summary.analyse();
-        }
-        result.sort(Comparator.<Summary>comparingInt(s -> s.whileStarting).reversed()
-                .thenComparing(s -> !s.notable())
-                .thenComparing(s -> s.latest, Comparator.reverseOrder()));
-        return result;
     }
 }

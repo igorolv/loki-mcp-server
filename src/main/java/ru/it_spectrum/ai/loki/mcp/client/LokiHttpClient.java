@@ -32,16 +32,29 @@ import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
  */
 public final class LokiHttpClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(LokiHttpClient.class);
-
-    public enum Direction {FORWARD, BACKWARD}
-
     private final ConnectionRegistry registry;
     private final LokiResponseDecoder decoder = new LokiResponseDecoder();
     private final Map<String, HttpClient> clients = new HashMap<>();
     private boolean closed;
-
     public LokiHttpClient(ConnectionRegistry registry) {
         this.registry = registry;
+    }
+
+    /**
+     * Parameters are the model's own query text and time bounds; the base URL, credentials and tenant are never logged.
+     */
+    private static String describe(List<Param> params) {
+        var text = new StringBuilder("{");
+        for (var param : params) {
+            if (text.length() > 1) text.append(", ");
+            String value = param.logged().replace('\n', ' ');
+            text.append(param.name()).append('=').append(value.length() <= 200 ? value : value.substring(0, 200) + "…");
+        }
+        return text.append('}').toString();
+    }
+
+    private static long millis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
@@ -106,23 +119,6 @@ public final class LokiHttpClient implements AutoCloseable {
             log.warn("GET {} {} -> {}, {} ms", path, describe(params), failure.error().code(), millis(started));
             throw failure;
         }
-    }
-
-    /**
-     * Parameters are the model's own query text and time bounds; the base URL, credentials and tenant are never logged.
-     */
-    private static String describe(List<Param> params) {
-        var text = new StringBuilder("{");
-        for (var param : params) {
-            if (text.length() > 1) text.append(", ");
-            String value = param.logged().replace('\n', ' ');
-            text.append(param.name()).append('=').append(value.length() <= 200 ? value : value.substring(0, 200) + "…");
-        }
-        return text.append('}').toString();
-    }
-
-    private static long millis(long startNanos) {
-        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     private byte[] send(ConnectionDefinition connection, String path, List<Param> params) {
@@ -234,6 +230,8 @@ public final class LokiHttpClient implements AutoCloseable {
     private void require(boolean valid) {
         if (!valid) throw TransportErrors.error(INVALID_ARGUMENT);
     }
+
+    public enum Direction {FORWARD, BACKWARD}
 
     private record Param(String name, String value, String logged) {
         Param(String name, String value) {

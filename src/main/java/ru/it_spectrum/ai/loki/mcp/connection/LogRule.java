@@ -14,35 +14,11 @@ import java.util.regex.Pattern;
  */
 public record LogRule(String id, Category category, Pattern exception, Pattern message, Pattern logger,
                       String subject, String advice, String filter) {
-    public enum Category {
-        /**
-         * Another system the service depends on failed: a database, a queue, a neighbouring service, an agency.
-         */
-        DEPENDENCY,
-        /**
-         * The service did not start or stopped at start-up.
-         */
-        STARTUP,
-        /**
-         * The service's own configuration is wrong or missing.
-         */
-        CONFIGURATION,
-        /**
-         * Known harmless lines: client aborts, scanners, missing endpoints polled by old clients.
-         */
-        NOISE;
-
-        public String text() {
-            return name().toLowerCase(java.util.Locale.ROOT);
-        }
-    }
-
     public static final int MAX_PATTERN_CHARS = 1000;
     public static final int MAX_TEXT_CHARS = 300;
     private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([a-zA-Z][a-zA-Z0-9]*)}");
     private static final Pattern FILTER = Pattern.compile("(?:\\s*(?:!=|!~)\\s*\"(?:[^\"\\\\]|\\\\.)+\")+\\s*");
-
     public LogRule {
         if (id == null || !ID.matcher(id).matches() || category == null
                 || (exception == null && message == null && logger == null)
@@ -92,5 +68,28 @@ public record LogRule(String id, Category category, Pattern exception, Pattern m
     @Override
     public String toString() {
         return "LogRule[" + id + "]";
+    }
+
+    public enum Category {
+        /**
+         * Another system the service depends on failed: a database, a queue, a neighbouring service, an agency.
+         */
+        DEPENDENCY,
+        /**
+         * The service did not start or stopped at start-up.
+         */
+        STARTUP,
+        /**
+         * The service's own configuration is wrong or missing.
+         */
+        CONFIGURATION,
+        /**
+         * Known harmless lines: client aborts, scanners, missing endpoints polled by old clients.
+         */
+        NOISE;
+
+        public String text() {
+            return name().toLowerCase(java.util.Locale.ROOT);
+        }
     }
 }

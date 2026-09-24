@@ -35,6 +35,15 @@ class ServiceStartsTest {
     private final Instant now = QueryTime.fromNanos(events.getLast().timestampNanos()).plusSeconds(60);
     private final EventNormalizer normalizer = new EventNormalizer();
 
+    private static QueryResponse response(List<LogEvent> lines) {
+        var streams = new LinkedHashMap<Map<String, String>, List<LogEntry>>();
+        for (var event : lines)
+            streams.computeIfAbsent(event.labels(), k -> new ArrayList<>()).add(new LogEntry(event.timestampNanos(), event.line(), Map.of()));
+        var result = new ArrayList<LogStream>();
+        for (var stream : streams.entrySet()) result.add(new LogStream(stream.getKey(), stream.getValue()));
+        return new QueryResponse(new Streams(result), new QueryStats(1L), List.of());
+    }
+
     private List<LogEvent> flyway() {
         return events.stream().filter(e -> e.line().contains("but no migration could be resolved")).toList();
     }
@@ -43,15 +52,6 @@ class ServiceStartsTest {
         var registry = new ConnectionRegistry(List.of(new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
                 ConnectionAuth.NONE, null, MOSCOW, new ConnectionLimits(100, 100, 8_000_000, maxResponseBytes, 1000, 86400), SERVICE_LABELS)));
         return new QueryService(registry, client, Clock.fixed(now, ZoneOffset.UTC));
-    }
-
-    private static QueryResponse response(List<LogEvent> lines) {
-        var streams = new LinkedHashMap<Map<String, String>, List<LogEntry>>();
-        for (var event : lines)
-            streams.computeIfAbsent(event.labels(), k -> new ArrayList<>()).add(new LogEntry(event.timestampNanos(), event.line(), Map.of()));
-        var result = new ArrayList<LogStream>();
-        for (var stream : streams.entrySet()) result.add(new LogStream(stream.getKey(), stream.getValue()));
-        return new QueryResponse(new Streams(result), new QueryStats(1L), List.of());
     }
 
     /**

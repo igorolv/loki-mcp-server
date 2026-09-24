@@ -62,10 +62,6 @@ public record ConnectionDefinition(String name, String description, String hint,
         this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, List.of());
     }
 
-    public static boolean validName(String name) {
-        return name != null && name.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}");
-    }
-
     public ConnectionDefinition {
         if (!validName(name) || (description != null && description.length() > 512)
                 || (hint != null && hint.length() > 1024)
@@ -96,6 +92,10 @@ public record ConnectionDefinition(String name, String description, String hint,
         scope = scope == null ? null : scope.strip();
         levels = java.util.Collections.unmodifiableMap(new TreeMap<>(levels));
         formats = List.copyOf(formats);
+    }
+
+    public static boolean validName(String name) {
+        return name != null && name.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}");
     }
 
     /**

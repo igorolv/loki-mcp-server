@@ -4,15 +4,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.LogRule;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -31,12 +23,21 @@ public final class LogSummary {
      * A group with at most this many lines is "rare": listed separately so that one-off errors are not lost.
      */
     public static final int RARE_LINES = 2;
+    /**
+     * A summary line is an index into the log, not the log: long SQL or audit payloads are cut shorter than in queryLogs.
+     */
+    public static final int SUMMARY_MESSAGE_CHARS = 200;
+    public static final int ROOT_MESSAGE_CHARS = 160;
+    public static final int NOISE_GROUPS = 10;
     static final String FRAMES_TEMPLATE = "(stack trace frame lines: at ..., ... N more)";
     /**
      * Printed instead of an arbitrary frame: one-line-per-frame services log hundreds of these, and they belong to the
      * exception lines above them, which getLogContext shows.
      */
     static final String FRAMES_EXAMPLE = "stack trace frame lines (at ...); read them with getLogContext around an error line";
+    static final int WRAPPERS_SHOWN = 3;
+    static final int NOISE_MESSAGE_CHARS = 120;
+    static final int LINKS_PER_GROUP = 2;
     private static final Pattern UUID = Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     private static final Pattern DATE_TIME_TEXT = Pattern.compile("\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}(?::\\d{2}(?:[.,]\\d+)?)?(?:Z|[+-]\\d{2}:?\\d{2})?)?");
     private static final Pattern TIME_TEXT = Pattern.compile("\\b\\d{1,2}:\\d{2}(?::\\d{2}(?:[.,]\\d+)?)?\\b");
@@ -46,69 +47,10 @@ public final class LogSummary {
      * "v1.2" and "asva2" keep their digits.
      */
     private static final Pattern NUMBER = Pattern.compile("(?<![\\w.])[+-]?\\d+(?:[.,]\\d+)*(?: \\d{3}(?!\\d))*[a-zA-Z\u00b5%]{0,2}(?!\\w)");
-    /**
-     * A summary line is an index into the log, not the log: long SQL or audit payloads are cut shorter than in queryLogs.
-     */
-    public static final int SUMMARY_MESSAGE_CHARS = 200;
-    public static final int ROOT_MESSAGE_CHARS = 160;
-    static final int WRAPPERS_SHOWN = 3;
-    public static final int NOISE_GROUPS = 10;
-    static final int NOISE_MESSAGE_CHARS = 120;
-    static final int LINKS_PER_GROUP = 2;
     private static final Pattern SPACES = Pattern.compile("\\s+");
     private static final Pattern FRAME_LINE = Pattern.compile("(?:at \\S.*|\\.\\.\\. \\d+ (?:more|common frames omitted).*)");
 
     private LogSummary() {
-    }
-
-    public static final class Group {
-        final String template;
-        int count;
-        LogEvent first, last;
-        EventNormalizer.View lastView;
-        ErrorSignature lastSignature;
-        LogRules.Match rule;
-        List<CorrelationKeys.Key> lastKeys = List.of();
-        /**
-         * {@code taskExecutionId=13548 → scheduler-main 2 lines}: keys of the newest line found in lines of other groups.
-         */
-        final List<String> links = new ArrayList<>();
-        /**
-         * The groups whose lines carry a key of this group's newest line, and the first such key.
-         */
-        final Set<Group> linked = new LinkedHashSet<>();
-        String linkKey;
-        /**
-         * Lines logged by a service while it was starting, and the newest such start.
-         */
-        int whileStarting;
-        ServiceStarts.Start start;
-        /**
-         * The stream label every line's service came from and its values; null when a line took its service from the
-         * JSON or from another label, so that no label can narrow a query to the group's services.
-         */
-        String serviceLabel;
-        final Set<String> serviceValues = new TreeSet<>();
-        private boolean serviceMixed;
-        /**
-         * One line of {@link GroupHistory}, printed under the group when set.
-         */
-        String history;
-        /**
-         * The verdict behind {@link #history}; null when the history was not checked.
-         */
-        GroupHistory.Verdict verdict;
-        /**
-         * The sampled lines of the group and the services they came from, for {@link FieldContrast}; its findings.
-         */
-        final List<LogEvent> events = new ArrayList<>();
-        final Set<String> services = new TreeSet<>();
-        List<String> fields = List.of();
-        List<FieldContrast.Finding> findings = List.of();
-
-        Group(String template) {
-            this.template = template;
-        }
     }
 
     /**
@@ -328,5 +270,55 @@ public final class LogSummary {
         String what = group.lastSignature != null ? group.lastSignature.rootType() + ": " + group.lastSignature.rootMessage() : view.message();
         return String.format("%5d×  ", group.count) + span + "  " + (view.service() == null ? "-" : view.service()) + "  "
                 + group.rule.rule().id() + "  " + truncate(SPACES.matcher(what).replaceAll(" ").strip(), NOISE_MESSAGE_CHARS);
+    }
+
+    public static final class Group {
+        final String template;
+        /**
+         * {@code taskExecutionId=13548 → scheduler-main 2 lines}: keys of the newest line found in lines of other groups.
+         */
+        final List<String> links = new ArrayList<>();
+        /**
+         * The groups whose lines carry a key of this group's newest line, and the first such key.
+         */
+        final Set<Group> linked = new LinkedHashSet<>();
+        final Set<String> serviceValues = new TreeSet<>();
+        /**
+         * The sampled lines of the group and the services they came from, for {@link FieldContrast}; its findings.
+         */
+        final List<LogEvent> events = new ArrayList<>();
+        final Set<String> services = new TreeSet<>();
+        int count;
+        LogEvent first, last;
+        EventNormalizer.View lastView;
+        ErrorSignature lastSignature;
+        LogRules.Match rule;
+        List<CorrelationKeys.Key> lastKeys = List.of();
+        String linkKey;
+        /**
+         * Lines logged by a service while it was starting, and the newest such start.
+         */
+        int whileStarting;
+        ServiceStarts.Start start;
+        /**
+         * The stream label every line's service came from and its values; null when a line took its service from the
+         * JSON or from another label, so that no label can narrow a query to the group's services.
+         */
+        String serviceLabel;
+        /**
+         * One line of {@link GroupHistory}, printed under the group when set.
+         */
+        String history;
+        /**
+         * The verdict behind {@link #history}; null when the history was not checked.
+         */
+        GroupHistory.Verdict verdict;
+        List<String> fields = List.of();
+        List<FieldContrast.Finding> findings = List.of();
+        private boolean serviceMixed;
+
+        Group(String template) {
+            this.template = template;
+        }
     }
 }

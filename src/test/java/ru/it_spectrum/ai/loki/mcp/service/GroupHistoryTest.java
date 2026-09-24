@@ -54,10 +54,6 @@ class GroupHistoryTest {
         }
     }
 
-    private List<LogSummary.Group> groups(List<LogEvent> events) {
-        return LogSummary.group(events, normalizer, SERVICE_LABELS, PACKAGES);
-    }
-
     /**
      * The regular expression Loki gets, read back from the LogQL string of the {@code | regexp} stage.
      */
@@ -66,6 +62,16 @@ class GroupHistoryTest {
         assertTrue(stages.find(), batch.scope());
         assertEquals(stages.group(1), stages.group(2));
         return Pattern.compile(stages.group(2).replace("\\\\", "\u0000").replace("\\\"", "\"").replace("\u0000", "\\"));
+    }
+
+    private static int count(String text, String part) {
+        int count = 0;
+        for (int at = text.indexOf(part); at >= 0; at = text.indexOf(part, at + 1)) count++;
+        return count;
+    }
+
+    private List<LogSummary.Group> groups(List<LogEvent> events) {
+        return LogSummary.group(events, normalizer, SERVICE_LABELS, PACKAGES);
     }
 
     @Test
@@ -217,7 +223,8 @@ class GroupHistoryTest {
             }
             var inside = source.stream().filter(e -> !QueryTime.fromNanos(e.timestampNanos()).isBefore(from)
                     && QueryTime.fromNanos(e.timestampNanos()).isBefore(to)).sorted(Comparator.comparingLong(LogEvent::nanos).reversed()).limit(limit).toList();
-            for (var e : inside) page.add(new LogStream(e.labels(), List.of(new LogEntry(e.timestampNanos(), e.line(), Map.of()))));
+            for (var e : inside)
+                page.add(new LogStream(e.labels(), List.of(new LogEntry(e.timestampNanos(), e.line(), Map.of()))));
             return new QueryResponse(new Streams(page), new QueryStats(0L), List.of());
         };
         doAnswer(answer).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
@@ -230,7 +237,8 @@ class GroupHistoryTest {
         assertTrue(range.find(), expression);
         long length = Long.parseLong(range.group(1));
         long offset = range.group(2) == null ? 0 : Long.parseLong(range.group(2));
-        if (length != GroupHistory.DAY_SECONDS && length != end.getEpochSecond() - start.getEpochSecond()) return timeline(expression, from, to, length, events);
+        if (length != GroupHistory.DAY_SECONDS && length != end.getEpochSecond() - start.getEpochSecond())
+            return timeline(expression, from, to, length, events);
         var result = new ArrayList<MetricSeries>();
         for (var group : history.get("groups")) {
             String fragment = group.get("fragment").asString();
@@ -267,7 +275,8 @@ class GroupHistoryTest {
         var fragments = new ArrayList<String>();
         for (var group : history.get("groups")) {
             String fragment = group.get("fragment").asString();
-            if (expression.contains(GroupHistory.logqlEscape(GroupHistory.regexEscape(fragment)))) fragments.add(fragment);
+            if (expression.contains(GroupHistory.logqlEscape(GroupHistory.regexEscape(fragment))))
+                fragments.add(fragment);
         }
         var counts = new TreeMap<String, TreeMap<Long, Long>>();
         for (var event : events) {
@@ -371,7 +380,8 @@ class GroupHistoryTest {
         var client = mock(LokiHttpClient.class);
         var requests = new ArrayList<String>();
         var lines = new ArrayList<LogEntry>();
-        for (int i = 0; i < 45; i++) lines.add(new LogEntry(QueryTime.nanos(end.minusSeconds(600L * i + 1)), "Connection refused by peer " + i, Map.of()));
+        for (int i = 0; i < 45; i++)
+            lines.add(new LogEntry(QueryTime.nanos(end.minusSeconds(600L * i + 1)), "Connection refused by peer " + i, Map.of()));
         doAnswer(invocation -> new QueryResponse(new Streams(invocation.getArgument(1).equals("{app=\"x\"}") && invocation.<Instant>getArgument(3).equals(end)
                 ? List.of(new LogStream(Map.of("app", "x"), lines)) : List.of()), new QueryStats(0L), List.of()))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
@@ -387,11 +397,5 @@ class GroupHistoryTest {
         var text = service(client, 64 * 1024).summarize("dev", "{app=\"x\"}", "now-12h", "now", null);
         assertTrue(text.contains("\n         more than usual: 45 in this window, usually about 10 in 12h; 140 in the 7 days before\n"), text);
         assertEquals(1, requests.size(), requests.toString());
-    }
-
-    private static int count(String text, String part) {
-        int count = 0;
-        for (int at = text.indexOf(part); at >= 0; at = text.indexOf(part, at + 1)) count++;
-        return count;
     }
 }

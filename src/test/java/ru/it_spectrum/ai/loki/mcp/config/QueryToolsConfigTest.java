@@ -28,12 +28,12 @@ class QueryToolsConfigTest {
     private final List<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> specs =
             new QueryToolsConfig().queryToolSpecifications(service, mock(ConnectionsService.class), mock(DiscoveryService.class), registry);
 
-    private CallToolResult call(String tool, Map<String, Object> args) {
-        return specs.stream().filter(s -> s.tool().name().equals(tool)).findFirst().orElseThrow().callHandler().apply(null, new CallToolRequest(tool, args));
-    }
-
     private static String text(CallToolResult result) {
         return ((TextContent) result.content().getFirst()).text();
+    }
+
+    private CallToolResult call(String tool, Map<String, Object> args) {
+        return specs.stream().filter(s -> s.tool().name().equals(tool)).findFirst().orElseThrow().callHandler().apply(null, new CallToolRequest(tool, args));
     }
 
     @Test

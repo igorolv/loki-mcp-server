@@ -49,7 +49,8 @@ final class QueryIntent {
         if (present(level)) {
             var levels = definition.allLevels();
             String filter = levels.get(level.strip().toLowerCase(Locale.ROOT));
-            if (filter == null) throw Errors.invalid("level must be one of: " + String.join(", ", levels.keySet()) + ".");
+            if (filter == null)
+                throw Errors.invalid("level must be one of: " + String.join(", ", levels.keySet()) + ".");
             built.append(' ').append(filter.strip());
         }
         if (present(text)) {

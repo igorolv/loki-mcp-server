@@ -20,29 +20,14 @@ public final class LogRules {
     private LogRules() {
     }
 
-    /**
-     * A rule that matched a line, with {@code ${name}} placeholders already filled from that line.
-     */
-    public record Match(LogRule rule, String subject, String advice) {
-        public LogRule.Category category() {
-            return rule.category();
-        }
-
-        /**
-         * {@code [dependency: SMEV]}, {@code [startup]}.
-         */
-        public String tag() {
-            return "[" + rule.category().text() + (subject == null ? "" : ": " + subject) + "]";
-        }
-    }
-
     public static Match match(List<LogRule> rules, EventNormalizer.View view, ErrorSignature signature) {
         if (rules.isEmpty()) return null;
         String message = view.message() == null ? "" : view.message();
         if (message.length() > MESSAGE_CHARS) message = message.substring(0, MESSAGE_CHARS);
         for (var rule : rules) {
             if (rule.exception() != null && !exceptionMatches(rule.exception(), signature)) continue;
-            if (rule.logger() != null && (view.logger() == null || !rule.logger().matcher(view.logger()).find())) continue;
+            if (rule.logger() != null && (view.logger() == null || !rule.logger().matcher(view.logger()).find()))
+                continue;
             Matcher matched = null;
             if (rule.message() != null) {
                 matched = find(rule.message(), message);
@@ -68,5 +53,21 @@ public final class LogRules {
         if (text == null) return null;
         var matcher = pattern.matcher(text);
         return matcher.find() ? matcher : null;
+    }
+
+    /**
+     * A rule that matched a line, with {@code ${name}} placeholders already filled from that line.
+     */
+    public record Match(LogRule rule, String subject, String advice) {
+        public LogRule.Category category() {
+            return rule.category();
+        }
+
+        /**
+         * {@code [dependency: SMEV]}, {@code [startup]}.
+         */
+        public String tag() {
+            return "[" + rule.category().text() + (subject == null ? "" : ": " + subject) + "]";
+        }
     }
 }

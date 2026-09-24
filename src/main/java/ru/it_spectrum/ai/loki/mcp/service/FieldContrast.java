@@ -50,12 +50,6 @@ final class FieldContrast {
     }
 
     /**
-     * One line of the background: its service and its fields.
-     */
-    record Line(String service, Map<String, String> fields) {
-    }
-
-    /**
      * The time slices the background is read in, newest {@link #SLICE_LINES} lines of each.
      */
     static List<QueryTime.Range> slices(QueryTime.Range window) {
@@ -83,7 +77,8 @@ final class FieldContrast {
         var values = new LinkedHashMap<String, String>();
         normalizer.parse(event.line(), values, new HashMap<>());
         values.forEach((name, value) -> {
-            if (SKIPPED_FIELDS.contains(name) || name.startsWith("error.") || value.isBlank() || value.length() > VALUE_MAX) return;
+            if (SKIPPED_FIELDS.contains(name) || name.startsWith("error.") || value.isBlank() || value.length() > VALUE_MAX)
+                return;
             fields.putIfAbsent(name, name.toLowerCase(Locale.ROOT).contains("thread") ? DIGITS.matcher(value).replaceAll("*") : value);
         });
         return fields;
@@ -91,18 +86,6 @@ final class FieldContrast {
 
     static boolean background(EventNormalizer.View view) {
         return !"ERROR".equals(view.level()) && !"FATAL".equals(view.level()) && (view.stackTrace() == null || view.stackTrace().isBlank());
-    }
-
-    /**
-     * A field value of a group and its share among the other lines that carry the field; -1 when few other lines do.
-     */
-    record Part(String name, String value, double share) {
-    }
-
-    /**
-     * Values held by the same {@code covered} of the group's {@code size} lines, lowest share first.
-     */
-    record Finding(int covered, int size, List<Part> parts) {
     }
 
     /**
@@ -172,8 +155,10 @@ final class FieldContrast {
                     // Rare in other lines: only a value every line of the group holds, of a field that varies in the
                     // sampled and other lines of the same services (a user id does, the build of a service does not).
                     var seen = new HashSet<String>();
-                    for (String service : services) seen.addAll(sampleValues.getOrDefault(service, Map.of()).getOrDefault(name.getKey(), Set.of()));
-                    for (var line : others) if (line.fields().containsKey(name.getKey())) seen.add(line.fields().get(name.getKey()));
+                    for (String service : services)
+                        seen.addAll(sampleValues.getOrDefault(service, Map.of()).getOrDefault(name.getKey(), Set.of()));
+                    for (var line : others)
+                        if (line.fields().containsKey(name.getKey())) seen.add(line.fields().get(name.getKey()));
                     if (value.getValue().cardinality() < size || seen.size() < 2) continue;
                     other = -1;
                 }
@@ -200,5 +185,23 @@ final class FieldContrast {
         if (value.length() <= VALUE_CHARS) return value;
         int head = VALUE_CHARS / 3;
         return value.substring(0, head) + "…" + value.substring(value.length() - (VALUE_CHARS - head - 1));
+    }
+
+    /**
+     * One line of the background: its service and its fields.
+     */
+    record Line(String service, Map<String, String> fields) {
+    }
+
+    /**
+     * A field value of a group and its share among the other lines that carry the field; -1 when few other lines do.
+     */
+    record Part(String name, String value, double share) {
+    }
+
+    /**
+     * Values held by the same {@code covered} of the group's {@code size} lines, lowest share first.
+     */
+    record Finding(int covered, int size, List<Part> parts) {
     }
 }

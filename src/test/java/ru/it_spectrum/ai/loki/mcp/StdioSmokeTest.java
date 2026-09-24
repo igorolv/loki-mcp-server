@@ -30,6 +30,25 @@ class StdioSmokeTest {
     @TempDir
     Path temporaryDirectory;
 
+    private static String text(JsonNode result) {
+        var content = result.path("content");
+        assertEquals(1, content.size(), result.toString());
+        assertEquals("text", content.get(0).path("type").asText());
+        return content.get(0).path("text").asText();
+    }
+
+    private static void assertNoSecrets(String text) {
+        for (String secret : new String[]{"SECRET_TOKEN", "SECRET_TENANT", "127.0.0.1", "/private"}) {
+            assertFalse(text.contains(secret), "Transport configuration leaked");
+        }
+    }
+
+    private static void send(BufferedWriter input, String json) throws Exception {
+        input.write(json.strip());
+        input.newLine();
+        input.flush();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     @Timeout(60)
@@ -320,19 +339,6 @@ class StdioSmokeTest {
         assertTrue(serverLog.contains("[server] ru.it_spectrum.ai.loki.mcp.config.QueryToolsConfig - Tool listConnections {} -> ok, "), "MDC restored between calls: " + serverLog);
     }
 
-    private static String text(JsonNode result) {
-        var content = result.path("content");
-        assertEquals(1, content.size(), result.toString());
-        assertEquals("text", content.get(0).path("type").asText());
-        return content.get(0).path("text").asText();
-    }
-
-    private static void assertNoSecrets(String text) {
-        for (String secret : new String[]{"SECRET_TOKEN", "SECRET_TENANT", "127.0.0.1", "/private"}) {
-            assertFalse(text.contains(secret), "Transport configuration leaked");
-        }
-    }
-
     @Test
     @Timeout(30)
     void invalidConfigurationFailsStartupWithoutLeakingSecretsToDiagnostics() throws Exception {
@@ -374,11 +380,5 @@ class StdioSmokeTest {
         assertEquals("2.0", node.path("jsonrpc").asText());
         assertFalse(node.has("error"), node.toString());
         return node;
-    }
-
-    private static void send(BufferedWriter input, String json) throws Exception {
-        input.write(json.strip());
-        input.newLine();
-        input.flush();
     }
 }

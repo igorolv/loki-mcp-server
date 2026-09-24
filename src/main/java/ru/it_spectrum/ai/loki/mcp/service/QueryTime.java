@@ -9,33 +9,15 @@ import java.util.regex.Pattern;
  * Every relative endpoint of one operation uses the same clock reading.
  */
 public final class QueryTime {
+    public static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSxxx");
+    public static final String FORMATS = "Use \"now\", \"now-15m\" (ns/ms/s/m/h/d), RFC3339 like \"2026-09-13T10:00:00+03:00\", "
+            + "local time \"2026-09-13T10:00:00\" in the connection timezone, or epoch nanoseconds.";
     private static final Pattern RELATIVE = Pattern.compile("(?:now-)?([1-9][0-9]*)(ns|ms|s|m|h|d)");
     private static final Pattern DURATION = Pattern.compile("([1-9][0-9]*)(ms|s|m|h|d)");
     private static final Pattern TIME_OF_DAY = Pattern.compile("([01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.([0-9]{1,9}))?)?");
     private static final Pattern FRACTION = Pattern.compile(".*:[0-5][0-9]\\.([0-9]{1,9})(?:[Zz]|[+-][0-9]{2}:?[0-9]{2})?");
-    public static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSxxx");
-    public static final String FORMATS = "Use \"now\", \"now-15m\" (ns/ms/s/m/h/d), RFC3339 like \"2026-09-13T10:00:00+03:00\", "
-            + "local time \"2026-09-13T10:00:00\" in the connection timezone, or epoch nanoseconds.";
 
     private QueryTime() {
-    }
-
-    public record Range(Instant start, Instant end) {
-        public Duration duration() {
-            return Duration.between(start, end);
-        }
-    }
-
-    /**
-     * A moment as the model wrote it: the instant and the precision of the text, so "10:12:03" covers the whole second.
-     */
-    public record Point(Instant at, Duration precision) {
-        /**
-         * Exclusive end of the instants this text denotes.
-         */
-        public Instant end() {
-            return at.plus(precision);
-        }
     }
 
     /**
@@ -170,5 +152,23 @@ public final class QueryTime {
     public static Instant ceilMillis(Instant time) {
         Instant floor = time.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         return floor.equals(time) ? time : floor.plusMillis(1);
+    }
+
+    public record Range(Instant start, Instant end) {
+        public Duration duration() {
+            return Duration.between(start, end);
+        }
+    }
+
+    /**
+     * A moment as the model wrote it: the instant and the precision of the text, so "10:12:03" covers the whole second.
+     */
+    public record Point(Instant at, Duration precision) {
+        /**
+         * Exclusive end of the instants this text denotes.
+         */
+        public Instant end() {
+            return at.plus(precision);
+        }
     }
 }

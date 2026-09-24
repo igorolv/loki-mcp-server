@@ -21,28 +21,6 @@ import static ru.it_spectrum.ai.loki.mcp.service.DiscoveryLimits.*;
  * is guessed when a value is absent, and no layout is known to the code.
  */
 public final class EventNormalizer {
-    private final List<LineFormat> formats;
-
-    public EventNormalizer() {
-        this(List.of());
-    }
-
-    public EventNormalizer(List<LineFormat> formats) {
-        this.formats = List.copyOf(formats);
-    }
-
-    public enum Format {JSON, PLAIN}
-
-    public record View(Format format, String level, String service, String logger, String message, String traceId,
-                       String stackTrace, Map<String, String> jsonFields) {
-        public View {
-            jsonFields = Map.copyOf(jsonFields);
-        }
-    }
-
-    private static final JsonMapper MAPPER = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
     static final List<String> LEVEL_FIELDS = List.of("log.level", "level", "severity", "lvl", "@l");
     static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application", "applicationName");
@@ -51,7 +29,49 @@ public final class EventNormalizer {
     static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");
     static final List<String> STACK_FIELDS = List.of("error.stack_trace", "stack_trace", "stacktrace", "stackTrace", "exception", "throwable");
     static final String EMPTY_MESSAGE = "(empty message";
+    private static final JsonMapper MAPPER = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private static final Pattern PLAIN_LEVEL = Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\b");
+    private final List<LineFormat> formats;
+    public EventNormalizer() {
+        this(List.of());
+    }
+    public EventNormalizer(List<LineFormat> formats) {
+        this.formats = List.copyOf(formats);
+    }
+
+    private static void visit(JsonNode node, String path, int depth, Map<String, String> values, Map<String, String> types) {
+        for (var property : node.properties()) {
+            if (types.size() >= FIELDS) return;
+            String name = path.isEmpty() ? property.getKey() : path + "." + property.getKey();
+            JsonNode value = property.getValue();
+            if (value.isObject()) {
+                if (depth + 1 < JSON_DEPTH && !value.isEmpty()) visit(value, name, depth + 1, values, types);
+                else types.put(name, "object");
+            } else {
+                types.put(name, value.isArray() ? "array" : value.isString() ? "string" : value.isNumber() ? "number"
+                                                                                          : value.isBoolean() ? "boolean" : "null");
+                if (value.isValueNode() && !value.isNull()) values.put(name, value.asString());
+            }
+        }
+    }
+
+    static String first(Map<String, String> source, List<String> keys) {
+        for (String key : keys) {
+            String value = source.get(key);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    /**
+     * Field name as Loki's json parser exposes it after {@code | json}: nested keys joined and sanitized with underscores.
+     */
+    public static String lokiFieldName(String dottedPath) {
+        String name = dottedPath.replaceAll("[^a-zA-Z0-9_]", "_");
+        return Character.isDigit(name.charAt(0)) ? "_" + name : name;
+    }
 
     public View view(LogEvent event, List<String> serviceLabels) {
         var values = new LinkedHashMap<String, String>();
@@ -89,10 +109,12 @@ public final class EventNormalizer {
             // empty message is the rest of the line (a report that starts on the next line), else it says so: a
             // shipper that sends every line apart leaves the report in the next entries, which getLogContext shows.
             String found = values.get("message");
-            if (found != null && !found.isBlank()) message = newline >= 0 && stack == null ? found + line.substring(newline) : found;
+            if (found != null && !found.isBlank())
+                message = newline >= 0 && stack == null ? found + line.substring(newline) : found;
             else if (found != null && newline >= 0 && !line.substring(newline).isBlank())
                 message = stack == null ? line.substring(newline + 1).strip() : message;
-            else if (found != null) message = logger == null ? EMPTY_MESSAGE + ")" : EMPTY_MESSAGE + ", logger " + logger + ")";
+            else if (found != null)
+                message = logger == null ? EMPTY_MESSAGE + ")" : EMPTY_MESSAGE + ", logger " + logger + ")";
         }
         return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, logger, message, trace, stack, types);
     }
@@ -136,35 +158,12 @@ public final class EventNormalizer {
         }
     }
 
-    private static void visit(JsonNode node, String path, int depth, Map<String, String> values, Map<String, String> types) {
-        for (var property : node.properties()) {
-            if (types.size() >= FIELDS) return;
-            String name = path.isEmpty() ? property.getKey() : path + "." + property.getKey();
-            JsonNode value = property.getValue();
-            if (value.isObject()) {
-                if (depth + 1 < JSON_DEPTH && !value.isEmpty()) visit(value, name, depth + 1, values, types);
-                else types.put(name, "object");
-            } else {
-                types.put(name, value.isArray() ? "array" : value.isString() ? "string" : value.isNumber() ? "number"
-                                                                                          : value.isBoolean() ? "boolean" : "null");
-                if (value.isValueNode() && !value.isNull()) values.put(name, value.asString());
-            }
-        }
-    }
+    public enum Format {JSON, PLAIN}
 
-    static String first(Map<String, String> source, List<String> keys) {
-        for (String key : keys) {
-            String value = source.get(key);
-            if (value != null && !value.isBlank()) return value;
+    public record View(Format format, String level, String service, String logger, String message, String traceId,
+                       String stackTrace, Map<String, String> jsonFields) {
+        public View {
+            jsonFields = Map.copyOf(jsonFields);
         }
-        return null;
-    }
-
-    /**
-     * Field name as Loki's json parser exposes it after {@code | json}: nested keys joined and sanitized with underscores.
-     */
-    public static String lokiFieldName(String dottedPath) {
-        String name = dottedPath.replaceAll("[^a-zA-Z0-9_]", "_");
-        return Character.isDigit(name.charAt(0)) ? "_" + name : name;
     }
 }

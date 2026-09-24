@@ -51,37 +51,6 @@ final class GroupHistory {
     }
 
     /**
-     * Groups counted by one request: their fragments, the scope (selector, the query's pipeline and the fragment
-     * stages), the same scope for the log, and the labels to count by.
-     */
-    record Batch(Map<LogSummary.Group, String> fragments, String scope, String logged, List<String> by) {
-    }
-
-    /**
-     * A metric request evaluated every day from {@code start} to {@code end} (both multiples of a day, as Loki aligns
-     * the steps of a range query to multiples of the step anyway).
-     */
-    record Request(String expression, String logged, Instant start, Instant end) {
-    }
-
-    enum Kind {NEW, MORE, SEEN}
-
-    /**
-     * {@code window} and {@code usual} are -1 when the window was not counted; {@code usual} is the median of the same
-     * hours ({@code per} "at these hours") or of the daily counts scaled to the window ({@code per} "in 12h").
-     */
-    record Verdict(Kind kind, long previous, long window, long usual, String per) {
-        String text() {
-            String usually = "usually " + (per.startsWith("in ") ? "about " : "") + usual + " " + per;
-            return switch (kind) {
-                case NEW -> "new: not seen in the " + DAYS + " days before";
-                case MORE -> "more than usual: " + window + " in this window, " + usually + "; " + previous + " in the " + DAYS + " days before";
-                case SEEN -> "seen before: " + previous + " in the " + DAYS + " days before" + (usual < 0 ? "" : ", " + usually);
-            };
-        }
-    }
-
-    /**
      * The longest run of the first message line between normalized parts, as it appears in the raw line (JSON-escaped
      * for a JSON line), cut at a word boundary; the simple root type when no run is long enough; null when the group
      * has no text to count by.
@@ -250,7 +219,8 @@ final class GroupHistory {
      * of the group's service label, "" when the group has none).
      */
     static Map<LogSummary.Group, TreeMap<Long, Map<String, Long>>> timeline(Batch batch, LokiResponses.QueryResponse response) {
-        if (response == null || !(response.data() instanceof LokiResponses.Matrix matrix)) throw new IllegalStateException("not a matrix");
+        if (response == null || !(response.data() instanceof LokiResponses.Matrix matrix))
+            throw new IllegalStateException("not a matrix");
         var result = new HashMap<LogSummary.Group, TreeMap<Long, Map<String, Long>>>();
         for (var group : batch.fragments().keySet()) result.put(group, new TreeMap<>());
         for (var series : matrix.series()) {
@@ -290,7 +260,8 @@ final class GroupHistory {
      * and, when its service came from a label, of its services. Days Loki returned no point for are 0.
      */
     static Map<LogSummary.Group, long[]> counts(Batch batch, Request request, LokiResponses.QueryResponse response) {
-        if (response == null || !(response.data() instanceof LokiResponses.Matrix matrix)) throw new IllegalStateException("not a matrix");
+        if (response == null || !(response.data() instanceof LokiResponses.Matrix matrix))
+            throw new IllegalStateException("not a matrix");
         long end = request.end().getEpochSecond();
         int days = (int) ((end - request.start().getEpochSecond()) / DAY_SECONDS) + 1;
         var counts = new HashMap<LogSummary.Group, long[]>();
@@ -300,7 +271,8 @@ final class GroupHistory {
             for (var entry : batch.fragments().entrySet()) {
                 var group = entry.getKey();
                 if (!entry.getValue().equals(fragment)
-                        || (group.serviceLabel != null && !group.serviceValues.contains(series.labels().get(group.serviceLabel)))) continue;
+                        || (group.serviceLabel != null && !group.serviceValues.contains(series.labels().get(group.serviceLabel))))
+                    continue;
                 for (var sample : series.samples()) {
                     long at = sample.timestampSeconds().setScale(0, RoundingMode.HALF_UP).longValueExact();
                     if ((end - at) % DAY_SECONDS == 0 && end >= at && (end - at) / DAY_SECONDS < days)
@@ -368,8 +340,41 @@ final class GroupHistory {
         long seen = verdicts.stream().filter(v -> v.kind() == Kind.SEEN).count();
         String text = verdicts.isEmpty() ? "History of the groups was not checked"
                 : "Compared with the " + DAYS + " days before (lines of this query with the same text): " + fresh + (fresh == 1 ? " group" : " groups")
-                + " new, " + more + " more than usual, " + seen + " seen before";
+                  + " new, " + more + " more than usual, " + seen + " seen before";
         if (!verdicts.isEmpty() && notChecked > 0) text += "; " + notChecked + " not checked";
         return text + (notChecked > 0 ? " (Loki did not answer in time or refused the count)." : ".");
+    }
+
+    enum Kind {NEW, MORE, SEEN}
+
+    /**
+     * Groups counted by one request: their fragments, the scope (selector, the query's pipeline and the fragment
+     * stages), the same scope for the log, and the labels to count by.
+     */
+    record Batch(Map<LogSummary.Group, String> fragments, String scope, String logged, List<String> by) {
+    }
+
+    /**
+     * A metric request evaluated every day from {@code start} to {@code end} (both multiples of a day, as Loki aligns
+     * the steps of a range query to multiples of the step anyway).
+     */
+    record Request(String expression, String logged, Instant start, Instant end) {
+    }
+
+    /**
+     * {@code window} and {@code usual} are -1 when the window was not counted; {@code usual} is the median of the same
+     * hours ({@code per} "at these hours") or of the daily counts scaled to the window ({@code per} "in 12h").
+     */
+    record Verdict(Kind kind, long previous, long window, long usual, String per) {
+        String text() {
+            String usually = "usually " + (per.startsWith("in ") ? "about " : "") + usual + " " + per;
+            return switch (kind) {
+                case NEW -> "new: not seen in the " + DAYS + " days before";
+                case MORE ->
+                        "more than usual: " + window + " in this window, " + usually + "; " + previous + " in the " + DAYS + " days before";
+                case SEEN ->
+                        "seen before: " + previous + " in the " + DAYS + " days before" + (usual < 0 ? "" : ", " + usually);
+            };
+        }
     }
 }

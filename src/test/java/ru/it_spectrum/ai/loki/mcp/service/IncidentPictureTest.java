@@ -42,6 +42,16 @@ class IncidentPictureTest {
         return String.join("\n", result);
     }
 
+    private static LogEvent line(String instant, String instance, String message, String trace) {
+        String json = "{\"log\":{\"level\":\"ERROR\"},\"message\":\"" + message + "\""
+                + (trace == null ? "" : ",\"error\":{\"stack_trace\":\"" + trace.replace("\n", "\\n").replace("\t", "\\t") + "\"}") + "}";
+        return new LogEvent(QueryTime.nanos(Instant.parse(instant)), Map.of("instance", instance), json, Map.of());
+    }
+
+    private static LogEvent start(String instant, String pod, String message) {
+        return new LogEvent(QueryTime.nanos(Instant.parse(instant)), Map.of("instance", "orders", "pod", pod), message, Map.of());
+    }
+
     @Test
     void theWindowReadWholeGivesExactOnsetsTheOrderOfServicesAndTheKeyOfOneFailure() {
         var requests = new ArrayList<String>();
@@ -88,12 +98,6 @@ class IncidentPictureTest {
                 .when(client).queryRange(anyString(), contains(" [300s]"), any(), any(), anyInt(), any(), notNull(), anyString());
         text = stand.service(client, 64 * 1024, rules).summarize("dev", QUERY, "now-4h", "now", 20);
         assertTrue(picture(text).contains("\n1. first in the sample at 12:22:30.863 (older lines of the window were not read), new "), picture(text));
-    }
-
-    private static LogEvent line(String instant, String instance, String message, String trace) {
-        String json = "{\"log\":{\"level\":\"ERROR\"},\"message\":\"" + message + "\""
-                + (trace == null ? "" : ",\"error\":{\"stack_trace\":\"" + trace.replace("\n", "\\n").replace("\t", "\\t") + "\"}") + "}";
-        return new LogEvent(QueryTime.nanos(Instant.parse(instant)), Map.of("instance", instance), json, Map.of());
     }
 
     private List<IncidentPicture.Incident> incidents(List<LogEvent> events, QueryTime.Range window) {
@@ -167,7 +171,8 @@ class IncidentPictureTest {
     void restartsSayWhatHappenedAroundTheOnset() {
         var window = new QueryTime.Range(Instant.parse("2026-09-24T07:00:00Z"), Instant.parse("2026-09-24T09:00:00Z"));
         var events = new ArrayList<LogEvent>();
-        for (int i = 0; i < 4; i++) events.add(line("2026-09-24T08:0" + (i + 1) + ":00Z", "orders", "Order queue is stuck " + i, null));
+        for (int i = 0; i < 4; i++)
+            events.add(line("2026-09-24T08:0" + (i + 1) + ":00Z", "orders", "Order queue is stuck " + i, null));
         events.add(line("2026-09-24T08:02:00Z", "billing", "Payment ledger is locked", null));
         var incidents = incidents(events, window);
         var orders = incidents.stream().filter(i -> i.services.containsKey("orders")).findFirst().orElseThrow();
@@ -189,10 +194,6 @@ class IncidentPictureTest {
         assertEquals("not checked (the query for start lines failed)",
                 IncidentPicture.restarts(billing, ServiceStarts.failed("{a=\"b\"}", ErrorCode.UPSTREAM_TIMEOUT), ZONE, false));
         assertNull(IncidentPicture.restarts(billing, null, ZONE, false));
-    }
-
-    private static LogEvent start(String instant, String pod, String message) {
-        return new LogEvent(QueryTime.nanos(Instant.parse(instant)), Map.of("instance", "orders", "pod", pod), message, Map.of());
     }
 
     @Test

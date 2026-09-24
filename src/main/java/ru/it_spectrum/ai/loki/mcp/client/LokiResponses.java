@@ -11,13 +11,13 @@ public final class LokiResponses {
     private LokiResponses() {
     }
 
+    public sealed interface QueryData permits Streams, Vector, Matrix {
+    }
+
     public record QueryResponse(QueryData data, QueryStats stats, List<String> warnings) {
         public QueryResponse {
             warnings = List.copyOf(warnings);
         }
-    }
-
-    public sealed interface QueryData permits Streams, Vector, Matrix {
     }
 
     public record Streams(List<LogStream> streams) implements QueryData {

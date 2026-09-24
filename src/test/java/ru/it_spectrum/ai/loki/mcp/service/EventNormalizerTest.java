@@ -13,6 +13,12 @@ import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.JSON;
 import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.PLAIN;
 
 class EventNormalizerTest {
+    private final EventNormalizer normalizer = new EventNormalizer();
+
+    private static LogEvent event(Map<String, String> labels, String line, Map<String, String> metadata) {
+        return new LogEvent("1700000000123456789", labels, line, metadata);
+    }
+
     @Test
     void detectedLevelUnknownIsNoLevel() {
         var normalizer = new EventNormalizer();
@@ -20,12 +26,6 @@ class EventNormalizerTest {
         assertNull(normalizer.view(unknown, List.of("app")).level());
         var error = new LogEvent("1", Map.of("app", "x"), "plain line", Map.of("detected_level", "error"));
         assertEquals("ERROR", normalizer.view(error, List.of("app")).level());
-    }
-
-    private final EventNormalizer normalizer = new EventNormalizer();
-
-    private static LogEvent event(Map<String, String> labels, String line, Map<String, String> metadata) {
-        return new LogEvent("1700000000123456789", labels, line, metadata);
     }
 
     private EventNormalizer.View view(Map<String, String> labels, String line) {

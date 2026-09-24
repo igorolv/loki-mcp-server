@@ -30,13 +30,6 @@ public class DiscoveryService {
     private final Clock clock;
     private final java.util.concurrent.ConcurrentHashMap<String, EventNormalizer> normalizers = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /**
-     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
-     */
-    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
-        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
-    }
-
     @Autowired
     public DiscoveryService(ConnectionRegistry registry, LokiHttpClient client) {
         this(registry, client, Clock.systemUTC());
@@ -46,6 +39,77 @@ public class DiscoveryService {
         this.registry = registry;
         this.client = client;
         this.clock = clock;
+    }
+
+    private static void appendLabels(StringBuilder text, Map<String, Set<String>> labels) {
+        if (labels.isEmpty()) {
+            text.append("\nNo labels found in this window.");
+            return;
+        }
+        text.append("\nLabels:");
+        for (var label : labels.entrySet()) {
+            var values = label.getValue();
+            text.append("\n  ").append(label.getKey()).append(": ");
+            if (values.isEmpty()) text.append("(values not available)");
+            else if (values.size() > VALUES_PER_LABEL)
+                text.append(values.size()).append(" distinct values (high cardinality, not listed)");
+            else {
+                var shown = values.stream().limit(VALUES_LISTED).map(v -> truncate(v, 60)).toList();
+                text.append(String.join(", ", shown));
+                if (values.size() > shown.size()) text.append(" (+").append(values.size() - shown.size())
+                        .append(" more: discoverLogs with label=\"").append(label.getKey()).append("\")");
+            }
+        }
+    }
+
+    private static void appendSample(StringBuilder text, Sample sample, int exampleChars) {
+        if (sample.events().isEmpty()) {
+            text.append("\nNo lines sampled in this window; fields are unknown.");
+            return;
+        }
+        int total = sample.events().size();
+        text.append("\nLine format (").append(total).append(" newest lines sampled): ");
+        var parts = new ArrayList<String>();
+        if (sample.json() > 0) parts.add("JSON " + sample.json());
+        if (sample.plain() > 0) parts.add("plain text " + sample.plain());
+        text.append(String.join(", ", parts)).append('.');
+        if (!sample.levels().isEmpty())
+            text.append("\nLevels seen: ").append(String.join(", ", sample.levels())).append('.');
+        if (!sample.fields().isEmpty()) {
+            var names = sample.fields().entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                    .map(Map.Entry::getKey).limit(FIELDS_LISTED).toList();
+            text.append("\nJSON fields (after | json): ").append(String.join(", ", names));
+            if (sample.fields().size() > names.size())
+                text.append(" (+").append(sample.fields().size() - names.size()).append(" more)");
+            text.append('.');
+        }
+        if (exampleChars > 0)
+            text.append("\nExample line: ").append(truncate(sample.events().getFirst().line().replace('\n', ' '), exampleChars));
+    }
+
+    private static void appendNext(StringBuilder text, String scope, Map<String, Set<String>> labels, Sample sample, ConnectionDefinition definition) {
+        text.append("\nNext: use countLogs or queryLogs with a selector like ");
+        String serviceLabel = definition.serviceLabels().stream().filter(l -> labels.containsKey(l) && !labels.get(l).isEmpty()).findFirst().orElse(null);
+        boolean scoped = scope != null && !scope.startsWith("{" + serviceLabel + "=~\".+\"}")
+                && Pattern.compile("[{,]\\s*" + Pattern.quote(String.valueOf(serviceLabel)) + "\\s*(=|=~|!=|!~)").matcher(scope).find();
+        if (serviceLabel != null && !scoped) {
+            String value = labels.get(serviceLabel).iterator().next();
+            String base = scope == null || scope.startsWith("{" + serviceLabel + "=~") ? "" : scope.strip().replaceAll("^\\{|}$", "") + ", ";
+            text.append('{').append(base).append(serviceLabel).append("=\"").append(value).append("\"}");
+        } else text.append(scope == null ? "{<label>=\"<value>\"}" : scope);
+        String levelField = LEVEL_FIELDS.stream().filter(sample.fields()::containsKey).findFirst().orElse(null);
+        if (levelField != null)
+            text.append("; filter JSON fields with | json, e.g. | json | ").append(levelField).append("=~\"(?i)error\"");
+        else if (labels.containsKey("level")) text.append("; filter by the level label, e.g. {..., level=\"error\"}");
+        text.append("; filter text with |= \"substring\".");
+    }
+
+    /**
+     * The normalizer of a connection, which knows the plain-text line formats of its rules catalogue.
+     */
+    private EventNormalizer normalizer(ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition definition) {
+        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
     }
 
     public String discover(String connection, String selector, String start, String end, String label) {
@@ -134,30 +198,6 @@ public class DiscoveryService {
         return scopeLabel == null ? null : "{" + scopeLabel + "=~\".+\"}";
     }
 
-    private static void appendLabels(StringBuilder text, Map<String, Set<String>> labels) {
-        if (labels.isEmpty()) {
-            text.append("\nNo labels found in this window.");
-            return;
-        }
-        text.append("\nLabels:");
-        for (var label : labels.entrySet()) {
-            var values = label.getValue();
-            text.append("\n  ").append(label.getKey()).append(": ");
-            if (values.isEmpty()) text.append("(values not available)");
-            else if (values.size() > VALUES_PER_LABEL)
-                text.append(values.size()).append(" distinct values (high cardinality, not listed)");
-            else {
-                var shown = values.stream().limit(VALUES_LISTED).map(v -> truncate(v, 60)).toList();
-                text.append(String.join(", ", shown));
-                if (values.size() > shown.size()) text.append(" (+").append(values.size() - shown.size())
-                        .append(" more: discoverLogs with label=\"").append(label.getKey()).append("\")");
-            }
-        }
-    }
-
-    private record Sample(List<LogEvent> events, int json, int plain, Map<String, Integer> fields, Set<String> levels) {
-    }
-
     private Sample sample(String connection, String scope, QueryTime.Range window, ConnectionDefinition definition) {
         if (scope == null) return new Sample(List.of(), 0, 0, Map.of(), Set.of());
         int limit = Math.min(SAMPLE_ENTRIES, definition.limits().maxEntries());
@@ -190,46 +230,6 @@ public class DiscoveryService {
         return new Sample(events, json, plain, fields, levels);
     }
 
-    private static void appendSample(StringBuilder text, Sample sample, int exampleChars) {
-        if (sample.events().isEmpty()) {
-            text.append("\nNo lines sampled in this window; fields are unknown.");
-            return;
-        }
-        int total = sample.events().size();
-        text.append("\nLine format (").append(total).append(" newest lines sampled): ");
-        var parts = new ArrayList<String>();
-        if (sample.json() > 0) parts.add("JSON " + sample.json());
-        if (sample.plain() > 0) parts.add("plain text " + sample.plain());
-        text.append(String.join(", ", parts)).append('.');
-        if (!sample.levels().isEmpty())
-            text.append("\nLevels seen: ").append(String.join(", ", sample.levels())).append('.');
-        if (!sample.fields().isEmpty()) {
-            var names = sample.fields().entrySet().stream()
-                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
-                    .map(Map.Entry::getKey).limit(FIELDS_LISTED).toList();
-            text.append("\nJSON fields (after | json): ").append(String.join(", ", names));
-            if (sample.fields().size() > names.size())
-                text.append(" (+").append(sample.fields().size() - names.size()).append(" more)");
-            text.append('.');
-        }
-        if (exampleChars > 0)
-            text.append("\nExample line: ").append(truncate(sample.events().getFirst().line().replace('\n', ' '), exampleChars));
-    }
-
-    private static void appendNext(StringBuilder text, String scope, Map<String, Set<String>> labels, Sample sample, ConnectionDefinition definition) {
-        text.append("\nNext: use countLogs or queryLogs with a selector like ");
-        String serviceLabel = definition.serviceLabels().stream().filter(l -> labels.containsKey(l) && !labels.get(l).isEmpty()).findFirst().orElse(null);
-        boolean scoped = scope != null && !scope.startsWith("{" + serviceLabel + "=~\".+\"}")
-                && Pattern.compile("[{,]\\s*" + Pattern.quote(String.valueOf(serviceLabel)) + "\\s*(=|=~|!=|!~)").matcher(scope).find();
-        if (serviceLabel != null && !scoped) {
-            String value = labels.get(serviceLabel).iterator().next();
-            String base = scope == null || scope.startsWith("{" + serviceLabel + "=~") ? "" : scope.strip().replaceAll("^\\{|}$", "") + ", ";
-            text.append('{').append(base).append(serviceLabel).append("=\"").append(value).append("\"}");
-        } else text.append(scope == null ? "{<label>=\"<value>\"}" : scope);
-        String levelField = LEVEL_FIELDS.stream().filter(sample.fields()::containsKey).findFirst().orElse(null);
-        if (levelField != null)
-            text.append("; filter JSON fields with | json, e.g. | json | ").append(levelField).append("=~\"(?i)error\"");
-        else if (labels.containsKey("level")) text.append("; filter by the level label, e.g. {..., level=\"error\"}");
-        text.append("; filter text with |= \"substring\".");
+    private record Sample(List<LogEvent> events, int json, int plain, Map<String, Integer> fields, Set<String> levels) {
     }
 }
