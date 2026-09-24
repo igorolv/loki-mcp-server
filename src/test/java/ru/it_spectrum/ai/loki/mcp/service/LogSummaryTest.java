@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -24,7 +25,8 @@ class LogSummaryTest {
     void realErrorLinesCollapseByRootCauseIntoASmallPage() {
         var events = Fixtures.events("asva2-dev-errors.jsonl");
         long raw = events.stream().mapToLong(e -> LogText.bytes(e.line())).sum();
-        var groups = LogSummary.group(events, normalizer, SERVICE_LABELS, PACKAGES);
+        var groups = LogSummary.group(events, normalizer, SERVICE_LABELS, PACKAGES,
+                List.of(Pattern.compile("\\.doFilter(Internal)?$")), List.of(), event -> null);
         String text = render(groups);
         assertTrue(groups.size() <= 35, groups.size() + " groups");
         // Russian text is two bytes a character in UTF-8.

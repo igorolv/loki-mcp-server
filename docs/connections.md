@@ -34,11 +34,19 @@ Format: an object `connections` with one or more connections. Names are case-sen
 letter or a digit. `description` is optional, up to 512 characters. `hint` is an optional
 hint for the model, up to 1024 characters: which labels the stand has, how to pick a
 service. `serviceLabels` is an optional list of labels that name the service on a line
-(default `applicationName, service_name, service, app, container, job`).
+(default `service_name, service, app, container, job`).
 `applicationPackages` is an optional list of up to 32 Java package prefixes of the stand's
 own code (`["ru.it_spectrum.asv", "ru.it_spectrum.core"]`): `summarizeLogs` shows the
 nearest frame of these packages under the root cause of a stack trace. Without it no frame
-is recognised as own code and nothing is guessed from class names. `rulesFile` is an
+is recognised as own code and nothing is guessed from class names. `ignoredFrames` is an
+optional list of up to 32 regular expressions matched against `Class.method` of such a
+frame: a frame they match is never the one shown — a request filter of the stand's own code
+that every call passes (`["\\.doFilter(Internal)?$"]`). `versionFields` is an optional
+ordered map of up to 8 JSON fields that tell a build to the word printed before the value
+(`{"service.version": "", "build.version": "build", "git.commit": "commit"}` prints `main
+build 2792 commit c000000008`; a value over 16 characters, a commit hash, is cut to 10); the
+default is the ECS `{"service.version": ""}`. The restarts block of `summarizeLogs` reads
+the version from these fields. `rulesFile` is an
 optional path to a rules catalogue (below) or a non-empty list of them, tried in order —
 the stand's own file first, then generic sets (`["asva2-rules.json", "java-rules.json"]`);
 a relative path is resolved against the directory of the connections file, `${VARIABLES}`
@@ -48,8 +56,9 @@ characters, a selector only): queries built from `service`, `level` and `text`
 ([queries.md](queries.md#queries-without-logql)) start from it. `levels` is an optional map
 of up to 16 level names (lower-case letters) to the LogQL line filter that selects them
 (`{"error": "|~ \"ERROR|Exception|Caused by\""}`, starting with `|`, up to 300 characters);
-it overrides the defaults `error` → `|~ "ERROR|FATAL|Exception|Caused by"` and `warn` →
-`|~ "WARN"`. `listConnections` names the levels and the scope of every connection. The registry never picks a default connection, even
+it overrides the defaults `error` → `|~ "ERROR|FATAL"` and `warn` → `|~ "WARN"`. A Java
+stand whose shipper sends stack trace lines apart adds `Exception|Caused by` to its own
+`error`, as the asva2 profile does. `listConnections` names the levels and the scope of every connection. The registry never picks a default connection, even
 with a single entry, and never trims names.
 
 ### Export directories

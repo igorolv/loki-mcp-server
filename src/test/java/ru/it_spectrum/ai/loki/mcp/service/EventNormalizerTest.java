@@ -56,7 +56,7 @@ class EventNormalizerTest {
 
     @Test
     void flatDottedKeysAndLabelsTakePriorityOverLineFields() {
-        var view = view(Map.of("applicationName", "from-label", "level", "warn"),
+        var view = view(Map.of("app", "from-label", "level", "warn"),
                 "{\"service.name\":\"from-line\",\"log.level\":\"ERROR\",\"msg\":\"hello\"}");
         assertEquals("WARN", view.level());
         assertEquals("from-label", view.service());

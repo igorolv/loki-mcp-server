@@ -58,7 +58,7 @@ class QueryIntentTest {
         assertEquals(SCOPE + " |~ \"WARN\"", resolve(dev, null, null, "warn", null));
         assertEquals("{a=\"b\"}", resolve(dev, "{a=\"b\"}", null, null, " "));
         // Without a scope a service is the selector.
-        assertEquals("{applicationName=\"sec-backend\"} |~ \"ERROR|FATAL|Exception|Caused by\"", resolve(definition(null, Map.of()), null, "sec-backend", "error", null));
+        assertEquals("{applicationName=\"sec-backend\"} |~ \"ERROR|FATAL\"", resolve(definition(null, Map.of()), null, "sec-backend", "error", null));
     }
 
     @Test

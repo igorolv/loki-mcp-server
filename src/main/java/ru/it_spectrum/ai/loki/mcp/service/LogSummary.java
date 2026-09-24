@@ -43,7 +43,7 @@ public final class LogSummary {
     private static final Pattern HEX = Pattern.compile("\\b(?:0x[0-9a-fA-F]+|(?=[0-9a-fA-F]*\\d)[0-9a-fA-F]{8,})\\b");
     /**
      * Numbers with dotted parts (versions, IPs), space-grouped thousands (6 029) and a short unit (15ms, 3s, 42MB);
-     * "v1.2" and "asva2" keep their digits.
+     * "v1.2" and "log4j2" keep their digits.
      */
     private static final Pattern NUMBER = Pattern.compile("(?<![\\w.])[+-]?\\d+(?:[.,]\\d+)*(?: \\d{3}(?!\\d))*[a-zA-Z\u00b5%]{0,2}(?!\\w)");
     private static final Pattern SPACES = Pattern.compile("\\s+");
@@ -62,18 +62,19 @@ public final class LogSummary {
 
     public static List<Group> group(List<LogEvent> events, EventNormalizer normalizer, List<String> serviceLabels,
                                     List<String> applicationPackages, List<LogRule> rules) {
-        return group(events, normalizer, serviceLabels, applicationPackages, rules, event -> null);
+        return group(events, normalizer, serviceLabels, applicationPackages, List.of(), rules, event -> null);
     }
 
     /**
      * {@code startOf} names the service start a line was logged in, or null.
      */
     static List<Group> group(List<LogEvent> events, EventNormalizer normalizer, List<String> serviceLabels,
-                             List<String> applicationPackages, List<LogRule> rules, Function<LogEvent, ServiceStarts.Start> startOf) {
+                             List<String> applicationPackages, List<Pattern> ignoredFrames, List<LogRule> rules,
+                             Function<LogEvent, ServiceStarts.Start> startOf) {
         var groups = new LinkedHashMap<String, Group>();
         for (var event : events) {
             var view = normalizer.view(event, serviceLabels);
-            var signature = signature(view, applicationPackages);
+            var signature = signature(view, applicationPackages, ignoredFrames);
             var group = groups.computeIfAbsent(signature != null ? signature.key() : template(view), Group::new);
             if (group.count++ == 0) group.first = event;
             group.last = event;
@@ -95,10 +96,10 @@ public final class LogSummary {
     /**
      * The root cause of the line's stack trace, or null when there is no trace or it has no exception header.
      */
-    static ErrorSignature signature(EventNormalizer.View view, List<String> applicationPackages) {
+    static ErrorSignature signature(EventNormalizer.View view, List<String> applicationPackages, List<Pattern> ignoredFrames) {
         if (view.stackTrace() == null || view.stackTrace().isBlank()) return null;
         if (FRAME_LINE.matcher(view.message().strip()).matches()) return null;
-        return ErrorSignature.of(view.stackTrace(), applicationPackages);
+        return ErrorSignature.of(view.stackTrace(), applicationPackages, ignoredFrames);
     }
 
     /**

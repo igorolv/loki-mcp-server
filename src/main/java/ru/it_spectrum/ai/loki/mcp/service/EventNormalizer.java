@@ -23,7 +23,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.DiscoveryLimits.*;
 public final class EventNormalizer {
     static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
     static final List<String> LEVEL_FIELDS = List.of("log.level", "level", "severity", "lvl", "@l");
-    static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application", "applicationName");
+    static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application");
     static final List<String> LOGGER_FIELDS = List.of("log.logger", "logger_name", "logger", "log.logger_name");
     static final List<String> MESSAGE_FIELDS = List.of("message", "msg", "@message", "event", "@m");
     static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");

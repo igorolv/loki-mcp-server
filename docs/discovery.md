@@ -79,7 +79,7 @@ labels and metadata are never overridden by it.
 | Field | Sources in priority order |
 |---|---|
 | level | labels `level`, `detected_level`, `severity`, `lvl` → the same keys in structured metadata → JSON `log.level`, `level`, `severity`, `lvl`, `@l` → for plain text the first `TRACE/DEBUG/INFO/WARN/WARNING/ERROR/FATAL` word within the first 120 characters |
-| service | the connection's `serviceLabels` in order (default `applicationName, service_name, service, app, container, job`) → JSON `service.name`, `service`, `app`, `application`, `applicationName` |
+| service | the connection's `serviceLabels` in order (default `service_name, service, app, container, job`) → JSON `service.name`, `service`, `app`, `application` |
 | message | JSON `message`, `msg`, `@message`, `event`, `@m`, otherwise the whole line; for plain text with frames — the first line |
 | traceId | metadata → JSON → labels: `traceId`, `trace.id`, `trace_id`, `traceID`, `trace` |
 | stackTrace | JSON `error.stack_trace`, `stack_trace`, `stacktrace`, `stackTrace`, `exception`, `throwable`; for plain text — the rest after the first line when it contains `\n\tat ` |

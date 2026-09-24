@@ -46,23 +46,23 @@ class DiscoveryServiceTest {
 
     @Test
     void selectorScopeListsLabelsFormatsFieldsLevelsExampleAndNextStep() {
-        series(List.of(Map.of("job", "test", "applicationName", "backend", "level", "error"),
-                Map.of("job", "test", "applicationName", "frontend", "level", "info")));
-        entries(Map.of("job", "test", "applicationName", "backend"), List.of(
+        series(List.of(Map.of("job", "test", "app", "backend", "level", "error"),
+                Map.of("job", "test", "app", "frontend", "level", "info")));
+        entries(Map.of("job", "test", "app", "backend"), List.of(
                 entry(1, "{\"service\":{\"name\":\"backend\"},\"log\":{\"level\":\"ERROR\"},\"message\":\"Ошибка 🐈\",\"traceId\":\"t\"}"),
                 entry(2, "plain WARN text"), entry(3, "{\"message\":\"m\",\"log\":{\"level\":\"INFO\"}}")));
         var text = service.discover("one", SELECTOR, "now-1s", "now", null);
         assertEquals("""
                 Streams matching {job="test"} in 2026-09-13 11:59:59–12:00:00 (Z): 2.
                 Labels:
-                  applicationName: backend, frontend
+                  app: backend, frontend
                   job: test
                   level: error, info
                 Line format (3 newest lines sampled): JSON 2, plain text 1.
                 Levels seen: ERROR, INFO, WARN.
                 JSON fields (after | json): log_level, message, service_name, traceId.
                 Example line: {"service":{"name":"backend"},"log":{"level":"ERROR"},"message":"Ошибка 🐈","traceId":"t"}
-                Next: use countLogs or queryLogs with a selector like {job="test", applicationName="backend"}; filter JSON fields with | json, e.g. | json | log_level=~"(?i)error"; filter text with |= "substring".""", text);
+                Next: use countLogs or queryLogs with a selector like {job="test", app="backend"}; filter JSON fields with | json, e.g. | json | log_level=~"(?i)error"; filter text with |= "substring".""", text);
         verify(client).series("one", List.of(SELECTOR), now.minusSeconds(1), now);
         verify(client).queryRange("one", SELECTOR, now.minusSeconds(1), now, 20, LokiHttpClient.Direction.BACKWARD, null);
         verifyNoMoreInteractions(client);

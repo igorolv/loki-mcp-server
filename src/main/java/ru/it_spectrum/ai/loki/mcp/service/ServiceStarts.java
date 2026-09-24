@@ -22,14 +22,16 @@ import static ru.it_spectrum.ai.loki.mcp.service.LogText.TIME;
  */
 final class ServiceStarts {
     /**
-     * Appended to a stream selector. The literal alternation runs in Loki as a substring search (4 s over a day of the
-     * asva2 DEV stand on Loki 2.6.1, where the regular expression alone took 18 s); the second stage keeps the exact lines.
+     * Appended to a stream selector. The literal alternation runs in Loki as a substring search (4 s over a day of a busy
+     * stand on Loki 2.6.1, where the regular expression alone took 18 s); the second stage keeps the exact lines.
      */
     static final String FILTER = " |~ \"Start|Graceful shutdown complete\""
             + " |~ `Started \\S+ in \\S+ seconds|Starting \\S+ (v\\S+ )?using Java|Graceful shutdown complete`";
     static final int SERVICES_SHOWN = 10;
     static final int TIMES_SHOWN = 4;
     static final int DEPLOYS_SHOWN = 2;
+    static final int LONG_VERSION = 16;
+    static final int SHORT_VERSION = 10;
     /**
      * A stop this close to a start of the same service belongs to that start (rolling update or recreate).
      */
@@ -80,11 +82,11 @@ final class ServiceStarts {
      * Chronological lines returned for {@code selector + FILTER}; {@code cut} when Loki returned as many as asked for.
      */
     static ServiceStarts of(String selector, List<LogEvent> events, boolean cut, EventNormalizer normalizer,
-                            List<String> serviceLabels, Instant windowEnd) {
+                            List<String> serviceLabels, Map<String, String> versionFields, Instant windowEnd) {
         var result = new ServiceStarts(selector, null, cut, events.size(), windowEnd);
         var byStream = new LinkedHashMap<Map<String, String>, List<Mark>>();
         for (var event : events) {
-            var mark = mark(event, normalizer, serviceLabels);
+            var mark = mark(event, normalizer, serviceLabels, versionFields);
             if (mark != null) byStream.computeIfAbsent(mark.stream(), k -> new ArrayList<>()).add(mark);
         }
         for (var marks : byStream.values()) {
@@ -114,7 +116,7 @@ final class ServiceStarts {
         return result;
     }
 
-    static Mark mark(LogEvent event, EventNormalizer normalizer, List<String> serviceLabels) {
+    static Mark mark(LogEvent event, EventNormalizer normalizer, List<String> serviceLabels, Map<String, String> versionFields) {
         var values = new LinkedHashMap<String, String>();
         normalizer.parse(event.line(), values, new LinkedHashMap<>());
         String message = values.isEmpty() ? event.line() : EventNormalizer.first(values, List.of("message", "msg", "@message", "@m"));
@@ -133,7 +135,7 @@ final class ServiceStarts {
         } else if (STOPPED.matcher(message).find()) kind = Kind.STOPPED;
         else return null;
         return new Mark(kind, QueryTime.fromNanos(event.timestampNanos()), event.labels(), service(event, values, serviceLabels),
-                version(values, appVersion), running);
+                version(values, appVersion, versionFields), running);
     }
 
     /**
@@ -147,14 +149,20 @@ final class ServiceStarts {
         return label == null || label.equals(named) ? named : named + " [" + label + "]";
     }
 
-    static Version version(Map<String, String> values, String appVersion) {
-        String release = present(values.get("service.version")), build = present(values.get("build.version")),
-                commit = present(values.get("git.commit"));
-        if (commit != null)
-            commit = commit.equals("unknown") ? null : commit.substring(0, Math.min(10, commit.length()));
-        if (release == null && build == null && commit == null)
-            return appVersion == null ? null : new Version(null, null, null, appVersion);
-        return new Version(release, build, commit, null);
+    /**
+     * The values of the profile's version fields the line holds, a long one (a commit hash) cut to its first 10
+     * characters; else the {@code v1.0.4} of a Starting line.
+     */
+    static Version version(Map<String, String> values, String appVersion, Map<String, String> versionFields) {
+        var parts = new ArrayList<Part>();
+        for (var field : versionFields.entrySet()) {
+            String value = present(values.get(field.getKey()));
+            if (value == null) continue;
+            if (value.length() > LONG_VERSION) value = value.substring(0, SHORT_VERSION);
+            parts.add(new Part(field.getValue(), value));
+        }
+        if (parts.isEmpty()) return appVersion == null ? null : new Version(List.of(), appVersion);
+        return new Version(parts, null);
     }
 
     private static String present(String value) {
@@ -255,12 +263,31 @@ final class ServiceStarts {
     }
 
     /**
-     * ECS service.version, build.version and git.commit (10 characters), else the {@code v1.0.4} of a Starting line.
+     * One version field as printed: {@code build 2790}, or the value alone when the profile gives no word.
      */
-    record Version(String release, String build, String commit, String app) {
+    record Part(String label, String value) {
+        @Override
+        public String toString() {
+            return label.isEmpty() ? value : label + " " + value;
+        }
+    }
+
+    /**
+     * The version fields of a line in the profile's order, or the {@code v1.0.4} of a Starting line ({@code app}).
+     */
+    record Version(List<Part> parts, String app) {
+        Version {
+            parts = List.copyOf(parts);
+        }
+
         private static void change(List<String> parts, String name, String before, String after) {
             if (!Objects.equals(before, after))
                 parts.add(name + (before == null ? "(none)" : before) + " → " + (after == null ? "(none)" : after));
+        }
+
+        private static String valueOf(List<Part> parts, String label) {
+            for (var part : parts) if (part.label().equals(label)) return part.value();
+            return null;
         }
 
         /**
@@ -268,24 +295,24 @@ final class ServiceStarts {
          */
         @Override
         public String toString() {
-            var parts = new ArrayList<String>();
-            if (release != null) parts.add(release);
-            if (build != null) parts.add("build " + build);
-            if (commit != null) parts.add("commit " + commit);
-            if (app != null) parts.add("v" + app);
-            return String.join(" ", parts);
+            var text = new ArrayList<String>();
+            for (var part : parts) text.add(part.toString());
+            if (app != null) text.add("v" + app);
+            return String.join(" ", text);
         }
 
         /**
          * {@code build 2790 → 2791, commit c000000002 → c000000003}: only the parts that changed.
          */
         String changeFrom(Version before) {
-            var parts = new ArrayList<String>();
-            change(parts, "", before.release, release);
-            change(parts, "build ", before.build, build);
-            change(parts, "commit ", before.commit, commit);
-            change(parts, "", before.app == null ? null : "v" + before.app, app == null ? null : "v" + app);
-            return String.join(", ", parts);
+            var labels = new LinkedHashSet<String>();
+            for (var part : parts) labels.add(part.label());
+            for (var part : before.parts) labels.add(part.label());
+            var text = new ArrayList<String>();
+            for (String label : labels)
+                change(text, label.isEmpty() ? "" : label + " ", valueOf(before.parts, label), valueOf(parts, label));
+            change(text, "", before.app == null ? null : "v" + before.app, app == null ? null : "v" + app);
+            return String.join(", ", text);
         }
     }
 

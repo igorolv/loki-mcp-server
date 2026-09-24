@@ -2,7 +2,7 @@ package ru.it_spectrum.ai.loki.mcp.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * What a stack trace says once the wrappers are peeled off: the root exception, its message, the nearest frame of
@@ -16,28 +16,28 @@ import java.util.Set;
  */
 public record ErrorSignature(String rootType, String rootMessage, StackTrace.Frame appFrame, List<String> wrappers,
                              List<String> wrapperMessages) {
-    /**
-     * Servlet filters pass every request through and are never where a failure comes from.
-     */
-    private static final Set<String> PASS_THROUGH_METHODS = Set.of("doFilter", "doFilterInternal");
-
     public ErrorSignature {
         wrappers = List.copyOf(wrappers);
         wrapperMessages = List.copyOf(wrapperMessages);
     }
 
-    /**
-     * Null when the text has no exception header.
-     */
     public static ErrorSignature of(String stackTrace, List<String> applicationPackages) {
+        return of(stackTrace, applicationPackages, List.of());
+    }
+
+    /**
+     * Null when the text has no exception header. {@code ignoredFrames} are matched against {@code Class.method} of an
+     * application frame; a match is never the application frame.
+     */
+    public static ErrorSignature of(String stackTrace, List<String> applicationPackages, List<Pattern> ignoredFrames) {
         var trace = StackTrace.parse(stackTrace);
         var root = trace.root();
         if (root == null || root.type() == null) return null;
-        var frame = applicationFrame(root, applicationPackages);
+        var frame = applicationFrame(root, applicationPackages, ignoredFrames);
         // No application frame under the root: take the wrapper nearest to it (innermost first).
         var outward = trace.wrappers().reversed();
         if (frame == null)
-            for (var wrapper : outward) if ((frame = applicationFrame(wrapper, applicationPackages)) != null) break;
+            for (var wrapper : outward) if ((frame = applicationFrame(wrapper, applicationPackages, ignoredFrames)) != null) break;
         var wrappers = new ArrayList<String>();
         var messages = new ArrayList<String>();
         for (var wrapper : trace.wrappers()) {
@@ -49,15 +49,22 @@ public record ErrorSignature(String rootType, String rootMessage, StackTrace.Fra
     }
 
     /**
-     * The first frame (nearest to the throw site) whose class is in one of the application packages.
+     * The first frame (nearest to the throw site) whose class is in one of the application packages and which no ignored
+     * pattern matches.
      */
-    static StackTrace.Frame applicationFrame(StackTrace.Section section, List<String> packages) {
+    static StackTrace.Frame applicationFrame(StackTrace.Section section, List<String> packages, List<Pattern> ignoredFrames) {
         for (var frame : section.frames()) {
-            if (PASS_THROUGH_METHODS.contains(frame.plainMethod())) continue;
+            if (ignored(frame, ignoredFrames)) continue;
             for (String prefix : packages)
                 if (frame.className().equals(prefix) || frame.className().startsWith(prefix + ".")) return frame;
         }
         return null;
+    }
+
+    private static boolean ignored(StackTrace.Frame frame, List<Pattern> ignoredFrames) {
+        String name = frame.plainClassName() + "." + frame.plainMethod();
+        for (var pattern : ignoredFrames) if (pattern.matcher(name).find()) return true;
+        return false;
     }
 
     /**

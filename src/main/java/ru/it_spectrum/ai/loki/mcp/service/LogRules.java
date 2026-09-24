@@ -64,7 +64,7 @@ public final class LogRules {
         }
 
         /**
-         * {@code [dependency: SMEV]}, {@code [startup]}.
+         * {@code [dependency: PostgreSQL]}, {@code [startup]}.
          */
         public String tag() {
             return "[" + rule.category().text() + (subject == null ? "" : ": " + subject) + "]";

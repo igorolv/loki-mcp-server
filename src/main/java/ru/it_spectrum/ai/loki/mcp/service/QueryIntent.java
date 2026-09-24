@@ -72,7 +72,7 @@ final class QueryIntent {
     }
 
     /**
-     * {@code applicationName="ssj-backend"} or {@code instance=~"ssj-main|sec-main"}: the first service label whose
+     * {@code app="billing"} or {@code container=~"billing|orders"}: the first service label whose
      * values in the window (within the scope) hold every name.
      */
     private static String serviceMatcher(ConnectionDefinition definition, LokiHttpClient client, String service, QueryTime.Range window) {

@@ -47,7 +47,8 @@ LLM is needed.
   never write full events into the server's own diagnostic logs by default.
 - Do not hard-code asva2 service names, labels, line layouts or LogQL into generic code;
   use the connection profile (`hint`, `serviceLabels`, `scope`, `levels`,
-  `applicationPackages`, the rules catalogue) and actual field discovery.
+  `applicationPackages`, `ignoredFrames`, `versionFields`, the rules catalogue) and actual
+  field discovery. Code defaults are generic (ECS, common logger fields), never one project's.
 - The base API supports Loki 2.6.1 and 3.x. Do not assume newer endpoints from a version;
   a closed ingress path does not mean the whole Loki is unavailable.
 

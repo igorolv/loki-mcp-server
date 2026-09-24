@@ -13,6 +13,8 @@
       "timezone": "Europe/Moscow",
       "serviceLabels": ["applicationName", "instance", "container"],
       "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
+      "ignoredFrames": ["\\.doFilter(Internal)?$"],
+      "versionFields": { "service.version": "", "build.version": "build", "git.commit": "commit" },
       "rulesFile": ["asva2-rules.json", "java-rules.json"],
       "scope": "{namespace=~\"dev|asv-dev\"}",
       "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }
@@ -24,6 +26,8 @@
       "timezone": "Europe/Moscow",
       "serviceLabels": ["applicationName", "service", "container"],
       "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
+      "ignoredFrames": ["\\.doFilter(Internal)?$"],
+      "versionFields": { "service.version": "", "build.version": "build", "git.commit": "commit" },
       "rulesFile": ["asva2-rules.json", "java-rules.json"],
       "scope": "{job=\"docker\"}",
       "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }

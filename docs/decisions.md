@@ -21,10 +21,28 @@ service fields. Everything the model needs is in the tool descriptions, the serv
 The server does the mechanical work a model does badly or expensively — building LogQL,
 paging, compacting stack traces, grouping lines by root cause, staying under a byte budget —
 and carries what the model cannot know: the knowledge of the stand kept next to the
-connection (`hint`, `serviceLabels`, `scope`, `levels`, `applicationPackages`, the rules
-catalogue with its line formats and layouts). Adding project knowledge there is preferred
-over adding analysis to the code. Statistical conclusions (what is new, since when, what is
+connection (`hint`, `serviceLabels`, `scope`, `levels`, `applicationPackages`, `ignoredFrames`,
+`versionFields`, the rules catalogue with its line formats and layouts). Adding project
+knowledge there is preferred over adding analysis to the code. Statistical conclusions (what is new, since when, what is
 related) are left to the model, which reads the groups and asks `countLogs` / `queryLogs`.
+
+## Project knowledge out of the code (2026-09-25)
+
+A review of the code for knowledge of one project or stack that had slipped in:
+
+- `build.version` and `git.commit` as version fields of the restarts block were asva2's own
+  additions to ECS; the profile names them (`versionFields`, default the ECS
+  `service.version`). A long value is cut to 10 characters; `unknown` is printed as it is.
+- `applicationName` (an asva2 promtail label and MDC field) left the default service labels
+  and JSON service fields and the examples of the tool descriptions.
+- The servlet filter frames skipped when choosing the application frame came from the asva2
+  request filter; the profile names them (`ignoredFrames`).
+- The default `error` level is `ERROR|FATAL`; `Exception|Caused by` (stack trace lines a
+  shipper sends apart) belongs to a Java profile.
+
+Kept in code as generic defaults: the JSON field names of ECS, logstash and Serilog, the Java
+stack trace parser, the Spring Boot start and stop patterns (to move into the rules catalogue
+when a stand on another stack appears).
 
 ## Simplification (2026-09-25)
 

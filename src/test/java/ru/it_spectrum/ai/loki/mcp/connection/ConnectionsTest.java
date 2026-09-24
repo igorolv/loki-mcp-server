@@ -42,7 +42,8 @@ class ConnectionsTest {
                        "tenant":"team-a","timezone":"Europe/Moscow","limits":{"maxEntries":7,"maxExportLines":2,"maxExportBytes":9}},
                   "b":{"url":"http://localhost:1","description":"Test", "auth":{
                        "type":"BASIC","username":"reader","password":"${PASSWORD}"}},
-                  "c":{"url":"http://localhost:2","applicationPackages":["ru.it_spectrum.asv","com.example"]}
+                  "c":{"url":"http://localhost:2","applicationPackages":["ru.it_spectrum.asv","com.example"],
+                       "ignoredFrames":["\\\\.doFilter$"],"versionFields":{"service.version":"","git.commit":"commit"}}
                 }}
                 """);
         var registry = new ConnectionRegistry(entries);
@@ -60,6 +61,10 @@ class ConnectionsTest {
         assertEquals("UTC", registry.require("c").timezone().getId());
         assertEquals(List.of("ru.it_spectrum.asv", "com.example"), registry.require("c").applicationPackages());
         assertEquals(List.of(), registry.require("a").applicationPackages());
+        assertEquals("\\.doFilter$",registry.require("c").ignoredFrames().getFirst().pattern());
+        assertEquals(List.of("service.version", "git.commit"), List.copyOf(registry.require("c").versionFields().keySet()));
+        assertEquals(List.of(), registry.require("a").ignoredFrames());
+        assertEquals(ConnectionDefinition.DEFAULT_VERSION_FIELDS, registry.require("a").versionFields());
         assertThrows(UnsupportedOperationException.class, () -> registry.list().clear());
         assertFalse(entries.toString().contains("private-token"));
         assertFalse(entries.getFirst().auth().toString().contains("private-token"));
@@ -229,6 +234,10 @@ class ConnectionsTest {
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":[\"ru..x\"]}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":[null]}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"applicationPackages\":\"ru.x\"}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"ignoredFrames\":[\"(SECRET\"]}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"ignoredFrames\":[null]}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"versionFields\":{}}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"versionFields\":{\"build\":\"SECRET!\"}}}}",
             "SECRET malformed json"
     })
     void rejectsInvalidConfigurationWithoutLeakingSource(String json) {

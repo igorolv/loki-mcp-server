@@ -72,7 +72,7 @@ public class ExportService {
     }
 
     /**
-     * {@code ssj-backend} as a file name: letters, digits, dot, dash and underscore.
+     * {@code billing-backend} as a file name: letters, digits, dot, dash and underscore.
      */
     static String fileName(String service) {
         if (service == null || service.isBlank()) return "unknown";

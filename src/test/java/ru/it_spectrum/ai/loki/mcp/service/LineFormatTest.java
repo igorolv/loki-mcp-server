@@ -1,6 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import org.junit.jupiter.api.Test;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionsLoader;
 import ru.it_spectrum.ai.loki.mcp.connection.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.connection.LogRule;
@@ -83,7 +84,8 @@ class LineFormatTest {
     @Test
     void startLinesInTheConsoleLayoutAreRecognised() {
         var mark = ServiceStarts.mark(event("2026-09-24T15:26:09.001+03:00  INFO 1 --- [           main] c.e.orders.Application                   : "
-                + "Started Application in 12.5 seconds (process running for 13.1)"), normalizer, List.of("instance"));
+                + "Started Application in 12.5 seconds (process running for 13.1)"), normalizer, List.of("instance"),
+                ConnectionDefinition.DEFAULT_VERSION_FIELDS);
         assertNotNull(mark);
         assertEquals(ServiceStarts.Kind.STARTED, mark.kind());
     }

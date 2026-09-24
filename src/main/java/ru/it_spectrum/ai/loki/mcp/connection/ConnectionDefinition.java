@@ -4,9 +4,11 @@ import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
 import java.net.URI;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
 
 /**
  * hint is shown to the model by listConnections; serviceLabels are tried in order to name the service of a line;
@@ -14,27 +16,42 @@ import java.util.TreeMap;
  * rules say what known kinds of lines mean, in the order they are tried; scope is the stream selector of the stand's
  * services that a query built from service, level and text starts from (null: none); levels map a level name to the
  * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}; formats split plain-text lines into fields,
- * in the order they are tried; layouts are the named line templates exportLogs can write lines in.
+ * in the order they are tried; layouts are the named line templates exportLogs can write lines in; ignoredFrames are
+ * frames of the stand's own code that are never where a failure comes from (a request filter every call passes);
+ * versionFields name the JSON fields that tell a build, each with the word printed before its value.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits,
                                    List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules,
                                    String scope, Map<String, String> levels, List<LineFormat> formats,
-                                   List<LineLayout> layouts) {
+                                   List<LineLayout> layouts, List<Pattern> ignoredFrames, Map<String, String> versionFields) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
-            "applicationName", "service_name", "service", "app", "container", "job");
+            "service_name", "service", "app", "container", "job");
     public static final int MAX_APPLICATION_PACKAGES = 32;
     public static final int MAX_RULES = 200;
     public static final int MAX_FILTER_CHARS = 300;
     public static final int MAX_FORMATS = 32;
     public static final int MAX_LAYOUTS = 32;
+    public static final int MAX_IGNORED_FRAMES = 32;
+    public static final int MAX_VERSION_FIELDS = 8;
     /**
-     * Line filters of a level when the profile names none: the level word as Java and most loggers print it, and for
-     * errors the exception lines of a stack trace.
+     * The ECS field of the release; a profile names the fields of its own builds.
+     */
+    public static final Map<String, String> DEFAULT_VERSION_FIELDS = Map.of("service.version", "");
+    /**
+     * Line filters of a level when the profile names none: the level word as most loggers print it.
      */
     public static final Map<String, String> DEFAULT_LEVELS = Map.of(
-            "error", "|~ \"ERROR|FATAL|Exception|Caused by\"",
+            "error", "|~ \"ERROR|FATAL\"",
             "warn", "|~ \"WARN\"");
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<String> applicationPackages, List<LogRule> rules, String scope, Map<String, String> levels,
+                                List<LineFormat> formats, List<LineLayout> layouts) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, scope, levels,
+                formats, layouts, List.of(), DEFAULT_VERSION_FIELDS);
+    }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
@@ -95,7 +112,11 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(java.util.Objects::isNull)
                 || formats.stream().map(LineFormat::id).distinct().count() != formats.size()
                 || layouts == null || layouts.size() > MAX_LAYOUTS || layouts.stream().anyMatch(java.util.Objects::isNull)
-                || layouts.stream().map(LineLayout::id).distinct().count() != layouts.size()) {
+                || layouts.stream().map(LineLayout::id).distinct().count() != layouts.size()
+                || ignoredFrames == null || ignoredFrames.size() > MAX_IGNORED_FRAMES || ignoredFrames.stream().anyMatch(java.util.Objects::isNull)
+                || versionFields == null || versionFields.isEmpty() || versionFields.size() > MAX_VERSION_FIELDS
+                || versionFields.entrySet().stream().anyMatch(f -> f.getKey() == null || !f.getKey().matches("[\\w.@-]{1,64}")
+                || f.getValue() == null || !f.getValue().matches("[\\w -]{0,16}"))) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
@@ -105,6 +126,8 @@ public record ConnectionDefinition(String name, String description, String hint,
         levels = java.util.Collections.unmodifiableMap(new TreeMap<>(levels));
         formats = List.copyOf(formats);
         layouts = List.copyOf(layouts);
+        ignoredFrames = List.copyOf(ignoredFrames);
+        versionFields = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(versionFields));
     }
 
     public static boolean validName(String name) {

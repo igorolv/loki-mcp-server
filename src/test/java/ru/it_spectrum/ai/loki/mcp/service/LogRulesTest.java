@@ -30,7 +30,7 @@ class LogRulesTest {
 
     private LogRules.Match match(String text) {
         var view = normalizer.view(Fixtures.containing(events, text), List.of("applicationName"));
-        return LogRules.match(rules, view, LogSummary.signature(view, PACKAGES));
+        return LogRules.match(rules, view, LogSummary.signature(view, PACKAGES, List.of()));
     }
 
     @Test

@@ -154,7 +154,7 @@ public class DiscoveryService {
      */
     private String values(String connection, String selector, QueryTime.Range window, ConnectionDefinition definition, String label) {
         if (!label.matches("[a-zA-Z_][a-zA-Z0-9_]*"))
-            throw Errors.invalid("label must be a label name (letters, digits, underscore), e.g. \"applicationName\"; see the names in discoverLogs without label.");
+            throw Errors.invalid("label must be a label name (letters, digits, underscore), e.g. \"app\"; see the names in discoverLogs without label.");
         var values = new TreeSet<>(client.labelValues(connection, label, window.start(), window.end(), selector).values());
         String header = "Values of " + label + (selector == null ? "" : " in streams matching " + selector) + ", "
                 + window(window, definition.timezone()) + " (" + connection + "): " + values.size() + ".";

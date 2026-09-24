@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class StackTraceTest {
     private static final List<String> PACKAGES = List.of("ru.it_spectrum.asv", "ru.it_spectrum.core");
+    private static final List<Pattern> IGNORED = List.of(Pattern.compile("\\.doFilter(Internal)?$"));
     private final List<LogEvent> events = Fixtures.events("asva2-dev-errors.jsonl");
     private final EventNormalizer normalizer = new EventNormalizer();
 
@@ -17,7 +19,7 @@ class StackTraceTest {
     }
 
     private ErrorSignature signature(String text) {
-        return ErrorSignature.of(stack(text), PACKAGES);
+        return ErrorSignature.of(stack(text), PACKAGES, IGNORED);
     }
 
     @Test
@@ -96,18 +98,22 @@ class StackTraceTest {
 
     @Test
     void everyFixtureTraceParsesWithATypedRootAndNoFrameIsAFilter() {
-        int traces = 0;
+        int traces = 0, filters = 0;
         for (var event : events) {
             var view = normalizer.view(event, List.of("applicationName"));
             if (view.stackTrace() == null) continue;
             traces++;
-            var signature = ErrorSignature.of(view.stackTrace(), PACKAGES);
+            var signature = ErrorSignature.of(view.stackTrace(), PACKAGES, IGNORED);
             assertNotNull(signature, view.message());
+            // The request filter of the stand's own code is only skipped because the profile says so.
+            var unfiltered = ErrorSignature.of(view.stackTrace(), PACKAGES).appFrame();
+            if (unfiltered != null && unfiltered.plainMethod().startsWith("doFilter")) filters++;
             assertNotNull(signature.rootType(), view.message());
             if (signature.appFrame() != null)
                 assertFalse(signature.appFrame().plainMethod().startsWith("doFilter"), signature.appFrame().text());
         }
         assertEquals(23, traces);
+        assertTrue(filters > 0);
     }
 
     @Test

@@ -70,7 +70,7 @@ public class QueryService {
     }
 
     /**
-     * {@code   dependency     SMEV  3 lines}: matched rules other than noise, summed by category and subject.
+     * {@code   dependency     PostgreSQL  3 lines}: matched rules other than noise, summed by category and subject.
      */
     private static List<String> knownCauses(List<LogSummary.Group> groups) {
         var lines = new LinkedHashMap<String, Integer>();
@@ -257,8 +257,8 @@ public class QueryService {
         boolean more = events.size() >= usedSample || sampled.cutByBytes();
         var starts = starts(connection, query, window);
         if (starts != null) starts.count(events);
-        var groups = LogSummary.group(events, normalizer(definition), definition.serviceLabels(), definition.applicationPackages(), definition.rules(),
-                starts == null ? event -> null : starts::startOf);
+        var groups = LogSummary.group(events, normalizer(definition), definition.serviceLabels(), definition.applicationPackages(),
+                definition.ignoredFrames(), definition.rules(), starts == null ? event -> null : starts::startOf);
         String span = TIME.format(QueryTime.fromNanos(events.getFirst().timestampNanos()).atZone(zone)) + "–"
                 + TIME.format(QueryTime.fromNanos(events.getLast().timestampNanos()).atZone(zone));
         String header = "Summary of " + where + ": " + (more ? "newest " + events.size() + " lines sampled (more exist"
@@ -343,7 +343,8 @@ public class QueryService {
         int limit = definition.limits().maxEntries();
         try {
             var events = fetch(connection, selector + ServiceStarts.FILTER, window, limit, LokiHttpClient.Direction.BACKWARD);
-            return ServiceStarts.of(selector, events, events.size() >= limit, normalizer(definition), definition.serviceLabels(), window.end());
+            return ServiceStarts.of(selector, events, events.size() >= limit, normalizer(definition), definition.serviceLabels(),
+                    definition.versionFields(), window.end());
         } catch (LokiOperationException e) {
             if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
             return ServiceStarts.failed(selector, e.error().code());

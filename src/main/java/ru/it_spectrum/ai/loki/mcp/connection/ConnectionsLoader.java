@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
@@ -69,7 +70,8 @@ public final class ConnectionsLoader {
                         e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels(),
                         e.applicationPackages() == null ? List.of() : e.applicationPackages(),
                         catalogue.rules(), e.scope(), e.levels() == null ? Map.of() : e.levels(), catalogue.formats(),
-                        catalogue.layouts()));
+                        catalogue.layouts(), ignoredFrames(e.ignoredFrames()),
+                        e.versionFields() == null ? ConnectionDefinition.DEFAULT_VERSION_FIELDS : e.versionFields()));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -169,6 +171,16 @@ public final class ConnectionsLoader {
         }
     }
 
+    private static List<Pattern> ignoredFrames(List<String> patterns) {
+        if (patterns == null) return List.of();
+        var compiled = new ArrayList<Pattern>();
+        for (String pattern : patterns) {
+            if (pattern == null) throw Errors.configuration();
+            compiled.add(LogRule.compile(pattern));
+        }
+        return compiled;
+    }
+
     private static int or(Integer value, int fallback) {
         return value == null ? fallback : value;
     }
@@ -208,7 +220,8 @@ public final class ConnectionsLoader {
 
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
                          Limits limits, List<String> serviceLabels, List<String> applicationPackages,
-                         JsonNode rulesFile, String scope, Map<String, String> levels) {
+                         JsonNode rulesFile, String scope, Map<String, String> levels, List<String> ignoredFrames,
+                         LinkedHashMap<String, String> versionFields) {
     }
 
     private record RulesFile(List<Rule> rules, List<Format> formats, List<Layout> layouts) {

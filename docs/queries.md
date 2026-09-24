@@ -139,8 +139,8 @@ cause: the last `Caused by:` of the trace (the first section of a root-first `Wr
 trace; `Suppressed:` never counts), the first line of its message with identifiers
 replaced by `*`, and the application frame — the first frame under the root section whose
 class starts with one of the connection's `applicationPackages`, else the first such frame
-of the wrapper nearest to the root. Servlet filter methods (`doFilter`,
-`doFilterInternal`) are never the application frame; lambda and CGLIB decorations are
+of the wrapper nearest to the root. A frame the connection's `ignoredFrames` match (a
+request filter every call passes) is never the application frame; lambda and CGLIB decorations are
 removed (`lambda$findDelegate$1` → `findDelegate`, `Service$$SpringCGLIB$$0` → `Service`)
 and the line number is not part of the key. The wrappers are shown, not grouped by, so the
 lines one failure produces through different wrappers fall into one group. Any other line
@@ -223,8 +223,8 @@ pair in one stream — a restarted pod is a new stream; a `Started` line without
 `Started` is an unfinished start. `Graceful shutdown complete` is a stop. The service is the
 line's own `service.name` plus, when it differs, the service label of the stream
 (`sbp-ui-backend [sbp-main]`: one helm release holds several services). The version is
-ECS `service.version`, `build.version` and `git.commit` (10 characters, `unknown`
-skipped), else the `v2.4.1` of the `Starting` line. A deploy is a start whose version differs
+the values of the connection's `versionFields` (default the ECS `service.version`; the asva2
+profile adds `build.version` and `git.commit`), else the `v2.4.1` of the `Starting` line. A deploy is a start whose version differs
 from the previous start of the service or, for its first start in the window, from the stop
 of another stream of that service within 10 minutes (the pod it replaced: in a rolling
 update the old pod stops a few seconds after the new one started, and its stop line carries
@@ -240,13 +240,13 @@ under its example:
 
 ```
 Restarts and deploys in the window (Spring Boot start and graceful stop lines of {namespace="dev", app=~"asv-app|sp-app"}):
-  sbp-ui-backend [sbp-main]  started 13:08:13.827, 15:57:38.749, 16:56:42.055; version development build LOCAL, unchanged; 3 sampled lines logged while starting
+  sbp-ui-backend [sbp-main]  started 13:08:13.827, 15:57:38.749, 16:56:42.055; version development build LOCAL commit unknown, unchanged; 3 sampled lines logged while starting
   ssj-backend [ssj-main]  started 12:28:19.155, 13:36:53.053, 16:18:28.254, 17:21:23.368; 4 deploys, last 2 at 16:18:28.254 build 2790 → 2791, commit c000000009 → c000000007; 17:21:23.368 build 2791 → 2792, commit c000000007 → c000000008; now main build 2792 commit c000000008
-  sbp-backend [sbp-main]  started 13:06:46.451, 15:56:59.452, 17:02:33.157; version development build LOCAL, unchanged; start at 17:00:01.481 did not finish (no "Started" line after it in its stream)
+  sbp-backend [sbp-main]  started 13:06:46.451, 15:56:59.452, 17:02:33.157; version development build LOCAL commit unknown, unchanged; start at 17:00:01.481 did not finish (no "Started" line after it in its stream)
   (+30 more services: ssj-ui-backend [ssj-pr-1374], …)
 Groups by count in the sample (first–last time, level, service, newest example):
     3×  13:06:32.721–16:55:09.062  ERROR sbp-main  Schema "sbp" has version 1.7, but no migration could be resolved in the configured locations !
-         logged while starting: 3 of 3 lines, newest in the start of sbp-ui-backend [sbp-main] 16:54:24.863–16:56:42.055, version development build LOCAL
+         logged while starting: 3 of 3 lines, newest in the start of sbp-ui-backend [sbp-main] 16:54:24.863–16:56:42.055, version development build LOCAL commit unknown
 ```
 
 No block is printed when the window has no such lines or the query has no stream selector
