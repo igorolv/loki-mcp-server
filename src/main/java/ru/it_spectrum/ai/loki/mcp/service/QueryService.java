@@ -134,7 +134,7 @@ public class QueryService {
         printed.addAll(rare.subList(0, Math.min(LogSummary.RARE_GROUPS, rare.size())));
         var keys = new HashSet<String>();
         for (var group : groups) keys.add(group.template);
-        var past = past(connection, query, window, printed, keys, !more);
+        var past = past(connection, query, window, printed, keys, !more, events);
         int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
         int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size()),
                 keepNoise = Math.min(LogSummary.NOISE_GROUPS, noise.size());
@@ -211,13 +211,14 @@ public class QueryService {
     }
 
     /**
-     * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups) and the "not now"
-     * page of a day earlier, one request after another: parallel requests of one call trip a stand's rate limit and
-     * leave its queue full for the next call. No request starts after the deadline; a failure costs its own lines,
-     * never the summary. Sets {@code history} of every printed group with a fragment.
+     * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups), the background of
+     * {@link FieldContrast} and the "not now" page of a day earlier, in this order and one request after another:
+     * parallel requests of one call trip a stand's rate limit and leave its queue full for the next call. No request
+     * starts after the deadline; a failure costs its own lines, never the summary. Sets {@code history} and
+     * {@code fields} of the printed groups.
      */
     private Past past(String connection, String query, QueryTime.Range window, List<LogSummary.Group> printed, Set<String> keys,
-                      boolean wholeWindow) {
+                      boolean wholeWindow, List<LogEvent> sample) {
         var definition = registry.require(connection);
         long deadline = System.nanoTime() + GroupHistory.DEADLINE.toNanos();
         var batches = GroupHistory.batches(query, printed);
@@ -248,6 +249,7 @@ public class QueryService {
                 verdicts.add(verdict);
             }
         String header = batches.isEmpty() ? null : GroupHistory.header(verdicts, notChecked);
+        contrast(connection, query, window, printed, sample, deadline);
         // The groups of a day earlier can only be "gone" when the sample of this window saw every line of it.
         if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS) return new Past(header, null, null);
         String title = "Seen at these hours a day earlier, not now";
@@ -265,6 +267,48 @@ public class QueryService {
             if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS) gone.add(group);
         if (gone.isEmpty()) return new Past(header, null, null);
         return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):", gone);
+    }
+
+    /**
+     * The background of the window for {@link FieldContrast}: slices over the query's stream selector without its
+     * pipeline and level matchers, narrowed to the services of the groups to explain, spread over the window first so
+     * that a deadline leaves an even sample; a failed slice ends the reading. Sets {@code fields} of the groups.
+     */
+    private void contrast(String connection, String query, QueryTime.Range window, List<LogSummary.Group> groups, List<LogEvent> sample,
+                          long deadline) {
+        var definition = registry.require(connection);
+        var targets = groups.stream().filter(g -> g.events.size() >= FieldContrast.MIN_LINES).toList();
+        String selector = ServiceStarts.selector(query);
+        if (targets.isEmpty() || selector == null) return;
+        selector = GroupHistory.narrow(selector, targets);
+        int limit = Math.min(FieldContrast.SLICE_LINES, definition.limits().maxEntries());
+        var slices = FieldContrast.slices(window);
+        var background = new ArrayList<FieldContrast.Line>();
+        for (int i = 0; i < slices.size(); i++) {
+            if (System.nanoTime() >= deadline) break;
+            // 7 is coprime with 12: 0, 7, 2, 9, 4, … visits every slice, far apart first.
+            var slice = slices.get(i * 7 % slices.size());
+            List<LogEvent> events;
+            try {
+                events = fetch(connection, selector, slice, limit, LokiHttpClient.Direction.BACKWARD);
+            } catch (LokiOperationException e) {
+                if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
+                break;
+            }
+            for (var event : events) {
+                var view = normalizer.view(event, definition.serviceLabels());
+                if (view.service() != null && FieldContrast.background(view))
+                    background.add(new FieldContrast.Line(view.service(), FieldContrast.fields(event, normalizer)));
+            }
+        }
+        var sampleValues = new HashMap<String, Map<String, Set<String>>>();
+        for (var event : sample) {
+            String service = normalizer.view(event, definition.serviceLabels()).service();
+            if (service == null) continue;
+            for (var field : FieldContrast.fields(event, normalizer).entrySet())
+                sampleValues.computeIfAbsent(service, k -> new HashMap<>()).computeIfAbsent(field.getKey(), k -> new HashSet<>()).add(field.getValue());
+        }
+        for (var group : targets) group.fields = FieldContrast.findings(group, normalizer, background, sampleValues);
     }
 
     /**

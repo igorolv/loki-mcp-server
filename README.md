@@ -11,7 +11,7 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
+| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the pod, build, node or user its lines share unlike the other lines of their service, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
 | `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
@@ -98,7 +98,8 @@ is printed without that block. It also counts the history of the printed groups 
 metric range queries (`count_over_time` with a day step and an `offset`, the fragments of
 many groups in one request through `| regexp`, one request after another, none started
 after 20 s) and reads one page of the same hours a day earlier; a group whose count failed
-says `history not checked`.
+says `history not checked`. For groups of 3 lines or more it reads 12 slices of 200 lines of
+the same streams without the query's filters, to compare their fields with the other lines.
 
 ## Connecting an MCP client
 

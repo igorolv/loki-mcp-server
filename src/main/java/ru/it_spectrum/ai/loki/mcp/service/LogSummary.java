@@ -88,6 +88,12 @@ public final class LogSummary {
          * One line of {@link GroupHistory}, printed under the group when set.
          */
         String history;
+        /**
+         * The sampled lines of the group and the services they came from, for {@link FieldContrast}; its findings.
+         */
+        final List<LogEvent> events = new ArrayList<>();
+        final Set<String> services = new TreeSet<>();
+        List<String> fields = List.of();
 
         Group(String template) {
             this.template = template;
@@ -126,6 +132,8 @@ public final class LogSummary {
             if (match != null) group.rule = match;
             group.lastKeys = CorrelationKeys.of(view);
             serviceLabel(group, event, serviceLabels);
+            group.events.add(event);
+            if (view.service() != null) group.services.add(view.service());
             var start = startOf.apply(event);
             if (start != null) {
                 group.whileStarting++;
@@ -249,6 +257,7 @@ public final class LogSummary {
                     + (start.version() == null ? "" : ", version " + start.version()));
         }
         if (group.history != null) lines.add("         " + group.history);
+        lines.addAll(group.fields);
         return lines;
     }
 

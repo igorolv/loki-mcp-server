@@ -38,6 +38,7 @@ class GroupHistoryTest {
     private static final List<String> PACKAGES = List.of("ru.it_spectrum.asv", "ru.it_spectrum.core");
     private static final String QUERY = "{namespace=\"dev\", app=~\"asv-app|sp-app\"} |~ \"ERROR|Exception|Caused by\"";
     private static final Pattern STAGES = Pattern.compile(" \\|~ \"((?:[^\"\\\\]|\\\\.)*)\" \\| regexp \"\\(\\?P<mcp_fragment>(.*)\\)\"$");
+    private static final Pattern BACKGROUND = Pattern.compile("\\{namespace=\"dev\", app=~\"asv-app\\|sp-app\", instance=~\"([^\"]+)\"}");
     private static final Pattern RANGE = Pattern.compile(" \\[(\\d+)s](?: offset (\\d+)s)?\\)\\)$");
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
     private final EventNormalizer normalizer = new EventNormalizer();
@@ -188,6 +189,7 @@ class GroupHistoryTest {
         var client = mock(LokiHttpClient.class);
         var events = new ArrayList<>(Fixtures.events("asva2-dev-contrast-window.jsonl"));
         events.addAll(Fixtures.events("asva2-dev-contrast-yesterday.jsonl"));
+        var background = Fixtures.events("asva2-dev-contrast-background.jsonl");
         org.mockito.stubbing.Answer<QueryResponse> answer = invocation -> {
             String query = invocation.getArgument(1);
             Instant from = invocation.getArgument(2), to = invocation.getArgument(3);
@@ -203,11 +205,19 @@ class GroupHistoryTest {
                 return new QueryResponse(new Matrix(series(query, from, to)), new QueryStats(0L), List.of());
             }
             var page = new ArrayList<LogStream>();
-            if (query.equals(QUERY)) {
-                var inside = events.stream().filter(e -> !QueryTime.fromNanos(e.timestampNanos()).isBefore(from)
-                        && QueryTime.fromNanos(e.timestampNanos()).isBefore(to)).sorted(Comparator.comparingLong(LogEvent::nanos).reversed()).limit(limit).toList();
-                for (var e : inside) page.add(new LogStream(e.labels(), List.of(new LogEntry(e.timestampNanos(), e.line(), Map.of()))));
+            var slice = BACKGROUND.matcher(query);
+            List<LogEvent> source = query.equals(QUERY) ? events : List.of();
+            if (slice.matches()) {
+                // The background of the fields: the stream selector of the query narrowed to the services, no pipeline.
+                synchronized (requests) {
+                    requests.add(query);
+                }
+                var instances = Set.of(slice.group(1).split("\\|"));
+                source = background.stream().filter(e -> instances.contains(e.labels().get("instance"))).toList();
             }
+            var inside = source.stream().filter(e -> !QueryTime.fromNanos(e.timestampNanos()).isBefore(from)
+                    && QueryTime.fromNanos(e.timestampNanos()).isBefore(to)).sorted(Comparator.comparingLong(LogEvent::nanos).reversed()).limit(limit).toList();
+            for (var e : inside) page.add(new LogStream(e.labels(), List.of(new LogEntry(e.timestampNanos(), e.line(), Map.of()))));
             return new QueryResponse(new Streams(page), new QueryStats(0L), List.of());
         };
         doAnswer(answer).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
@@ -259,8 +269,14 @@ class GroupHistoryTest {
         var text = service(stand(requests), 64 * 1024).summarize("dev", QUERY, "now-4h", "now", null);
         assertTrue(text.contains(": all 67 lines, spanning ") && text.contains(", 13 distinct messages.\n"
                 + "Compared with the 7 days before (lines of this query with the same text): 4 groups new, 2 more than usual, 7 seen before.\n"), text);
-        // All 13 groups in one request for the 7 days before and one for the same hours.
-        assertEquals(2, requests.size(), requests.toString());
+        // All 13 groups in one request for the 7 days before and one for the same hours; the background of the fields
+        // in 12 slices over the services of the groups of 3 lines or more.
+        assertEquals(14, requests.size(), requests.toString());
+        assertEquals(12, requests.stream().filter(r -> r.equals("{namespace=\"dev\", app=~\"asv-app|sp-app\", "
+                + "instance=~\"nsi-main|scheduler-main|sec-main|ssj-main|ssj-pr-1396\"}")).count(), requests.toString());
+        assertTrue(text.contains("\n         more than usual: 6 in this window, usually 0 at these hours; 14 in the 7 days before\n"
+                + "         all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (7% in other lines of ssj-main), "), text);
+        assertTrue(text.contains("\n         all 5 lines: userId 1002 (rare in other lines of ssj-main), "), text);
         assertTrue(text.contains("\n         more than usual: 35 in this window, usually 6 at these hours; 1334 in the 7 days before\n"), text);
         assertTrue(text.contains("\n         more than usual: 6 in this window, usually 0 at these hours; 14 in the 7 days before\n"), text);
         assertTrue(text.contains(": Загрузка файлов невозможна\n         at ru.it_spectrum.asv.bc.loader.action.CreateUploadAction$LoaderServiceAsyncAction.run("

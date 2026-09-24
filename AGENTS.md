@@ -186,6 +186,10 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
   seen before; `QueryService.summarize` sends them and the "not now" page of a day earlier
   one after another (parallel requests trip a stand's rate limit) under one deadline, and a
   failure costs lines, never the summary.
+- `FieldContrast` compares the stream labels and JSON fields of a summary group's lines with
+  the other lines of its services (a background of 12 slices of the window, read by
+  `QueryService` after the history): values most group lines hold and few other lines do,
+  or one value of a varying field every group line holds; field names come from the lines.
 - `Map` is fine for labels and arbitrary fields; limits and timeouts live in
   `ConnectionLimits` and `DiscoveryLimits`, no magic numbers in tools.
 - `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven

@@ -32,12 +32,12 @@ public final class EventNormalizer {
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
-    private static final List<String> LEVEL_FIELDS = List.of("log.level", "level", "severity", "lvl", "@l");
+    static final List<String> LEVEL_FIELDS = List.of("log.level", "level", "severity", "lvl", "@l");
     static final List<String> SERVICE_FIELDS = List.of("service.name", "service", "app", "application", "applicationName");
-    private static final List<String> LOGGER_FIELDS = List.of("log.logger", "logger_name", "logger", "log.logger_name");
-    private static final List<String> MESSAGE_FIELDS = List.of("message", "msg", "@message", "event", "@m");
-    private static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");
-    private static final List<String> STACK_FIELDS = List.of("error.stack_trace", "stack_trace", "stacktrace", "stackTrace", "exception", "throwable");
+    static final List<String> LOGGER_FIELDS = List.of("log.logger", "logger_name", "logger", "log.logger_name");
+    static final List<String> MESSAGE_FIELDS = List.of("message", "msg", "@message", "event", "@m");
+    static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");
+    static final List<String> STACK_FIELDS = List.of("error.stack_trace", "stack_trace", "stacktrace", "stackTrace", "exception", "throwable");
     private static final Pattern PLAIN_LEVEL = Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\b");
 
     public View view(LogEvent event, List<String> serviceLabels) {

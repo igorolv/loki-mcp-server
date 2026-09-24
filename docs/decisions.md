@@ -383,10 +383,13 @@ over 09:06–13:06 MSK: 67 lines in 13 groups.
   - **Contrast:** a value held by at least half of the group's lines, whose share among
     background lines that carry the field (at least 20 of them) is at least 0.4 lower.
   - **Concentration:** fewer than 20 background lines carry the field, every group line has
-    the same value, and the window's sample holds at least two values of it.
+    the same value, and the field varies in the sampled and background lines of the group's
+    services (changed in S19: over the whole sample the build of a PR stand "varied" because
+    other services had other builds).
   - Values covering exactly the same lines are one finding; at most two findings a group,
-    printed under it as `all 6 lines: pod …-gbwck, build.version 2799, git.commit 00000000…
-    (7% of other ssj-main lines)`.
+    printed under it with the share of each value (changed in S19, see below):
+    `all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (7% in other lines of
+    ssj-main), node_name … (15%), build.version 2799 (43%), …`.
 
 ### Work packages
 
@@ -436,7 +439,24 @@ over 09:06–13:06 MSK: 67 lines in 13 groups.
   service without a label matcher, the "not now" block from
   `asva2-dev-contrast-yesterday.jsonl` shown only when the window was read whole, the
   summary of the window under its budget with both blocks.
-- **S19 — fields that set a group apart.** A `FieldContrast` in `service` (background
+- **S19 — fields that set a group apart** (done 2026-09-24). What the work added to the
+  plan:
+  - One share for a merged finding misled: the pod of `DeleteDraftUploads` holds 7% of the
+    other `ssj-main` lines, the lines holding all six values together 36% of those carrying
+    all six fields. Every value now prints its own share, lowest first, at most four
+    (`(+2 more)`); a long value is cut in the middle, because pod names differ at the end.
+  - The background selector is the query's stream selector without its pipeline and level
+    matchers, narrowed to the services of the groups of 3 lines or more; slices are read
+    in the order 0, 7, 2, 9, … so that the shared 20 s deadline (history first, then the
+    background, then the "gone" page) leaves an even sample. `filename` and `job` (promtail
+    labels repeating the pod) are not fields.
+  - On DEV over 24 hours the block found what no single group shows: `DataSource health
+    check failed` in `audit-main` (54 lines), `ssj-main` (12) and `parus-main` (4), every
+    line on `k8s-node1` against 1–4% of the other lines of those services — a node, not the
+    services. Over 4 hours: the task failure on the pod of build 2799 (5%), the upload errors
+    in the thread `Информация по загрузке` (1%) of one user. Cost: a 4-hour summary 10.5 s in
+    all (8 s before S19), 24 hours 33 s.
+  The plan as written: a `FieldContrast` in `service` (background
   slices, contrast and concentration, merging), one or two lines under a group. Tests from
   `asva2-dev-contrast-window.jsonl` and `-background.jsonl`: pod/build/commit of
   `DeleteDraftUploads` as one finding, thread and `userId` of `Загрузка файлов невозможна`,

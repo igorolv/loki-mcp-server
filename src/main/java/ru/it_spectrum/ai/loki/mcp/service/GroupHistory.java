@@ -159,22 +159,8 @@ final class GroupHistory {
      */
     private static Batch batch(String braces, String pipeline, Map<LogSummary.Group, String> fragments) {
         var labels = new TreeSet<String>();
-        boolean narrow = true;
-        var values = new TreeSet<String>();
-        for (var group : fragments.keySet()) {
-            if (group.serviceLabel == null) narrow = false;
-            else {
-                labels.add(group.serviceLabel);
-                values.addAll(group.serviceValues);
-            }
-        }
-        String selector = braces;
-        if (narrow && labels.size() == 1) {
-            String label = labels.first();
-            String matcher = values.size() == 1 ? label + "=\"" + logqlEscape(values.first()) + "\""
-                    : label + "=~\"" + logqlEscape(String.join("|", values.stream().map(GroupHistory::regexEscape).toList())) + "\"";
-            selector = braces.substring(0, braces.length() - 1).stripTrailing() + ", " + matcher + "}";
-        }
+        for (var group : fragments.keySet()) if (group.serviceLabel != null) labels.add(group.serviceLabel);
+        String selector = narrow(braces, fragments.keySet());
         var alternatives = new ArrayList<>(new LinkedHashSet<>(fragments.values()));
         alternatives.sort(Comparator.comparingInt(String::length).reversed());
         String alternation = logqlEscape(String.join("|", alternatives.stream().map(GroupHistory::regexEscape).toList()));
@@ -183,6 +169,25 @@ final class GroupHistory {
         by.add(LABEL);
         by.addAll(labels);
         return new Batch(Map.copyOf(fragments), base + stages(alternation), base + stages(LOGGED_FRAGMENTS), List.copyOf(by));
+    }
+
+    /**
+     * The selector with a matcher on the groups' services when every group took its service from one stream label;
+     * otherwise the selector as it is.
+     */
+    static String narrow(String braces, Collection<LogSummary.Group> groups) {
+        var labels = new TreeSet<String>();
+        var values = new TreeSet<String>();
+        for (var group : groups) {
+            if (group.serviceLabel == null) return braces;
+            labels.add(group.serviceLabel);
+            values.addAll(group.serviceValues);
+        }
+        if (labels.size() != 1 || values.isEmpty()) return braces;
+        String label = labels.first();
+        String matcher = values.size() == 1 ? label + "=\"" + logqlEscape(values.first()) + "\""
+                : label + "=~\"" + logqlEscape(String.join("|", values.stream().map(GroupHistory::regexEscape).toList())) + "\"";
+        return braces.substring(0, braces.length() - 1).stripTrailing() + ", " + matcher + "}";
     }
 
     private static String stages(String alternation) {

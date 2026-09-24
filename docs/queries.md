@@ -313,6 +313,36 @@ than 7 days makes old groups look new. In the server's own log these requests sh
 fragments as `<log text>`. On the DEV stand a summary of 4 hours took 8 s with the history,
 of 24 hours 34 s (16 s of them the sample itself).
 
+**Fields that set a group apart.** A printed group of at least 3 sampled lines is compared
+with the other lines of its services in the window: the query's stream selector without
+its pipeline and level matchers, narrowed to the services of those groups, read in 12
+slices of the window, the newest 200 lines of each (slices far apart first, so that the
+deadline leaves an even sample); lines of level ERROR/FATAL or with a stack trace are not
+"other lines". The fields of a line are its stream labels and the scalar fields of its JSON
+(`EventNormalizer.parse`), without time, level, logger, message, `error.*`, stack, trace,
+process id, `filename` and `job`, and values over 120 characters; digit runs in thread names
+become `*`. A value is a finding
+
+- when at least half of the group's lines hold it and its share among the other lines that
+  carry the field (at least 20 of them) is lower by 0.4 or more;
+- or, for a field fewer than 20 other lines carry, when every line of the group holds it and
+  the field takes more than one value in the sampled and other lines of those services (a
+  user id does; the build of one service does not).
+
+Values held by exactly the same lines are one finding; at most two findings a group, at most
+four values each, lowest share first, a long value cut in the middle:
+
+```
+    6×  10:56:52.561–10:58:53.189  ERROR ssj-main  [TASK_EXECUTION_ERROR] …
+         all 6 lines: pod ssj-main-asv-…p-connect-76566db777-gbwck (5% in other lines of ssj-main), node_name k8s-node3 (7%), process.thread.name http-nio-*-exec-* (22%), service.name ssj-backend (38%) (+2 more)
+    5×  10:24:50.259–12:24:27.059  ERROR ssj-main  При обработке данных возникла ошибка
+         all 5 lines: userId 1002 (rare in other lines of ssj-main), process.thread.name Информация по загрузке (0%), service.name ssj-ui-backend (54%)
+```
+
+Fewer than 20 other lines of the group's services give no finding. The slices run after the
+history and before the "gone" page, under the same deadline; a failed slice ends the
+reading.
+
 **Gone since a day earlier.** When the sample read every line of a window of at most 24
 hours, the same query is read over the same hours a day earlier (one page of 50 lines,
 read the same byte-aware way) and grouped; up to 5 groups that are not in this window and
@@ -389,7 +419,8 @@ it. The `QueryToolsConfig` wrapper checks the actual text size as the last guard
 compaction, footer, budget, countLogs/queryMetrics, getLogContext (two requests, marker,
 time precision, trimming around the target), summarizeLogs (templates, rare groups, budget;
 the history and the gone groups against the counts DEV Loki gave for
-`asva2-dev-contrast-*`, `GroupHistoryTest`) and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
+`asva2-dev-contrast-*`, `GroupHistoryTest`; the fields against its background,
+`FieldContrastTest`) and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
 16 outstanding calls with different budgets, errors without secrets, Loki 400 text).
 `gradlew.bat integrationTest --console=plain` — Loki 2.6.1/3.6.0: page, continuation by
 `end`, raw with labels, context (lines at the moment, exact time, a moment without lines,
