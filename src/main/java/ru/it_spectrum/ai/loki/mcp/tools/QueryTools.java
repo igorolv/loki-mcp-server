@@ -36,8 +36,8 @@ public class QueryTools {
     @McpTool(name = "summarizeLogs",
             description = "Summarize many matching log lines instead of reading them: errors grouped by root cause (the exception, "
                     + "its wrappers, the line of our code), other lines by repeated message, each group with its count in the sample, "
-                    + "first/last time and newest example; rare one-off messages listed separately. Restarts and deploys of the same "
-                    + "services are listed on top, and errors logged while a service was starting say so. Use it when countLogs shows "
+                    + "first/last time and newest example; rare one-off messages listed separately. Each group says whether it is new, "
+                    + "more than usual or seen in the 7 days before; restarts and deploys are listed on top. Use it when countLogs shows "
                     + "hundreds of lines, e.g. query {app=\"backend\"} |= \"ERROR\"; counts cover the sampled newest lines only. "
                     + "Then read one group with queryLogs |= \"<part of its message>\" or getLogContext around its time.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))

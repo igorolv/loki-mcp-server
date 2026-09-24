@@ -128,8 +128,12 @@ class LokiCompatibilityTest {
                 var summary = service.summarize("fixture", selector, start, end, null);
                 assertTrue(summary.contains(": all 3 lines, spanning " + time + "–"), summary);
                 assertTrue(summary.contains(", 3 distinct messages.\n"), summary);
-                assertTrue(summary.contains("\n    1×  " + time + "  INFO  a  Ошибка 🐈\n         java.io.IOException: x\n"), summary);
-                assertTrue(summary.contains("\n    1×  " + time + "  -     b  same timestamp other stream\n"), summary);
+                assertTrue(summary.contains("\n    1×  " + time + "  INFO  a  Ошибка 🐈\n         IOException: x\n"), summary); // root cause by simple type name
+                assertTrue(summary.contains("\n    1×  " + time + "  -     b  same timestamp other stream\n"
+                        + "         new: not seen in the 7 days before\n"), summary);
+                // The day-offset count requests are accepted ("second" has no literal part long enough to count by).
+                assertTrue(summary.contains("\nCompared with the 7 days before (lines of this query with the same text): 2 groups new, "
+                        + "0 more than usual, 0 seen before.\n"), summary);
                 assertTrue(summary.endsWith("Counts are for the 3 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= \"<distinctive part of its message>\"."), summary);
                 var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
                 assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
@@ -147,6 +151,29 @@ class LokiCompatibilityTest {
                 assertEquals("Values of shard in streams matching " + selector + ", " + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
                         + " (fixture): 2.\na\nb", discovery.discover("fixture", selector, start, end, "shard"));
                 assertTrue(discovery.discover("fixture", null, start, end, "shard").startsWith("Values of shard, "));
+                // History: the same text a day earlier, 0.1 s after the same hours begin (another stream, so that Loki
+                // takes the old line). A fresh Loki keeps it in its ingester, which it asks for recent data only: flush it
+                // to the store and wait until it can be read. Last, because the flush empties /series of this window on 2.6.1.
+                Instant dayBefore = base.minus(Duration.ofDays(1));
+                String old = new tools.jackson.databind.json.JsonMapper().writeValueAsString(java.util.Map.of("streams", List.of(
+                        java.util.Map.of("stream", java.util.Map.of("fixture", "s04", "shard", "b", "day", "before"), "values",
+                                List.of(List.of(QueryTime.nanos(dayBefore.plusMillis(100)), "same timestamp other stream"))))));
+                assertEquals(204, http.send(HttpRequest.newBuilder(url.resolve("/loki/api/v1/push")).timeout(Duration.ofSeconds(15))
+                        .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(old)).build(),
+                        HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(204, http.send(HttpRequest.newBuilder(url.resolve("/flush")).timeout(Duration.ofSeconds(15))
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+                long waitUntil = System.nanoTime() + Duration.ofSeconds(120).toNanos();
+                while (((ru.it_spectrum.ai.loki.mcp.client.LokiResponses.Streams) client.queryRange("fixture", "{day=\"before\"}", dayBefore, base, 1,
+                        LokiHttpClient.Direction.BACKWARD, null).data()).streams().isEmpty()) {
+                    assertTrue(System.nanoTime() < waitUntil, "the day-old line did not become readable");
+                    Thread.sleep(2000);
+                }
+                var history = service.summarize("fixture", selector, start, end, null);
+                assertTrue(history.contains("\n    1×  " + time + "  -     b  same timestamp other stream\n"
+                        + "         seen before: 1 in the 7 days before, usually 0 at these hours\n"), history);
+                assertTrue(history.contains("\nCompared with the 7 days before (lines of this query with the same text): 1 group new, "
+                        + "0 more than usual, 1 seen before.\n"), history);
             }
         }
     }

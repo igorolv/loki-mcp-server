@@ -10,6 +10,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -75,6 +77,17 @@ public final class LogSummary {
          */
         int whileStarting;
         ServiceStarts.Start start;
+        /**
+         * The stream label every line's service came from and its values; null when a line took its service from the
+         * JSON or from another label, so that no label can narrow a query to the group's services.
+         */
+        String serviceLabel;
+        final Set<String> serviceValues = new TreeSet<>();
+        private boolean serviceMixed;
+        /**
+         * One line of {@link GroupHistory}, printed under the group when set.
+         */
+        String history;
 
         Group(String template) {
             this.template = template;
@@ -112,6 +125,7 @@ public final class LogSummary {
             var match = LogRules.match(rules, view, signature);
             if (match != null) group.rule = match;
             group.lastKeys = CorrelationKeys.of(view);
+            serviceLabel(group, event, serviceLabels);
             var start = startOf.apply(event);
             if (start != null) {
                 group.whileStarting++;
@@ -123,6 +137,24 @@ public final class LogSummary {
         var sorted = new ArrayList<>(groups.values());
         sorted.sort(Comparator.<Group>comparingInt(g -> g.count).reversed().thenComparing(g -> g.last.nanos(), Comparator.reverseOrder()));
         return sorted;
+    }
+
+    private static void serviceLabel(Group group, LogEvent event, List<String> serviceLabels) {
+        if (group.serviceMixed) return;
+        String label = null;
+        for (String name : serviceLabels)
+            if (event.labels().get(name) != null && !event.labels().get(name).isBlank()) {
+                label = name;
+                break;
+            }
+        if (label == null || (group.serviceLabel != null && !group.serviceLabel.equals(label))) {
+            group.serviceMixed = true;
+            group.serviceLabel = null;
+            group.serviceValues.clear();
+            return;
+        }
+        group.serviceLabel = label;
+        group.serviceValues.add(event.labels().get(label));
     }
 
     /**
@@ -216,6 +248,7 @@ public final class LogSummary {
                     + (start.end() == null ? "(did not finish)" : TIME.format(start.end().atZone(zone)))
                     + (start.version() == null ? "" : ", version " + start.version()));
         }
+        if (group.history != null) lines.add("         " + group.history);
         return lines;
     }
 
@@ -248,6 +281,18 @@ public final class LogSummary {
 
     public static boolean isNoise(Group group) {
         return group.rule != null && group.rule.category() == LogRule.Category.NOISE;
+    }
+
+    /**
+     * One line of a group that is no longer there: {@code     2×  scheduler-main  SocketTimeoutException: Connect timed out}.
+     */
+    public static String renderGone(Group group) {
+        var view = group.lastView;
+        var signature = group.lastSignature;
+        String what = signature == null ? view.message()
+                : signature.rootType() + (signature.rootMessage().isBlank() ? "" : ": " + signature.rootMessage());
+        return String.format("%5d×  ", group.count) + (view.service() == null ? "-" : view.service()) + "  "
+                + truncate(SPACES.matcher(what).replaceAll(" ").strip(), NOISE_MESSAGE_CHARS);
     }
 
     /**

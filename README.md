@@ -11,7 +11,7 @@ Flash). Read-only: push, delete, `/config` and other management endpoints are ne
 | `discoverLogs` | Labels and values, line format, JSON fields, a ready-made selector; `label="..."` lists every value of one label |
 | `countLogs` | How many lines match; `groupBy` by a label or `"time"` with spike markers |
 | `queryLogs` | Lines in chronological order: `time LEVEL service message`, stack traces compacted; `raw=true` prints the line as is with its labels |
-| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
+| `summarizeLogs` | Groups in a sample of the newest lines — errors by root cause and the application frame, other lines by message template: count, first/last time, example; rare ones listed separately; for each group whether it is new, more than usual or seen in the 7 days before, and the groups of the same hours a day earlier that are gone; service restarts and deploys (Spring Boot start/stop lines with their version) in the same window, and which errors were logged while a service was starting |
 | `getLogContext` | N lines before and after a moment in a stream, the target lines marked with `>>>` |
 | `followKey` | Every line holding one id (`taskExecutionId=13548`, `ErrorID`, a trace id) across services, oldest first, errors with their root cause |
 | `queryMetrics` | Metric LogQL as a table (advanced) |
@@ -76,7 +76,7 @@ file with telling names; keep different systems in separate files via
 The connection's `limits` object (all fields optional): `maxEntries` (1000) — the cap of
 `limit` and `sample`; `maxIntervalSeconds` (86400) — the longest `start`–`end` window;
 `maxResponseBytes` (65536) — the limit of one response text; when exceeded, `queryLogs`
-drops the oldest lines and `summarizeLogs` drops rare groups, noise and restarted services
+drops the oldest lines and `summarizeLogs` drops rare groups, the gone groups, noise and restarted services
 before the top groups, and the output says so;
 `requestTimeoutMs` (30000) and `maxHttpResponseBytes` (8 MiB) — the limit of one request
 to Loki. Time: `now`, `now-15m` (`ns/ms/s/m/h/d`), RFC3339 with an offset
@@ -94,7 +94,11 @@ structured metadata counts as the line's level (`unknown` as no level). Loki's p
 is not needed: `summarizeLogs` groups locally. `summarizeLogs` makes one more request for
 the start and stop lines of the same streams, filtered by a literal alternation first so
 that a day of a busy environment stays within seconds on 2.6.1; if it fails, the summary
-is printed without that block.
+is printed without that block. It also counts the history of the printed groups with
+metric range queries (`count_over_time` with a day step and an `offset`, the fragments of
+many groups in one request through `| regexp`, one request after another, none started
+after 20 s) and reads one page of the same hours a day earlier; a group whose count failed
+says `history not checked`.
 
 ## Connecting an MCP client
 

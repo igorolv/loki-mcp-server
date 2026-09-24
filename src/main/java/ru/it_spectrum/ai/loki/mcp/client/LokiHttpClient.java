@@ -46,11 +46,20 @@ public final class LokiHttpClient implements AutoCloseable {
 
     public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
                                     int limit, Direction direction, BigDecimal stepSeconds) {
+        return queryRange(connection, query, start, end, limit, direction, stepSeconds, query);
+    }
+
+    /**
+     * {@code loggedQuery} stands for the query in the diagnostic log: a query the server built around text taken from
+     * log lines names that text in the request only.
+     */
+    public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
+                                    int limit, Direction direction, BigDecimal stepSeconds, String loggedQuery) {
         var definition = registry.require(connection);
         var params = window(start, end);
-        require(query != null && !query.isBlank() && limit > 0 && direction != null);
+        require(query != null && !query.isBlank() && limit > 0 && direction != null && loggedQuery != null);
         require(stepSeconds == null || stepSeconds.signum() > 0);
-        params.add(new Param("query", query));
+        params.add(new Param("query", query, loggedQuery));
         params.add(new Param("limit", Integer.toString(limit)));
         params.add(new Param("direction", direction == Direction.FORWARD ? "forward" : "backward"));
         if (stepSeconds != null) params.add(new Param("step", stepSeconds.toPlainString()));
@@ -106,7 +115,7 @@ public final class LokiHttpClient implements AutoCloseable {
         var text = new StringBuilder("{");
         for (var param : params) {
             if (text.length() > 1) text.append(", ");
-            String value = param.value().replace('\n', ' ');
+            String value = param.logged().replace('\n', ' ');
             text.append(param.name()).append('=').append(value.length() <= 200 ? value : value.substring(0, 200) + "…");
         }
         return text.append('}').toString();
@@ -226,6 +235,9 @@ public final class LokiHttpClient implements AutoCloseable {
         if (!valid) throw TransportErrors.error(INVALID_ARGUMENT);
     }
 
-    private record Param(String name, String value) {
+    private record Param(String name, String value, String logged) {
+        Param(String name, String value) {
+            this(name, value, value);
+        }
     }
 }

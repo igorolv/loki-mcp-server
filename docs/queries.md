@@ -202,8 +202,8 @@ different error must not disappear. The rest is counted in `(+N more groups, M l
 A single-line group prints one time. The header names the real span of the sample
 (`spanning`): 500 newest lines may cover only part of the window, so the frequency in the
 sample is never presented as a statistic of the interval — the footer points to
-`countLogs`. Under the budget rare groups are dropped first, then noise groups, then
-restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
+`countLogs`. Under the budget rare groups are dropped first, then the groups of a day
+earlier that are gone, then noise groups, then restarted services (the dropped ones go into the `(+N more services: …)` line), then groups
 from the end of the list: `Output limit reached: showing N of M groups.` An empty result gives the same
 advice as `queryLogs`.
 
@@ -265,6 +265,69 @@ left to reuse. A failed request costs the block, not the summary: `Restarts and 
 checked, the query for start and stop lines of {…} failed (UPSTREAM_TIMEOUT).` Only Spring
 Boot / Tomcat / Netty lines are recognised; other stacks show no block.
 
+**History of the groups.** Every printed group (top and rare, not noise) is looked up in
+the 7 days before the window by counting, not by reading lines. The count is of lines of
+the query that hold a fragment of the group's text: the longest part of the first line of
+its root message (or of its message, for a group without a root cause) between the parts
+replaced by `*`, at least 8 characters, else the root type's simple name; JSON-escaped for
+a JSON line, because Loki searches the raw line; cut to 60 characters at a word boundary.
+Frame-line groups and messages without such a part are not looked up.
+
+One metric request counts many groups. The query's stream selector gets a matcher on the
+service label when every group took its service from that label (`instance=~"nsi-main|
+sbp-main|…"`), the query's pipeline is kept, and two stages are added: a literal
+alternation of the fragments, longest first, which Loki runs as a substring search, and the
+same alternation as the named group of `| regexp`, so that the fragment a line holds becomes
+the label `mcp_fragment`; the sum is by that label and the service label. A group adds up
+the series of its fragment and its services. A line holding two fragments counts once, for
+the one that starts first. Groups go into one request until the URL-encoded query reaches
+6000 bytes (an ingress passes 8 KB request lines; a Cyrillic character is 6 bytes encoded),
+then into the next. Each evaluation is moved by `offset` so that it ends where it should,
+because Loki aligns the steps of a range query to multiples of the step (UTC midnight):
+
+- `sum by (mcp_fragment, instance) (count_over_time(<scope> [86400s] offset Xs))`, step one
+  day — the seven periods of 24 hours before the window start. All zeros: `new: not seen in
+  the 7 days before`.
+- `… [<window>s] offset Ys))`, step one day — for a window of at most 6 hours the window
+  itself and the same hours on each of the 7 days before: `more than usual: 6 in this
+  window, usually 0 at these hours; 14 in the 7 days before` when the window holds at least
+  three times the median of the same hours (at least 1) and the Poisson tail `P(X ≥ window |
+  λ = max(median, 0.5))` is below 0.01, otherwise `seen before: 22 in the 7 days before,
+  usually 0 at these hours`. A longer window is compared with the median of the daily
+  counts scaled to its length (`usually about 10 in 12h`); its own count is the group's count
+  in the sample when the sample read the whole window, else the request asks for the window
+  only. The same hours of a day window would read 8 days of lines: 27 s on the asva2 DEV
+  Loki 2.6.1.
+- Groups never seen before need no second request.
+
+The line is printed under the group; above the groups one line sums them up: `Compared
+with the 7 days before (lines of this query with the same text): 4 groups new, 2 more than
+usual, 7 seen before.` The requests run one after another — four in parallel tripped the DEV
+Loki's rate limit (HTTP 429) and left its queue full for the next call — and no request
+starts once the history has taken 20 seconds. A group without its 7 days says `history not
+checked`, and the summary line adds `; N not checked (Loki did not answer in time or refused
+the count)`; without its same hours it says `seen before: N in the 7 days before`. A
+fragment is a heuristic: two lines of one failure can come out differently when one of them
+carries text that earlier lines of the failure did not. A stand whose retention is shorter
+than 7 days makes old groups look new. In the server's own log these requests show the
+fragments as `<log text>`. On the DEV stand a summary of 4 hours took 8 s with the history,
+of 24 hours 34 s (16 s of them the sample itself).
+
+**Gone since a day earlier.** When the sample read every line of a window of at most 24
+hours, the same query is read over the same hours a day earlier (one page of 50 lines,
+read the same byte-aware way) and grouped; up to 5 groups that are not in this window and
+are not noise are listed after the groups:
+
+```
+Seen at these hours a day earlier, not now (in a sample of 25 lines of 2026-09-23 09:06:56–13:06:56 (+03:00)):
+    2×  scheduler-main  SocketTimeoutException: Connect timed out
+```
+
+The block tells a day that was not normal from one that was; with a cut sample it is not
+printed, because a group missing from the sample may still be in the window. A failed read
+prints `Seen at these hours a day earlier, not now: not checked (Loki did not answer in
+time or failed).`
+
 ## countLogs(connection, query, start, end, groupBy)
 
 The server builds the metric LogQL; `query` is an ordinary log query starting with `{`.
@@ -324,11 +387,12 @@ it. The `QueryToolsConfig` wrapper checks the actual text size as the last guard
 
 `gradlew.bat build --console=plain` — unit tests for the line format, stack trace
 compaction, footer, budget, countLogs/queryMetrics, getLogContext (two requests, marker,
-time precision, trimming around the target), summarizeLogs (templates, rare groups, budget)
-and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
+time precision, trimming around the target), summarizeLogs (templates, rare groups, budget;
+the history and the gone groups against the counts DEV Loki gave for
+`asva2-dev-contrast-*`, `GroupHistoryTest`) and the stdio smoke on the packaged jar (`instructions`, tools/list without output schema,
 16 outstanding calls with different budgets, errors without secrets, Loki 400 text).
 `gradlew.bat integrationTest --console=plain` — Loki 2.6.1/3.6.0: page, continuation by
 `end`, raw with labels, context (lines at the moment, exact time, a moment without lines,
 pipeline rejection), count/groupBy/time, summary, metrics, parser error, discovery and label
-values. `python scripts/live_smoke/run_smoke.py --connection <name>` — a read-only run of
+values, and last the summary history against a line pushed a day before the window. `python scripts/live_smoke/run_smoke.py --connection <name>` — a read-only run of
 the packaged jar over stdio against a live stand (see README, "Development").

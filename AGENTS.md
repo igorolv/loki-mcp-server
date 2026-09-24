@@ -85,7 +85,9 @@ the connection names with timezone and auth type; per tool call one line
 {parameters} -> 200|<code>, bytes, ms`; the connection of the current call is in MDC
 (`[dev]`, outside a call `[server]`). Model arguments (query, selector, times) are logged
 trimmed to 200 characters; URLs, credentials, tenant, response bodies and the stand's log
-lines never reach diagnostics — the stdio smoke checks this.
+lines never reach diagnostics — the stdio smoke checks this. A query the server builds
+around text of log lines (the history counts of `summarizeLogs`) is logged with that text
+replaced by `<log text>` (`LokiHttpClient.queryRange` with `loggedQuery`).
 
 Create `~/.loki-mcp-server/connections.json` (or one inside `LOKI_MCP_DATA_DIR`) before
 starting; `LOKI_MCP_CONNECTIONS_FILE` overrides the path separately. Format, env
@@ -128,7 +130,9 @@ Container check (a separate opt-in task, not part of build/test):
 Needs Docker and the pinned images `grafana/loki:2.6.1` and `grafana/loki:3.6.0`;
 Testcontainers 2.0.3 is in the version catalog. Ingests only into its own temporary
 containers: log page, continuation by `end`, raw, context, countLogs (total/groupBy/time),
-summary, queryMetrics, Loki parser error, discovery; a missing Docker is a failure, not a
+summary, queryMetrics, Loki parser error, discovery, and last the summary history against a
+line of a day before (pushed with an old timestamp and flushed to the store, because a
+fresh Loki asks its ingester for recent data only); a missing Docker is a failure, not a
 skip. The command has been verified on the development machine.
 
 Live smoke (read-only against a configured Loki, outside build/test):
@@ -176,6 +180,12 @@ stderr. Needs Python 3.10+, stdlib only. Ad-hoc requests to a stand can reuse th
 - `ServiceStarts` reads Spring Boot start/stop lines (one extra request of `summarizeLogs`
   over the query's selector) into starts, unfinished starts, stops and deploys; the
   patterns are generic Spring Boot / Tomcat / Netty text, never stand names.
+- `GroupHistory` builds the history counts of summary groups (a literal fragment of each
+  message, many groups per request through `| regexp` into the `mcp_fragment` label,
+  day-step range queries with an `offset`) and classifies them as new / more than usual /
+  seen before; `QueryService.summarize` sends them and the "not now" page of a day earlier
+  one after another (parallel requests trip a stand's rate limit) under one deadline, and a
+  failure costs lines, never the summary.
 - `Map` is fine for labels and arbitrary fields; limits and timeouts live in
   `ConnectionLimits` and `DiscoveryLimits`, no magic numbers in tools.
 - `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven

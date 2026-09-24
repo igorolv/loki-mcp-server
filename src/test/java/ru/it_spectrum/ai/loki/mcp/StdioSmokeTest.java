@@ -231,7 +231,8 @@ class StdioSmokeTest {
                     assertTrue(text.startsWith("count_over_time({kind=\"test\"}[1s]) — test, 2023-11-14 22:13:20–22:13:21 (Z), step 1s, 1 series:\n{kind=\"test\"}\n  22:13:20  NaN"), text);
                 } else if (id % 8 == 3) {
                     assertTrue(text.startsWith("Summary of {kind=\"test\"} — test, 2023-11-14 22:13:20–22:13:21 (Z): all 1 lines, spanning 22:13:20.123–22:13:20.123, 1 distinct message.\n"), text);
-                    assertTrue(text.contains("\n    1×  22:13:20.123  ERROR test  Ошибка 🐈\nCounts are for the 1 sampled lines only;"), text);
+                    assertTrue(text.contains("\nCompared with the 7 days before (lines of this query with the same text): 1 group new, 0 more than usual, 0 seen before.\n"), text);
+                    assertTrue(text.contains("\n    1×  22:13:20.123  ERROR test  Ошибка 🐈\n         new: not seen in the 7 days before\nCounts are for the 1 sampled lines only;"), text);
                 } else if (id % 8 == 7) {
                     assertTrue(text.contains("\n22:13:20.123 {kind=\"test\", level=\"error\"}  Ошибка 🐈\nShown all 1 matching lines."), text);
                 } else {

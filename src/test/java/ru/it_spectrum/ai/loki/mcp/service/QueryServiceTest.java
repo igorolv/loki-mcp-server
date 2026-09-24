@@ -38,6 +38,9 @@ class QueryServiceTest {
     private void range(QueryData data, List<String> warnings) {
         doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
+        // The history counts of summarizeLogs name a separate text for the log.
+        doReturn(new QueryResponse(data, new QueryStats(999L), warnings))
+                .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any(), anyString());
     }
 
     private static LogEntry entry(String nanos, String line) {
@@ -57,6 +60,8 @@ class QueryServiceTest {
             if (page.size() > limit) page = new java.util.ArrayList<>(page.subList(0, limit));
             return new QueryResponse(new Streams(List.of(new LogStream(labels, page))), new QueryStats(999L), List.of());
         }).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
+        doReturn(new QueryResponse(new Matrix(List.of()), new QueryStats(0L), List.of()))
+                .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any(), anyString());
     }
 
     @Test

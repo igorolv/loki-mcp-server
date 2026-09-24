@@ -130,13 +130,20 @@ public class QueryService {
         rare.sort(Comparator.comparing((LogSummary.Group g) -> g.last.nanos()).reversed());
         var known = knownCauses(listed);
         int noiseLines = noise.stream().mapToInt(g -> g.count).sum();
+        var printed = new ArrayList<LogSummary.Group>(top);
+        printed.addAll(rare.subList(0, Math.min(LogSummary.RARE_GROUPS, rare.size())));
+        var keys = new HashSet<String>();
+        for (var group : groups) keys.add(group.template);
+        var past = past(connection, query, window, printed, keys, !more);
         int budget = definition.limits().maxResponseBytes() - ENVELOPE_BYTES;
         int keepTop = top.size(), keepRare = Math.min(LogSummary.RARE_GROUPS, rare.size()),
                 keepNoise = Math.min(LogSummary.NOISE_GROUPS, noise.size());
         int keepStarts = starts == null || starts.isEmpty() ? 0 : Math.min(ServiceStarts.SERVICES_SHOWN, starts.services());
+        int keepGone = past.gone() == null ? 0 : past.gone().size();
         int fullRare = keepRare, fullNoise = keepNoise;
         while (true) {
             var lines = new ArrayList<String>();
+            if (past.header() != null) lines.add(past.header());
             if (!known.isEmpty()) {
                 lines.add("Known causes by the rules of this connection (lines in the sample):");
                 lines.addAll(known);
@@ -156,6 +163,10 @@ public class QueryService {
             }
             if (hiddenGroups > 0)
                 lines.add("  (+" + hiddenGroups + " more groups, " + hiddenLines + " lines: narrow the query to see them)");
+            if (past.goneTitle() != null && (past.gone() == null || keepGone > 0)) {
+                lines.add(past.goneTitle());
+                if (past.gone() != null) for (var group : past.gone().subList(0, keepGone)) lines.add(LogSummary.renderGone(group));
+            }
             if (!noise.isEmpty()) {
                 lines.add("Noise by the rules of this connection (" + noiseLines + " of " + events.size() + " sampled lines, not listed above):");
                 for (var group : noise.subList(0, keepNoise)) lines.add(LogSummary.renderNoise(group, zone));
@@ -179,6 +190,7 @@ public class QueryService {
             if (bytes(text) <= budget) return text;
             // Rare groups go first, then noise, then restarted services, then the top list from its end; one group always stays.
             if (keepRare > 0) keepRare--;
+            else if (keepGone > 0) keepGone--;
             else if (keepNoise > (keepTop == 0 ? 1 : 0)) keepNoise--;
             else if (keepStarts > 0) keepStarts--;
             else if (keepTop > 1) keepTop--;
@@ -188,6 +200,89 @@ public class QueryService {
     }
 
     static final int KNOWN_CAUSES = 10;
+    static final int GONE_GROUPS = 5;
+
+    /**
+     * The header line of the groups' history (null when no group could be counted), and the groups of the same hours a
+     * day earlier that are gone: {@code goneTitle} is null when there is nothing to say, {@code gone} null when the
+     * request failed.
+     */
+    record Past(String header, String goneTitle, List<LogSummary.Group> gone) {
+    }
+
+    /**
+     * History of the printed groups ({@link GroupHistory}: two metric requests per batch of groups) and the "not now"
+     * page of a day earlier, one request after another: parallel requests of one call trip a stand's rate limit and
+     * leave its queue full for the next call. No request starts after the deadline; a failure costs its own lines,
+     * never the summary. Sets {@code history} of every printed group with a fragment.
+     */
+    private Past past(String connection, String query, QueryTime.Range window, List<LogSummary.Group> printed, Set<String> keys,
+                      boolean wholeWindow) {
+        var definition = registry.require(connection);
+        long deadline = System.nanoTime() + GroupHistory.DEADLINE.toNanos();
+        var batches = GroupHistory.batches(query, printed);
+        var previous = new HashMap<LogSummary.Group, long[]>();
+        var same = new HashMap<LogSummary.Group, long[]>();
+        for (var batch : batches)
+            if (System.nanoTime() < deadline) previous.putAll(counts(connection, batch, GroupHistory.previousDays(batch, window)));
+        boolean longWindow = window.duration().compareTo(GroupHistory.SAME_HOURS) > 0;
+        for (var batch : batches) {
+            // Groups never seen before need no comparison with the same hours.
+            boolean seen = batch.fragments().keySet().stream().anyMatch(g -> previous.containsKey(g) && Arrays.stream(previous.get(g)).sum() > 0);
+            if (!seen) continue;
+            // A long window read whole needs no count of itself: the sample holds every line of each group.
+            if (longWindow && wholeWindow) for (var group : batch.fragments().keySet()) same.put(group, new long[]{group.count, 0});
+            else if (System.nanoTime() < deadline) same.putAll(counts(connection, batch, GroupHistory.sameHours(batch, window)));
+        }
+        var verdicts = new ArrayList<GroupHistory.Verdict>();
+        int notChecked = 0;
+        for (var batch : batches)
+            for (var group : batch.fragments().keySet()) {
+                if (!previous.containsKey(group)) {
+                    group.history = GroupHistory.NOT_CHECKED;
+                    notChecked++;
+                    continue;
+                }
+                var verdict = GroupHistory.classify(previous.get(group), same.get(group), window.duration());
+                group.history = verdict.text();
+                verdicts.add(verdict);
+            }
+        String header = batches.isEmpty() ? null : GroupHistory.header(verdicts, notChecked);
+        // The groups of a day earlier can only be "gone" when the sample of this window saw every line of it.
+        if (!wholeWindow || window.duration().getSeconds() > GroupHistory.DAY_SECONDS) return new Past(header, null, null);
+        String title = "Seen at these hours a day earlier, not now";
+        var dayBefore = new QueryTime.Range(window.start().minus(Duration.ofDays(1)), window.end().minus(Duration.ofDays(1)));
+        Sample sampled;
+        try {
+            if (System.nanoTime() >= deadline) throw Errors.failure(ErrorCode.UPSTREAM_TIMEOUT, "deadline");
+            sampled = sample(connection, query, dayBefore, FIRST_PAGE, definition.limits().maxHttpResponseBytes());
+        } catch (LokiOperationException e) {
+            if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
+            return new Past(header, title + ": not checked (Loki did not answer in time or failed).", null);
+        }
+        var gone = new ArrayList<LogSummary.Group>();
+        for (var group : LogSummary.group(sampled.events(), normalizer, definition.serviceLabels(), definition.applicationPackages(), definition.rules()))
+            if (!LogSummary.isNoise(group) && !keys.contains(group.template) && gone.size() < GONE_GROUPS) gone.add(group);
+        if (gone.isEmpty()) return new Past(header, null, null);
+        return new Past(header, title + " (in a sample of " + sampled.events().size() + " lines of " + window(dayBefore, definition.timezone()) + "):", gone);
+    }
+
+    /**
+     * Counts of one history request by group; empty when Loki failed or answered something else, so the groups say
+     * they were not checked. The server's log shows the request without the fragments.
+     */
+    private Map<LogSummary.Group, long[]> counts(String connection, GroupHistory.Batch batch, GroupHistory.Request request) {
+        try {
+            var response = client.queryRange(connection, request.expression(), request.start(), request.end(),
+                    registry.require(connection).limits().maxEntries(), LokiHttpClient.Direction.FORWARD, GroupHistory.step(), request.logged());
+            return GroupHistory.counts(batch, request, response);
+        } catch (LokiOperationException e) {
+            if (e.error().code() == ErrorCode.OPERATION_CANCELLED) throw e;
+            return Map.of();
+        } catch (IllegalStateException e) {
+            return Map.of();
+        }
+    }
 
     /**
      * Spring Boot start and graceful stop lines of the query's streams in the window: one more Loki request, whose
