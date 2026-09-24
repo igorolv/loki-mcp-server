@@ -59,7 +59,8 @@ public final class ConnectionsLoader {
                         ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits,
                         e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels(),
                         e.applicationPackages() == null ? List.of() : e.applicationPackages(),
-                        rules(path, e.rulesFile(), environment, rulesByFile)));
+                        rules(path, e.rulesFile(), environment, rulesByFile), e.scope(),
+                        e.levels() == null ? Map.of() : e.levels()));
             }
             return List.copyOf(definitions);
         } catch (Exception ignored) {
@@ -147,7 +148,7 @@ public final class ConnectionsLoader {
 
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
                          Limits limits, List<String> serviceLabels, List<String> applicationPackages,
-                         JsonNode rulesFile) {
+                         JsonNode rulesFile, String scope, Map<String, String> levels) {
     }
 
     private record RulesFile(List<Rule> rules) {

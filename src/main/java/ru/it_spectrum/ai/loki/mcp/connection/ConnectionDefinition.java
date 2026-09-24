@@ -5,19 +5,38 @@ import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import java.net.URI;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * hint is shown to the model by listConnections; serviceLabels are tried in order to name the service of a line;
  * applicationPackages tell which stack frames belong to the stand's own code (empty: none are recognised);
- * rules say what known kinds of lines mean, in the order they are tried.
+ * rules say what known kinds of lines mean, in the order they are tried; scope is the stream selector of the stand's
+ * services that a query built from service, level and text starts from (null: none); levels map a level name to the
+ * LogQL line filter that selects it, on top of {@link #DEFAULT_LEVELS}.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits,
-                                   List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules) {
+                                   List<String> serviceLabels, List<String> applicationPackages, List<LogRule> rules,
+                                   String scope, Map<String, String> levels) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of(
             "applicationName", "service_name", "service", "app", "container", "job");
     public static final int MAX_APPLICATION_PACKAGES = 32;
     public static final int MAX_RULES = 200;
+    public static final int MAX_FILTER_CHARS = 300;
+    /**
+     * Line filters of a level when the profile names none: the level word as Java and most loggers print it, and for
+     * errors the exception lines of a stack trace.
+     */
+    public static final Map<String, String> DEFAULT_LEVELS = Map.of(
+            "error", "|~ \"ERROR|FATAL|Exception|Caused by\"",
+            "warn", "|~ \"WARN\"");
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<String> applicationPackages, List<LogRule> rules) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, applicationPackages, rules, null, Map.of());
+    }
 
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits) {
@@ -53,12 +72,28 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || applicationPackages == null || applicationPackages.size() > MAX_APPLICATION_PACKAGES
                 || applicationPackages.stream().anyMatch(p -> p == null || !p.matches("[a-zA-Z_$][\\w$]*(?:\\.[a-zA-Z_$][\\w$]*)*"))
                 || rules == null || rules.size() > MAX_RULES || rules.stream().anyMatch(java.util.Objects::isNull)
-                || rules.stream().map(LogRule::id).distinct().count() != rules.size()) {
+                || rules.stream().map(LogRule::id).distinct().count() != rules.size()
+                || (scope != null && (scope.length() > 1000 || !ru.it_spectrum.ai.loki.mcp.service.DiscoveryService.SELECTOR.matcher(scope).matches()))
+                || levels == null || levels.size() > 16
+                || levels.entrySet().stream().anyMatch(l -> l.getKey() == null || !l.getKey().matches("[a-z]{1,16}") || l.getValue() == null
+                || !l.getValue().strip().startsWith("|") || l.getValue().length() > MAX_FILTER_CHARS
+                || l.getValue().chars().anyMatch(Character::isISOControl))) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
         applicationPackages = List.copyOf(applicationPackages);
         rules = List.copyOf(rules);
+        scope = scope == null ? null : scope.strip();
+        levels = java.util.Collections.unmodifiableMap(new TreeMap<>(levels));
+    }
+
+    /**
+     * The profile's levels over the defaults, by name.
+     */
+    public Map<String, String> allLevels() {
+        var all = new TreeMap<>(DEFAULT_LEVELS);
+        all.putAll(levels);
+        return all;
     }
 
     @Override

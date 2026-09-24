@@ -42,7 +42,14 @@ is recognised as own code and nothing is guessed from class names. `rulesFile` i
 optional path to a rules catalogue (below) or a non-empty list of them, tried in order —
 the stand's own file first, then generic sets (`["asva2-rules.json", "java-rules.json"]`);
 a relative path is resolved against the directory of the connections file, `${VARIABLES}`
-are substituted, and connections naming the same file share one loaded copy. The registry never picks a default connection, even
+are substituted, and connections naming the same file share one loaded copy. `scope` is an
+optional stream selector of the stand's services (`{namespace=~"dev|asv-dev"}`, up to 1000
+characters, a selector only): queries built from `service`, `level` and `text`
+([queries.md](queries.md#queries-without-logql)) start from it. `levels` is an optional map
+of up to 16 level names (lower-case letters) to the LogQL line filter that selects them
+(`{"error": "|~ \"ERROR|Exception|Caused by\""}`, starting with `|`, up to 300 characters);
+it overrides the defaults `error` → `|~ "ERROR|FATAL|Exception|Caused by"` and `warn` →
+`|~ "WARN"`. `listConnections` names the levels and the scope of every connection. The registry never picks a default connection, even
 with a single entry, and never trims names.
 
 ### Rules catalogue

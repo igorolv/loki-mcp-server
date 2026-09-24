@@ -10,6 +10,11 @@ import ru.it_spectrum.ai.loki.mcp.service.QueryService;
 public class QueryTools {
     static final String START = "Window start. Default \"now-1h\". Examples: \"now-15m\", \"now-2d\", \"2026-09-13T10:00:00+03:00\".";
     static final String END = "Window end. Default \"now\". Same formats as start; use the value from a previous footer to read older lines.";
+    static final String QUERY = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\". "
+            + "Leave it out when you pass service, level or text.";
+    static final String SERVICE = "Instead of query: service name as discoverLogs prints it, e.g. \"backend\"; several: \"backend,frontend\"";
+    static final String LEVEL = "Instead of query: \"error\" or \"warn\" (listConnections names the levels of the stand)";
+    static final String TEXT = "Instead of query: text the line must contain, case-sensitive, e.g. \"timeout\"";
     private final QueryService service;
 
     public QueryTools(QueryService service) {
@@ -17,7 +22,8 @@ public class QueryTools {
     }
 
     @McpTool(name = "queryLogs",
-            description = "Read log lines matching a LogQL log query, newest first within the window. Each line is printed as "
+            description = "Read log lines, newest first within the window: pass service=\"backend\", level=\"error\" (and text) "
+                    + "or a LogQL query. Each line is printed as "
                     + "'time LEVEL service message' with stack traces shortened. Example query: {app=\"backend\"} |= \"ERROR\"; "
                     + "with JSON logs add | json | log_level=~\"(?i)error\". To find lines of one request use |= \"<traceId>\". "
                     + "If the footer says there are more lines, either narrow the query or repeat with the end value it gives. "
@@ -25,29 +31,35 @@ public class QueryTools {
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String queryLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\"") String query,
+            @McpToolParam(description = QUERY, required = false) String query,
+            @McpToolParam(description = SERVICE, required = false) String service,
+            @McpToolParam(description = LEVEL, required = false) String level,
+            @McpToolParam(description = TEXT, required = false) String text,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "Maximum lines to return, default 50", required = false) Integer limit,
             @McpToolParam(description = "true prints original lines unchanged (full JSON, full stack trace) with their stream labels. Default false", required = false) Boolean raw) {
-        return service.logs(connection, query, start, end, limit, raw);
+        return this.service.logs(connection, query, service, level, text, start, end, limit, raw);
     }
 
     @McpTool(name = "summarizeLogs",
             description = "Summarize many log lines instead of reading them. It starts with an incident picture: what is new or "
                     + "growing, since when, in which services in which order, the dependency, and restarts or deploys around it; below "
                     + "are the groups (errors by root cause, other lines by message) with counts in the sample and their history. Use it "
-                    + "when asked what is broken or when countLogs shows hundreds of lines, e.g. {app=\"backend\"} |= \"ERROR\" with "
-                    + "start=\"now-4h\". Then follow the picture: followKey for its key, queryLogs |= \"<part of its message>\" or "
+                    + "when asked what is broken or when countLogs shows hundreds of lines, e.g. level=\"error\", start=\"now-4h\" "
+                    + "(or a service, or a LogQL query). Then follow the picture: followKey for its key, queryLogs with its text, "
                     + "getLogContext around its time.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String summarizeLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\"") String query,
+            @McpToolParam(description = QUERY, required = false) String query,
+            @McpToolParam(description = SERVICE, required = false) String service,
+            @McpToolParam(description = LEVEL, required = false) String level,
+            @McpToolParam(description = TEXT, required = false) String text,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "How many newest lines to sample, default 500", required = false) Integer sample) {
-        return service.summarize(connection, query, start, end, sample);
+        return this.service.summarize(connection, query, service, level, text, start, end, sample);
     }
 
     @McpTool(name = "followKey",
@@ -84,18 +96,21 @@ public class QueryTools {
     }
 
     @McpTool(name = "countLogs",
-            description = "Count log lines matching a LogQL log query, to check whether a problem exists, how big it is and when it started. "
+            description = "Count log lines (service/level/text or a LogQL query), to check whether a problem exists, how big it is and when it started. "
                     + "Without groupBy returns one number. groupBy=\"<label>\" (e.g. level, app) returns a table per label value. "
                     + "groupBy=\"time\" returns counts per time bucket and marks spikes. Use this before reading lines. "
-                    + "Example: query {app=\"backend\"} |= \"ERROR\", groupBy \"time\".",
+                    + "Example: service=\"backend\", level=\"error\", groupBy=\"time\".",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String countLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "LogQL log query starting with a stream selector, e.g. {app=\"backend\"} |= \"ERROR\"") String query,
+            @McpToolParam(description = QUERY, required = false) String query,
+            @McpToolParam(description = SERVICE, required = false) String service,
+            @McpToolParam(description = LEVEL, required = false) String level,
+            @McpToolParam(description = TEXT, required = false) String text,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "A label name to break the count down by, or \"time\" for buckets over the window", required = false) String groupBy) {
-        return service.count(connection, query, start, end, groupBy);
+        return this.service.count(connection, query, service, level, text, start, end, groupBy);
     }
 
     @McpTool(name = "queryMetrics",

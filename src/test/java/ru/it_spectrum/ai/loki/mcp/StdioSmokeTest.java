@@ -148,7 +148,8 @@ class StdioSmokeTest {
             assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "followKey", "getLogContext", "queryMetrics")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
-            assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
+            assertEquals(List.of("connection"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
+            assertTrue(tool.path("inputSchema").path("properties").has("service") && tool.path("inputSchema").path("properties").has("level"), tool.toString());
             for (int id = 19; id <= 34; id++) {
                 send(input, "{\"jsonrpc\":\"2.0\",\"id\":" + id
                         + ",\"method\":\"tools/call\",\"params\":{\"name\":\"listConnections\",\"arguments\":{}}}");
@@ -161,7 +162,7 @@ class StdioSmokeTest {
                 JsonNode result = call.path("result");
                 assertFalse(result.path("isError").asBoolean(), result.toString());
                 assertFalse(result.has("structuredContent"), result.toString());
-                assertEquals("dev — Development. Labels: kind, level\ntest\ntiny", text(result));
+                assertEquals("dev — Development. Labels: kind, level. Without LogQL: service, level (error, warn), text; service is required.\ntest. Without LogQL: service, level (error, warn), text; service is required.\ntiny. Without LogQL: service, level (error, warn), text; service is required.", text(result));
                 assertNoSecrets(call.toString());
             }
             // Oversized payloads and the minimum budget traverse the real outbound transport.

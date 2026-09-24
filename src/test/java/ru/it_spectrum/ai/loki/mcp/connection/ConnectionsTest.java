@@ -90,6 +90,21 @@ class ConnectionsTest {
     }
 
     @Test
+    void scopeAndLevelsAreLoadedAndChecked() throws Exception {
+        var entries = load("""
+                {"connections":{"a":{"url":"http://localhost:1","scope":"{namespace=\\"dev\\"}",
+                  "levels":{"error":"|~ \\"ERROR|Exception\\""}}}}
+                """);
+        assertEquals("{namespace=\"dev\"}", entries.getFirst().scope());
+        assertEquals("|~ \"ERROR|Exception\"", entries.getFirst().allLevels().get("error"));
+        assertEquals("|~ \"WARN\"", entries.getFirst().allLevels().get("warn"));
+        for (String bad : List.of("\"scope\":\"namespace=dev\"", "\"scope\":\"{a=\\\"b\\\"} |= \\\"x\\\"\"",
+                "\"levels\":{\"error\":\"ERROR\"}", "\"levels\":{\"Error\":\"|= \\\"x\\\"\"}"))
+            assertSafeConfigurationError(assertThrows(LokiOperationException.class,
+                    () -> load("{\"connections\":{\"a\":{\"url\":\"http://localhost\"," + bad + "}}}")));
+    }
+
+    @Test
     void severalRulesFilesAreTriedInTheirOrderWithIdsUniqueAcrossThem() throws Exception {
         Files.writeString(directory.resolve("stand.json"), "{\"rules\":[" + RULE + "]}");
         Files.writeString(directory.resolve("java.json"),

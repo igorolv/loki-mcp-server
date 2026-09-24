@@ -54,7 +54,8 @@ environment variables `LOKI_DEV_URL` and `LOKI_TST_URL`. The minimum:
 `hint` is a short map of the stand for the model (which labels exist, how to pick a
 service, known traps); `serviceLabels` says which labels name the service on a line;
 `applicationPackages` names the packages of the stand's own code (the frame shown under a
-root cause); `rulesFile` points to a catalogue of what known lines mean — dependencies,
+root cause); `scope` and `levels` let `queryLogs`, `countLogs` and `summarizeLogs` take
+`service`, `level` and `text` instead of LogQL; `rulesFile` points to a catalogue of what known lines mean — dependencies,
 start-up failures, configuration errors, noise — which `summarizeLogs` applies; it takes
 one file or a list, the stand's own first (the asva2 set is
 [examples/asva2-rules.json](examples/asva2-rules.json), a generic Java set

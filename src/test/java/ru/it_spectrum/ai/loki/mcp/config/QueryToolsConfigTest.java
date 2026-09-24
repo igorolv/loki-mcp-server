@@ -48,7 +48,7 @@ class QueryToolsConfigTest {
 
     @Test
     void unexpectedFailureIsSafeAndInvalidInputNeverInvokesService() {
-        when(service.logs("test", "q", null, null, null, null)).thenThrow(new IllegalStateException("SECRET cause"));
+        when(service.logs("test", "q", null, null, null, null, null, null, null)).thenThrow(new IllegalStateException("SECRET cause"));
         var result = call("queryLogs", Map.of("connection", "test", "query", "q"));
         assertTrue(result.isError());
         assertEquals("Error INTERNAL_ERROR: Operation failed internally.", text(result));
@@ -67,15 +67,15 @@ class QueryToolsConfigTest {
 
     @Test
     void safeErrorsFromServicesAndOversizedTextAreReportedAsText() {
-        when(service.count("test", "{a=\"b\"}", null, null, null)).thenThrow(Errors.invalid("groupBy must be a label name."));
+        when(service.count("test", "{a=\"b\"}", null, null, null, null, null, null)).thenThrow(Errors.invalid("groupBy must be a label name."));
         var error = call("countLogs", Map.of("connection", "test", "query", "{a=\"b\"}"));
         assertTrue(error.isError());
         assertEquals("Error INVALID_ARGUMENT: groupBy must be a label name.", text(error));
-        when(service.logs("test", "q", null, null, null, null)).thenReturn("x".repeat(2000));
+        when(service.logs("test", "q", null, null, null, null, null, null, null)).thenReturn("x".repeat(2000));
         var oversized = call("queryLogs", Map.of("connection", "test", "query", "q"));
         assertTrue(oversized.isError());
         assertTrue(text(oversized).startsWith("Error RESPONSE_BUDGET_EXCEEDED"));
-        when(service.logs("test", "q", null, null, null, null)).thenReturn("fine");
+        when(service.logs("test", "q", null, null, null, null, null, null, null)).thenReturn("fine");
         var ok = call("queryLogs", Map.of("connection", "test", "query", "q"));
         assertFalse(ok.isError());
         assertEquals("fine", text(ok));

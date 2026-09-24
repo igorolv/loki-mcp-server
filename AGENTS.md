@@ -55,7 +55,9 @@ from the Redmine donor without a separate reason.
 
 Current stack: Gradle 9.3.1, Spring Boot 4.0.0, Spring AI 2.0.0. Tools: `listConnections`,
 `discoverLogs` (with `label`), `countLogs`, `summarizeLogs`, `queryLogs` (`raw` with
-labels), `getLogContext`, `followKey`, `queryMetrics` — all return text; external configuration is
+labels), `getLogContext`, `followKey`, `queryMetrics` — all return text; the first three
+take `service`/`level`/`text` instead of LogQL (`QueryIntent`, profile `scope`/`levels`),
+and an empty result says why (`SelectorCheck`); external configuration is
 mandatory, the registry is immutable. Contract: [docs/queries.md](docs/queries.md),
 [docs/discovery.md](docs/discovery.md). Standard Windows PowerShell commands:
 
@@ -249,9 +251,9 @@ stdio interaction checks.
   passed test. Continue with independent work.
 - Pages and the budget need tests for identical timestamps, several streams, real
   duplicates, large stack traces, Unicode and the minimum `maxResponseBytes`.
-- Tool descriptions and `instructions` are verified only by running the scenario with the
-  target model (DeepSeek 4.1 Flash) through a real MCP client; the user runs it manually,
-  the findings and description fixes go to `docs/decisions.md` ("Open items").
+- Tool descriptions and `instructions` are checked by review against the rules above and
+  by the live smoke; a manual run with the target model is not planned (dropped by the user
+  on 2026-09-24). Findings from real use go to `docs/decisions.md` ("Open items").
 - After a successful check do not repeat it without new changes or another concrete reason.
 
 ## Donors and document currency

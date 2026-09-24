@@ -69,8 +69,8 @@ and the query has an obvious default (`start="now-1h"`, `end="now"`, `limit=50`)
 Not implemented on purpose: `loki_stats`, `loki_ready`, `loki_config` (nothing to
 investigate with), `direction` (always the newest lines of the window), Grafana proxy
 transport (Grafana adds no capability over direct Loki; revisit if a stand exposes Loki
-only through Grafana), MCP prompts (deferred until the manual run with the target model
-shows whether they help).
+only through Grafana), MCP prompts (no evidence that they help; the manual run with the
+target model that was to decide it was dropped on 2026-09-24).
 
 ## Connections
 
@@ -121,8 +121,9 @@ a rolling file. `immediateExecution(true)` and SDK input validation off, as in t
   green again from `8ef11b8` (the S14–S17 pushes failed in `integrationTest` on an outdated
   assertion). Actions at v5 since 2026-09-24; `gradlew` is executable in the index, so
   there is no `chmod` step.
-- Tool descriptions and `instructions` can only be verified by running the investigation
-  scenario with the target model through a real MCP client; this is done manually.
+- Tool descriptions and `instructions` are checked by review and the live smoke. The
+  planned manual run with DeepSeek 4.1 Flash was dropped by the user on 2026-09-24; the
+  descriptions stay written for that class of model.
 
 ## Observations from the asva2 stands (2026-09-14)
 
@@ -526,10 +527,43 @@ Done 2026-09-24. What the work added to the plan:
   start-up NPE and Flyway errors came out "more than usual" because the services restarted
   more often, which their restarts line says.
 
+## Queries without LogQL and why a result is empty (D, 2026-09-24)
+
+A weak model writes LogQL with a mistyped label value, the wrong service label or a filter
+that drops everything, and Loki answers all of them with zero lines. Decided with the user
+(the manual run with the target model, which was to come first, was dropped):
+
+- **D1 — why a result is empty.** Only after an empty result, so it costs nothing while
+  there are lines: label values of every `=` matcher, the label list when a label has none,
+  then `/series` of the selector; one `Why:` line names the missing label or value (with
+  the closest values), the matchers no stream holds together, or the pipeline that dropped
+  every line of the streams. A failed lookup leaves the plain answer.
+- **D2 — `service`, `level`, `text` instead of `query`** in `queryLogs`, `countLogs` and
+  `summarizeLogs`. They are filters with obvious defaults, not a mode. The base selector is
+  the profile's `scope`; the service label is looked up among `serviceLabels` by the
+  values Loki has in the window, never guessed; `level` is a line filter from the profile's
+  `levels` over generic defaults (`error`, `warn`), because a level label is missing on the
+  asva2 streams and `detected_level` exists only on 3.x. `query` together with them is an
+  argument error: combining would let the model write half a query twice. The built query
+  is printed, so the model sees LogQL it can refine. `followKey` and `getLogContext` keep
+  their explicit selector: context needs the exact stream.
+
+On DEV on 2026-09-24 (asva2 profile with `scope` `{namespace=~"dev|asv-dev"}` and the
+asva2 error filter as `levels.error`): `countLogs(service="ssj-main", level="error")` built
+`{namespace=~"dev|asv-dev", instance="ssj-main"} |~ "ERROR|Exception|Caused by"` in 0.6 s
+(`applicationName` does not hold the release name, so `instance` was taken);
+`service="ssj-mian"` answered with the closest names in 0.1 s; a query with
+`instance="ssj-mian"` said which value was missing, and one with a filter no line holds said
+that 4 streams matched and the filter left nothing. Label values and series answer in
+20–45 ms. `summarizeLogs(level="error")` over the whole scope for 2 hours read 334 lines in
+29 s: the scope holds more than the Java services.
+
 ## Open items
 
-- Manual end-to-end run with DeepSeek 4.1 Flash ("the DEV stand is broken, find out why");
-  fix tool descriptions, `instructions` and hints from its protocol; decide on MCP prompts.
+- Plain Spring Boot pattern lines (`ais-ui-develop` on DEV) keep their timestamp, level
+  and thread prefix in the message, so a group's headline starts with
+  `2026-09-24T15:10:16.432+03:00 WARN 1 --- [ main] …`; the plain branch of
+  `EventNormalizer` could strip the default Spring Boot console prefix.
 - Docker image: deferred; the stdio server is launched by a local MCP client.
 - Grafana Explore links, Grafana proxy transport: only if a real need appears.
 - asva2 side, not ours: the DEV promtail lacks the JSON stage (no `applicationName` /

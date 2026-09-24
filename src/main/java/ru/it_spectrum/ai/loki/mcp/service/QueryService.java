@@ -36,6 +36,7 @@ public class QueryService {
     private final LokiHttpClient client;
     private final Clock clock;
     private final EventNormalizer normalizer = new EventNormalizer();
+    private final SelectorCheck check;
 
     @Autowired
     public QueryService(ConnectionRegistry registry, LokiHttpClient client) {
@@ -46,15 +47,33 @@ public class QueryService {
         this.registry = registry;
         this.client = client;
         this.clock = clock;
+        this.check = new SelectorCheck(client);
+    }
+
+    /**
+     * {@code text} with the reason of an empty result on a line of its own, when one is found.
+     */
+    private String why(String text, String connection, String query, QueryTime.Range window) {
+        String why = check.explain(connection, query, window);
+        return why == null ? text : text + "\n" + why;
     }
 
     /**
      * Newest {@code limit} lines of the window, printed in chronological order.
      */
     public String logs(String connection, String query, String start, String end, Integer limit, Boolean raw) {
+        return logs(connection, query, null, null, null, start, end, limit, raw);
+    }
+
+    /**
+     * {@code service}, {@code level} and {@code text} build the query instead of {@code query} ({@link QueryIntent}).
+     */
+    public String logs(String connection, String query, String service, String level, String textFilter, String start, String end,
+                       Integer limit, Boolean raw) {
         var definition = registry.require(connection);
-        requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        query = QueryIntent.resolve(definition, client, query, service, level, textFilter, window);
+        requireLogQuery(query);
         int usedLimit = limit == null ? Math.min(DEFAULT_LIMIT, definition.limits().maxEntries()) : limit;
         if (usedLimit <= 0 || usedLimit > definition.limits().maxEntries())
             throw Errors.invalid("limit must be between 1 and " + definition.limits().maxEntries() + " for this connection.");
@@ -68,8 +87,9 @@ public class QueryService {
                 + (events.isEmpty() ? "no matching lines." : more ? "newest " + events.size() + " of more:" : "all " + events.size() + " lines:");
         var marked = withDateMarkers(events, lines, zone);
         // Markers are not events; keep the two lists aligned when the oldest lines are dropped for the budget.
-        return fit(header, marked, dropped -> footer(events, marked, dropped, more, usedLimit, zone),
+        String text = fit(header, marked, dropped -> footer(events, marked, dropped, more, usedLimit, zone),
                 definition.limits().maxResponseBytes() - ENVELOPE_BYTES);
+        return events.isEmpty() ? why(text, connection, query, window) : text;
     }
 
     private static String footer(List<LogEvent> events, List<String> marked, int dropped, boolean more, int limit, ZoneId zone) {
@@ -95,9 +115,15 @@ public class QueryService {
      * The numbers describe the sample, never the window; the footer says so and names countLogs for the total.
      */
     public String summarize(String connection, String query, String start, String end, Integer sample) {
+        return summarize(connection, query, null, null, null, start, end, sample);
+    }
+
+    public String summarize(String connection, String query, String service, String level, String textFilter, String start, String end,
+                            Integer sample) {
         var definition = registry.require(connection);
-        requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        query = QueryIntent.resolve(definition, client, query, service, level, textFilter, window);
+        requireLogQuery(query);
         int maximum = definition.limits().maxEntries();
         int usedSample = sample == null ? Math.min(LogSummary.DEFAULT_SAMPLE, maximum) : sample;
         if (usedSample <= 0 || usedSample > maximum)
@@ -106,8 +132,8 @@ public class QueryService {
         var events = sampled.events();
         ZoneId zone = definition.timezone();
         String where = query.strip() + " — " + connection + ", " + window(window, zone);
-        if (events.isEmpty()) return "Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
-                + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.";
+        if (events.isEmpty()) return why("Summary of " + where + ": no matching lines.\nNo lines match in this window. Try a wider window "
+                + "(e.g. start=\"now-6h\"), check labels and fields with discoverLogs, or simplify the filter.", connection, query, window);
         boolean more = events.size() >= usedSample || sampled.cutByBytes();
         var starts = starts(connection, query, window);
         if (starts != null) starts.count(events);
@@ -471,8 +497,9 @@ public class QueryService {
         String where = "Lines with " + what + " in " + scope + " — " + connection + ", " + window(window, zone);
         String partialNote = partial == 0 ? "" : " " + partial + (partial == 1 ? " line" : " lines")
                 + " holding " + value + " only inside a longer word were left out.";
-        if (events.isEmpty()) return where + ": no lines." + partialNote + "\nNo line of the window holds this value. Widen the window "
-                + "around the time the key was seen (start=\"...\", end=\"...\"), or use a selector that covers every service.";
+        if (events.isEmpty()) return why(where + ": no lines." + partialNote + "\nNo line of the window holds this value. Widen the window "
+                + "around the time the key was seen (start=\"...\", end=\"...\"), or use a selector that covers every service.",
+                connection, scope + " |= \"" + value + "\"", window);
         var lines = new ArrayList<String>();
         var services = new LinkedHashSet<String>();
         String firstError = null;
@@ -571,6 +598,8 @@ public class QueryService {
             if (placeholder != null) marked.add(marked.size() - keepAfter, placeholder);
             int dropped = (beforeCount - keepBefore) + (later.size() - keepAfter);
             String text = assemble(header, marked, contextFooter(earlier, later, targets, wantBefore, wantAfter, keepBefore, keepAfter, dropped, point, reach, zone));
+            if (earlier.isEmpty() && later.isEmpty())
+                return why(text, connection, scope, new QueryTime.Range(point.end().minus(reach), point.end().plus(reach)));
             if (bytes(text) <= budget) return text;
             if (keepBefore == 0 && keepAfter == 0) throw Errors.failure(ErrorCode.RESPONSE_BUDGET_EXCEEDED,
                     "Even a minimal response does not fit maxResponseBytes of this connection. Narrow the selector or raise the limit.");
@@ -608,14 +637,21 @@ public class QueryService {
      * Count of matching lines, optionally broken down by a label or by time buckets.
      */
     public String count(String connection, String query, String start, String end, String groupBy) {
+        return count(connection, query, null, null, null, start, end, groupBy);
+    }
+
+    public String count(String connection, String query, String service, String level, String textFilter, String start, String end,
+                        String groupBy) {
         var definition = registry.require(connection);
-        requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        query = QueryIntent.resolve(definition, client, query, service, level, textFilter, window);
+        requireLogQuery(query);
         ZoneId zone = definition.timezone();
         String where = query.strip() + " in " + window(window, zone) + " (" + connection + ")";
         if (groupBy == null || groupBy.isBlank()) {
             long total = sum(vector(client.queryInstant(connection, countExpression(query, window.duration(), null), window.end())));
-            return total + " lines match " + where + ".";
+            String text = total + " lines match " + where + ".";
+            return total == 0 ? why(text, connection, query, window) : text;
         }
         if (groupBy.strip().equals("time")) return buckets(connection, query, window, zone);
         String label = groupBy.strip();
@@ -627,7 +663,7 @@ public class QueryService {
         rows.sort(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()));
         long total = rows.stream().mapToLong(Map.Entry::getValue).sum();
         var text = new StringBuilder(total + " lines match " + where + ".");
-        if (rows.isEmpty()) return text.toString();
+        if (rows.isEmpty()) return why(text.toString(), connection, query, window);
         text.append("\nBy ").append(label).append(':');
         int width = Math.max(6, rows.stream().mapToInt(r -> r.getKey().length()).max().orElse(1));
         int shown = 0;
@@ -664,7 +700,7 @@ public class QueryService {
             }
         long total = counts.values().stream().mapToLong(Long::longValue).sum();
         var text = new StringBuilder(total + " lines match " + where + ".");
-        if (total == 0) return text.toString();
+        if (total == 0) return why(text.toString(), connection, query, window);
         var sorted = new ArrayList<>(counts.values());
         Collections.sort(sorted);
         double median = sorted.get(sorted.size() / 2);
@@ -813,7 +849,8 @@ public class QueryService {
 
     private static void requireLogQuery(String query) {
         if (query == null || query.isBlank())
-            throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\".");
+            throw Errors.invalid("query is required, e.g. {app=\"backend\"} |= \"ERROR\", or pass service/level/text instead, "
+                    + "e.g. service=\"backend\", level=\"error\".");
         if (!query.strip().startsWith("{"))
             throw Errors.invalid("A log query starts with a stream selector in braces, e.g. {app=\"backend\"} |= \"ERROR\". "
                     + "For metric expressions use queryMetrics.");

@@ -13,7 +13,9 @@
       "timezone": "Europe/Moscow",
       "serviceLabels": ["applicationName", "instance", "container"],
       "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
-      "rulesFile": ["asva2-rules.json", "java-rules.json"]
+      "rulesFile": ["asva2-rules.json", "java-rules.json"],
+      "scope": "{namespace=~\"dev|asv-dev\"}",
+      "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }
     },
     "tst": {
       "description": "asva2 TST stand: docker-compose on the infra host, Loki 3.5, 7-day retention",
@@ -22,7 +24,9 @@
       "timezone": "Europe/Moscow",
       "serviceLabels": ["applicationName", "service", "container"],
       "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
-      "rulesFile": ["asva2-rules.json", "java-rules.json"]
+      "rulesFile": ["asva2-rules.json", "java-rules.json"],
+      "scope": "{job=\"docker\"}",
+      "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }
     },
     "secured": {
       "description": "Loki behind authentication, configured through environment variables",

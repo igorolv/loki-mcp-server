@@ -11,7 +11,45 @@ short form `15m` is accepted), RFC3339 with an offset, local time in the connect
 timezone, or epoch nanoseconds. The window is limited by the connection's
 `maxIntervalSeconds`.
 
-## queryLogs(connection, query, start, end, limit = 50, raw = false)
+**Why a result is empty.** When `queryLogs`, `countLogs`, `summarizeLogs`, `followKey` or
+`getLogContext` find no line, the server looks for the reason with metadata requests that
+cost nothing while there are lines: the values of every label of an `=` matcher
+(`/label/<name>/values` over the window), the label list when a label has none, then
+`/series` of the whole selector. The answer gets one more line:
+
+```
+Why: no stream has instance="ssj-mian" in this window; closest values of instance: ssj-main, nsi-main, sbp-main, sec-main, audit-main. discoverLogs with label="instance" lists them all.
+Why: label applicationNme does not exist in this window; labels: app, applicationName, namespace. Take labels and values from discoverLogs.
+Why: no stream matches {namespace="tst", instance="ssj-main"} in this window, although every single value exists; one matcher excludes the others. …
+Why: {namespace="dev", instance=~"ssj.*"} matches 14 streams, but |~ "EROR" left no line. Check the filter text (it is case-sensitive; |~ "(?i)..." ignores case); countLogs with {…} alone shows how many lines the streams have.
+```
+
+Closest values are those holding the wanted text or held by it, then by edit distance, at
+most 5. Regular expression matchers are not looked up one by one. A failed lookup leaves
+the plain empty answer.
+
+**Queries without LogQL.** `queryLogs`, `countLogs` and `summarizeLogs` take `service`,
+`level` and `text` instead of `query` (both at once is an argument error with an example):
+
+- `service` — one name or several separated by commas. The server asks Loki for the values
+  of each of the connection's `serviceLabels` within its `scope` over the window and takes
+  the first label that holds every name: `applicationName="ssj-backend"`, or
+  `instance=~"ssj-main|sec-main"`. A name no label holds is an argument error with the
+  closest values; names held by different labels ask for one call each.
+- `level` — a name of the connection's `levels` (default `error`, `warn`), added as its
+  line filter.
+- `text` — `|= "<text>"`, case-sensitive, up to 500 characters on one line.
+
+The selector is the connection's `scope` with the service matcher added (the service
+matcher alone without a scope; neither is an argument error). The built query is printed
+in the header like a given one, so the model can refine it as LogQL:
+
+```
+summarizeLogs(connection="dev", service="ssj-backend", level="error", start="now-4h")
+Summary of {namespace=~"dev|asv-dev", applicationName="ssj-backend"} |~ "ERROR|Exception|Caused by" — dev, …
+```
+
+## queryLogs(connection, query | service, level, text, start, end, limit = 50, raw = false)
 
 One backward `query_range` request with `limit` (at most `maxEntries`). Lines are printed
 in chronological order:
@@ -130,7 +168,7 @@ by line) the advice is a larger `before`. Under the budget lines are dropped fro
 side and the marked lines are never dropped: `Output limit reached: showing N before and
 M after of K fetched lines.`
 
-## summarizeLogs(connection, query, start, end, sample = 500)
+## summarizeLogs(connection, query | service, level, text, start, end, sample = 500)
 
 A summary instead of reading: the `sample` newest lines of the window, grouped locally —
 Loki's pattern API is not used, so it works on 2.6.1 too.
@@ -413,7 +451,7 @@ request runs after the history and before the fields, under the same deadline, a
 log line shows `<log text>` for the fragments. The budget cuts the picture last, by its
 smallest incidents: `Not in the picture: N more incidents (output limit)`.
 
-## countLogs(connection, query, start, end, groupBy)
+## countLogs(connection, query | service, level, text, start, end, groupBy)
 
 The server builds the metric LogQL; `query` is an ordinary log query starting with `{`.
 

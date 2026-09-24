@@ -12,7 +12,8 @@ public class ConnectionsService {
     }
 
     /**
-     * One line per connection: name, description and the operator's hint. Never URLs or credentials.
+     * One line per connection: name, description, the operator's hint and what service/level/text queries start from.
+     * Never URLs or credentials.
      */
     public String list() {
         var text = new StringBuilder();
@@ -20,6 +21,9 @@ public class ConnectionsService {
             text.append(connection.name());
             if (connection.description() != null) text.append(" — ").append(connection.description());
             if (connection.hint() != null) text.append(". ").append(connection.hint());
+            if (text.charAt(text.length() - 1) != '.') text.append('.');
+            text.append(" Without LogQL: service, level (").append(String.join(", ", connection.allLevels().keySet())).append("), text")
+                    .append(connection.scope() == null ? "; service is required." : ", searched in " + connection.scope() + ".");
             text.append('\n');
         }
         return text.toString().stripTrailing();
