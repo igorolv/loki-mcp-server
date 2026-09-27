@@ -30,7 +30,7 @@ Every data operation names its connection. A failure of one connection does not 
 
 ## Count, discovery and export
 
-discoverLogs calls labels or label/<name>/values. It does not sample lines or try to supply a ready selector. It has no selector argument because [Loki 2.6.1's metadata handler](https://github.com/grafana/loki/blob/v2.6.1/pkg/loghttp/labels.go) ignores the `query` parameter. Claiming a scoped result would be misleading. countLogs wraps a log query in count_over_time and can group by label or clock aligned time bucket. It reports counts without spike or cause markers. exportLogs reads forward, writes the Loki query result line or an inline template in full and stays inside configured export roots. A LogQL line_format stage rewrites the result line before export; raw means the returned line, not necessarily the ingested line. It never overwrites an existing file. A nanosecond holding more lines than one Loki page may leave lines missing; the report says so. Export limits and errors leave a partial file with a continuation when possible.
+Initially, discoverLogs called labels or label/<name>/values only. It did not sample lines or try to supply a ready selector. It had no selector argument because [Loki 2.6.1's metadata handler](https://github.com/grafana/loki/blob/v2.6.1/pkg/loghttp/labels.go) ignores the `query` parameter. Claiming a scoped result from that endpoint would be misleading. The later `/series` decision below adds scoped discovery through a different endpoint. countLogs wraps a log query in count_over_time and can group by label or clock aligned time bucket. It reports counts without spike or cause markers. exportLogs reads forward, writes the Loki query result line or an inline template in full and stays inside configured export roots. A LogQL line_format stage rewrites the result line before export; raw means the returned line, not necessarily the ingested line. It never overwrites an existing file. A nanosecond holding more lines than one Loki page may leave lines missing; the report says so. Export limits and errors leave a partial file with a continuation when possible.
 
 ## Boundaries and safety
 
@@ -57,6 +57,12 @@ exportLogs has a 25-second default total duration, maxExportDurationMs. Each pag
 ## Visible connection limits (2026-09-28)
 
 The user chose to show the effective planning limits in listConnections, before the model calls a data tool. Each connection keeps its name, description and hint, followed by one compact text line with the discoverLogs, queryLogs, countLogs and exportLogs maximum windows, the separate countLogs time-only window, the queryLogs line cap and the per-request timeout. Values come from the loaded ConnectionLimits, including overrides. The response remains text and excludes the URL, credentials, tenant and full configuration.
+
+## Stream label combinations in discovery (2026-09-28)
+
+The user chose to keep the five-tool catalogue and extend discoverLogs with an optional single `match` stream selector. Without match it still calls labels or label/<name>/values. With match and without label it calls `/loki/api/v1/series` and shows complete stream label sets; with both match and label it derives distinct values of that label from the returned sets. The earlier decision to avoid scoped `query` on Loki 2.6.1 label endpoints remains valid: that handler ignores query, whereas `/series` applies its match selector. Multiple `match[]` selectors are not needed in the first version; their union semantics add cost and complexity to the small-model interface.
+
+The series path has a one-day default maximum window, separate from the seven-day unscoped discovery window, and uses the same request timeout, HTTP body limit and text budget as other data calls. It displays at most 50 complete label sets or 200 scoped values, with an exact total and a visible cut only after receiving the complete Loki response. An oversized HTTP response yields no partial result or count and advises narrowing match or the window. Stream label sets do not count log lines and do not prove that a line exists exactly in the requested window. The server does not infer a selector or interpret incident causes from the sets.
 
 ## Open items
 

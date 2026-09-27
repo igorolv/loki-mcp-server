@@ -56,6 +56,7 @@ class StdioSmokeTest {
     void executableJarSpeaksOnlyJsonRpcOnStdout(boolean overrideFile) throws Exception {
         var upstream = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var sawLookaheadLimit = new AtomicBoolean();
+        var sawSeriesMatch = new AtomicBoolean();
         upstream.createContext("/", exchange -> {
             try (exchange) {
                 String path = exchange.getRequestURI().getPath();
@@ -68,6 +69,10 @@ class StdioSmokeTest {
                 else if (status == 404) body = "SECRET_TOKEN path blocked";
                 else if (path.endsWith("/labels")) body = "{\"status\":\"success\",\"data\":[\"kind\"]}";
                 else if (path.endsWith("/values")) body = "{\"status\":\"success\",\"data\":[\"test\"]}";
+                else if (path.endsWith("/series")) {
+                    sawSeriesMatch.set(query.contains("match[]={kind=\"test\"}") && !query.contains("limit="));
+                    body = "{\"status\":\"success\",\"data\":[{\"kind\":\"test\",\"namespace\":\"a\"},{\"kind\":\"test\",\"namespace\":\"b\"}]}";
+                }
                 else if (path.endsWith("/query"))
                     body = "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"kind\":\"test\"},\"value\":[1700000000.125,\"3\"]}]}}";
                 else if (query.contains("step="))
@@ -197,6 +202,7 @@ class StdioSmokeTest {
                     .filter(declaration -> declaration.path("name").asText().equals("discoverLogs")).findFirst().orElseThrow()
                     .path("inputSchema");
             assertFalse(discovery.path("properties").has("selector"), discovery.toString());
+            assertTrue(discovery.path("properties").has("match"), discovery.toString());
             for (int id = 19; id <= 34; id++) {
                 send(input, "{\"jsonrpc\":\"2.0\",\"id\":" + id
                         + ",\"method\":\"tools/call\",\"params\":{\"name\":\"listConnections\",\"arguments\":{}}}");
@@ -211,11 +217,11 @@ class StdioSmokeTest {
                 assertFalse(result.has("structuredContent"), result.toString());
                 assertEquals("""
                         dev — Development. Labels: kind, level.
-                          Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                          Limits: discoverLogs 7d (labels/values), 1d (match); queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
                         test.
-                          Limits: discoverLogs 5d; queryLogs 2d, max 25 lines; countLogs 3d (total/label/label+time), 4d (time-only); exportLogs 2d; request timeout 4500ms.
+                          Limits: discoverLogs 5d (labels/values), 1d (match); queryLogs 2d, max 25 lines; countLogs 3d (total/label/label+time), 4d (time-only); exportLogs 2d; request timeout 4500ms.
                         tiny.
-                          Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                          Limits: discoverLogs 7d (labels/values), 1d (match); queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
                         """.stripTrailing(), text(result));
                 assertNoSecrets(call.toString());
             }
@@ -333,6 +339,19 @@ class StdioSmokeTest {
                 }
                 assertNoSecrets(call.toString());
             }
+            for (int id = 87; id <= 88; id++) {
+                var arguments = new HashMap<String, Object>(Map.of("connection", "test", "match", "{kind=\"test\"}",
+                        "start", "1700000000000000000", "end", "1700000001000000000"));
+                if (id == 88) arguments.put("label", "namespace");
+                send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
+                        "params", Map.of("name", "discoverLogs", "arguments", arguments))));
+                var result = response(stdout, stderr).path("result");
+                assertFalse(result.path("isError").asBoolean(), text(result));
+                if (id == 87) assertTrue(text(result).contains("2 label sets returned by Loki.\n{kind=\"test\", namespace=\"a\"}"), text(result));
+                else assertTrue(text(result).contains("2 values from 2 label sets returned by Loki.\n\"a\"\n\"b\""), text(result));
+                assertNoSecrets(result.toString());
+            }
+            assertTrue(sawSeriesMatch.get());
             for (var bad : List.of(Map.of("label", "kind"),
                     Map.of("connection", "test", "label", "kind", "start", "MODEL_ARGUMENT"))) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 86, "method", "tools/call",

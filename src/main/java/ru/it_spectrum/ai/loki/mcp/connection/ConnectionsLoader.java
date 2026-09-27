@@ -51,7 +51,7 @@ public final class ConnectionsLoader {
                         : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)),
                         ConnectionsLoader::loadFormatFile);
                 Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null,
-                        null, null, null, null) : entry.limits();
+                        null, null, null, null, null) : entry.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
                         or(l.requestTimeoutMs(), d.requestTimeoutMs()), or(l.maxHttpResponseBytes(), d.maxHttpResponseBytes()),
@@ -62,6 +62,7 @@ public final class ConnectionsLoader {
                         l.maxCountIntervalSeconds() == null ? d.maxCountIntervalSeconds() : l.maxCountIntervalSeconds(),
                         l.maxTimeCountIntervalSeconds() == null ? d.maxTimeCountIntervalSeconds() : l.maxTimeCountIntervalSeconds(),
                         l.maxDiscoveryIntervalSeconds() == null ? d.maxDiscoveryIntervalSeconds() : l.maxDiscoveryIntervalSeconds(),
+                        l.maxSeriesIntervalSeconds() == null ? d.maxSeriesIntervalSeconds() : l.maxSeriesIntervalSeconds(),
                         or(l.maxExportDurationMs(), d.maxExportDurationMs()));
                 definitions.add(new ConnectionDefinition(pair.getKey(), entry.description(), entry.hint(),
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
@@ -173,6 +174,7 @@ public final class ConnectionsLoader {
                           Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,
                           Integer maxExportLines, Long maxExportBytes,
                            Long maxCountIntervalSeconds, Long maxTimeCountIntervalSeconds,
-                           Long maxDiscoveryIntervalSeconds, Integer maxExportDurationMs) {
+                           Long maxDiscoveryIntervalSeconds, Long maxSeriesIntervalSeconds,
+                           Integer maxExportDurationMs) {
     }
 }

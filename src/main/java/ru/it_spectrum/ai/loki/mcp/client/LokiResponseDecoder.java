@@ -48,6 +48,13 @@ final class LokiResponseDecoder {
         return new LabelResponse(root.has("data") ? strings(root.path("data")) : List.of());
     }
 
+    SeriesResponse series(byte[] bytes) {
+        JsonNode root = root(bytes);
+        var labelSets = new ArrayList<Map<String, String>>();
+        for (JsonNode set : array(root.path("data"))) labelSets.add(labelsMap(set));
+        return new SeriesResponse(labelSets);
+    }
+
     private JsonNode root(byte[] bytes) {
         try {
             JsonNode root = object(MAPPER.readTree(bytes));

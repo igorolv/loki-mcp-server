@@ -14,15 +14,17 @@ public class DiscoveryTools {
     }
 
     @McpTool(name = "discoverLogs",
-            description = "Discover label names and values before writing LogQL. Call without label to list label names, "
-                    + "then pass label=\"app\" to list its values. Use the names and values to write a stream selector "
-                    + "for queryLogs or countLogs. Widen the window if a quiet stand has no labels in the last hour.",
+            description = "Discover labels before writing LogQL. Without label or match, list label names; "
+                    + "label=\"app\" lists its values. match=\"{app=\\\"api\\\"}\" lists complete stream label sets; "
+                    + "add label=\"namespace\" to list namespace values among those sets. "
+                    + "Use a narrow match and time window, then countLogs or queryLogs to check log lines.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String discoverLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
             @McpToolParam(description = QueryTools.START, required = false) String start,
             @McpToolParam(description = QueryTools.END, required = false) String end,
-            @McpToolParam(description = "Optional label name, e.g. \"app\": list its values", required = false) String label) {
-        return service.discover(connection, start, end, label);
+            @McpToolParam(description = "Optional label name, e.g. \"app\": list its values", required = false) String label,
+            @McpToolParam(description = "Optional LogQL stream selector, e.g. {app=\"api\"}; no line filters", required = false) String match) {
+        return service.discover(connection, start, end, label, match);
     }
 }

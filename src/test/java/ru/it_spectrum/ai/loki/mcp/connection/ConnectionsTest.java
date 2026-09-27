@@ -45,6 +45,7 @@ class ConnectionsTest {
         assertEquals(86_400, dev.limits().maxCountIntervalSeconds());
         assertEquals(604_800, dev.limits().maxTimeCountIntervalSeconds());
         assertEquals(604_800, dev.limits().maxDiscoveryIntervalSeconds());
+        assertEquals(86_400, dev.limits().maxSeriesIntervalSeconds());
         assertEquals(25_000, dev.limits().maxExportDurationMs());
         assertEquals(List.of(directory.resolve("exports").toAbsolutePath().normalize()), config.exportRoots());
         var secured = config.connections().get(1);
@@ -53,9 +54,9 @@ class ConnectionsTest {
         String listing = new ConnectionsService(new ConnectionRegistry(config.connections())).list();
         assertEquals("""
                 dev — Development. Use {app=backend}.
-                  Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                  Limits: discoverLogs 7d (labels/values), 1d (match); queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
                 secured.
-                  Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                  Limits: discoverLogs 7d (labels/values), 1d (match); queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
                 """.stripTrailing(), listing);
         assertFalse(listing.contains("SECRET"));
         assertFalse(listing.contains("localhost"));
@@ -81,6 +82,7 @@ class ConnectionsTest {
                 {"connections":{"a":{"url":"http://localhost","limits":{
                   "maxIntervalSeconds":60,"maxCountIntervalSeconds":172800,
                   "maxTimeCountIntervalSeconds":345600,"maxDiscoveryIntervalSeconds":259200,
+                  "maxSeriesIntervalSeconds":43200,
                   "maxEntries":37,"requestTimeoutMs":1250,"maxExportDurationMs":12000}}}}
                 """);
         var limits = config.connections().getFirst().limits();
@@ -88,10 +90,11 @@ class ConnectionsTest {
         assertEquals(172800, limits.maxCountIntervalSeconds());
         assertEquals(345600, limits.maxTimeCountIntervalSeconds());
         assertEquals(259200, limits.maxDiscoveryIntervalSeconds());
+        assertEquals(43200, limits.maxSeriesIntervalSeconds());
         assertEquals(12000, limits.maxExportDurationMs());
         assertEquals("""
                 a.
-                  Limits: discoverLogs 3d; queryLogs 1m, max 37 lines; countLogs 2d (total/label/label+time), 4d (time-only); exportLogs 1m; request timeout 1250ms.
+                  Limits: discoverLogs 3d (labels/values), 12h (match); queryLogs 1m, max 37 lines; countLogs 2d (total/label/label+time), 4d (time-only); exportLogs 1m; request timeout 1250ms.
                 """.stripTrailing(), new ConnectionsService(new ConnectionRegistry(config.connections())).list());
     }
 
@@ -116,6 +119,7 @@ class ConnectionsTest {
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxEntries\":0}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxCountIntervalSeconds\":0}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxTimeCountIntervalSeconds\":0}}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxSeriesIntervalSeconds\":0}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxExportDurationMs\":0}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxEntries\":1.5}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"auth\":{\"type\":\"BEARER\",\"token\":\"${MISSING}\"}}}}",

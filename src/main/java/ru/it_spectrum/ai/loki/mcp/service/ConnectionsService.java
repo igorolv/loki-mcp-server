@@ -31,6 +31,7 @@ public class ConnectionsService {
 
     private void appendLimits(StringBuilder text, ConnectionLimits limits) {
         text.append("discoverLogs ").append(duration(limits.maxDiscoveryIntervalSeconds()));
+        text.append(" (labels/values), ").append(duration(limits.maxSeriesIntervalSeconds())).append(" (match)");
         text.append("; queryLogs ").append(duration(limits.maxIntervalSeconds()));
         text.append(", max ").append(limits.maxEntries()).append(" lines");
         text.append("; countLogs ").append(duration(limits.maxCountIntervalSeconds()));

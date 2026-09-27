@@ -123,6 +123,11 @@ class Smoke:
         if selector is None:
             self.skip("log steps", "no label value in this window; try --window now-24h")
             return
+        series, err = self.call("discoverLogs", match=selector, start="now-1h")
+        self.check("discoverLogs stream label sets", not err and series.startswith("Series — "), first_line(series))
+        scoped, err = self.call("discoverLogs", label=label, match=selector, start="now-1h")
+        self.check(f"discoverLogs scoped values of {label}",
+                   not err and scoped.startswith(f"Values of {label} among series — "), first_line(scoped))
         count, err = self.call("countLogs", query=selector, start=self.window)
         self.check("countLogs total", not err and re.match(r"\d+ lines match ", count) is not None, first_line(count))
         buckets, err = self.call("countLogs", query=selector, start=self.window, groupBy="time")
@@ -199,9 +204,14 @@ def main() -> int:
             info = init.get("result", {})
             print(f"server: {info.get('serverInfo', {}).get('name')} {info.get('serverInfo', {}).get('version')}, "
                   f"instructions: {'yes' if info.get('instructions') else 'MISSING'}")
-            tools = {tool["name"] for tool in client.request("tools/list")["result"]["tools"]}
+            catalogue = client.request("tools/list")["result"]["tools"]
+            tools = {tool["name"] for tool in catalogue}
             print(f"{'PASS' if tools == TOOLS else 'FAIL'} tools/list {sorted(tools)}")
             failures += tools != TOOLS
+            discovery = next((tool for tool in catalogue if tool["name"] == "discoverLogs"), None)
+            match_parameter = discovery is not None and "match" in discovery["inputSchema"]["properties"]
+            print(f"{'PASS' if match_parameter else 'FAIL'} discoverLogs match parameter")
+            failures += not match_parameter
             for name in chosen:
                 print(f"== {name} (window {args.window})")
                 smoke = Smoke(client, name, args.window, secrets)

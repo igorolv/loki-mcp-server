@@ -99,6 +99,14 @@ public final class LokiHttpClient implements AutoCloseable {
                 window(start, end)));
     }
 
+    public SeriesResponse series(String connection, String match, Instant start, Instant end) {
+        var definition = registry.require(connection);
+        require(match != null && !match.isBlank());
+        var params = window(start, end);
+        params.add(new Param("match[]", match));
+        return decoder.series(get(definition, "/loki/api/v1/series", params));
+    }
+
     private byte[] get(ConnectionDefinition connection, String path, List<Param> params) {
         return get(connection, path, params, connection.limits().requestTimeoutMs());
     }

@@ -154,6 +154,26 @@ class LokiHttpClientTest {
     }
 
     @Test
+    void requestsSeriesWithOneEncodedMatchAndExactWindow() throws Exception {
+        var client = plain(8192, 3000);
+        handler = exchange -> respond(exchange, 200,
+                "{\"status\":\"success\",\"data\":[{\"app\":\"api\",\"namespace\":\"prod\"}]}", false);
+        String match = "{app=\"api\", namespace=~\"prod|test\"}";
+        var response = client.series("local", match, START, END);
+        assertEquals(List.of(Map.of("app", "api", "namespace", "prod")), response.labelSets());
+        Captured request = requests.poll(2, TimeUnit.SECONDS);
+        assertNotNull(request);
+        assertEquals("GET", request.method());
+        assertEquals("/loki/api/v1/series", request.uri().getPath());
+        assertEquals(List.of(match), parameters(request, "match[]"));
+        assertNull(parameter(request, "match"));
+        assertNull(parameter(request, "query"));
+        assertNull(parameter(request, "limit"));
+        assertEquals("1720000000123456789", parameter(request, "start"));
+        assertEquals("1720000030123456789", parameter(request, "end"));
+    }
+
+    @Test
     void keepsAuthorizationTenantAndFailuresIsolatedAcrossConnections() throws Exception {
         var client = client(
                 definition("a", "/a", new ConnectionAuth(ConnectionAuth.Type.BEARER, null, null, "secret-token"), "tenant-a", 8192, 3000),

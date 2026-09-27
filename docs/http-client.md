@@ -15,11 +15,12 @@ requests to fixed endpoints are available:
 | `queryInstant` | `/loki/api/v1/query` | connection, query, time |
 | `labels` | `/loki/api/v1/labels` | connection, start/end |
 | `labelValues` | `/loki/api/v1/label/<name>/values` | connection, label, start/end |
+| `series` | `/loki/api/v1/series` | connection, one match selector, start/end |
 
 In `queryRange` the optional `stepSeconds` is a positive `BigDecimal`.
 Label names are checked against the basic `[a-zA-Z_][a-zA-Z0-9_]*` syntax.
-There is no arbitrary URL/path, no write endpoint and no
-`/config` read.
+The series method sends one URL-encoded `match[]` parameter. There is no arbitrary URL/path,
+no write endpoint and no `/config` read.
 
 Time is accepted as an absolute `Instant` and sent as an epoch-nanosecond string within
 signed int64, without rounding. An interval requires `start < end`. Relative time and
@@ -62,7 +63,7 @@ application-level retries, mandatory probes or version checks.
 ## Decoding
 
 `LokiResponses` holds transport records; they are not MCP output schemas. `streams`,
-`vector`, `matrix` and label/value lists are supported. An unknown resultType or a
+`vector`, `matrix`, label/value lists and series label sets are supported. An unknown resultType or a
 malformed known shape is an error, not an empty sample. New unknown object fields are
 allowed. Duplicate JSON keys and trailing JSON are rejected. Empty result arrays are fine;
 so is a `{"status":"success"}` without `data` for `/label/<name>/values`,
@@ -126,7 +127,7 @@ does not mark the whole connection unavailable.
 `LokiHttpClientTest` uses only a loopback HTTP server and a local TCP socket for a hanging
 TLS handshake; the HTTP listener exists in tests only. `LokiResponseDecoderTest` checks
 JSON fixtures without a network. Covered: URL/parameters/headers, time precision,
-stream/metric/metadata DTOs, empty and malformed responses, auth/tenant isolation, errors,
+stream/metric/metadata/series DTOs, empty and malformed responses, auth/tenant isolation, errors,
 redirect refusal, byte budgets with Content-Length and chunked, Unicode, header/body/TLS
 timeouts, cancellation and the absence of secrets in exceptions. Compatibility with Loki
 2.6.1 and 3.6.0 is checked by the separate `integrationTest` task (see

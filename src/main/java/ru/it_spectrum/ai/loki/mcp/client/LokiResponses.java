@@ -73,4 +73,10 @@ public final class LokiResponses {
         }
     }
 
+    public record SeriesResponse(List<Map<String, String>> labelSets) {
+        public SeriesResponse {
+            labelSets = labelSets.stream().map(Map::copyOf).toList();
+        }
+    }
+
 }

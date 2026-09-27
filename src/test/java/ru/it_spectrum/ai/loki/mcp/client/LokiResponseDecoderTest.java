@@ -82,6 +82,24 @@ class LokiResponseDecoderTest {
         assertThrows(LokiOperationException.class, () -> decoder.labels(bytes("{\"status\":\"success\",\"data\":[3]}")));
     }
 
+    @Test
+    void decodesCompleteSeriesLabelSetsAndRejectsMalformedResults() {
+        var response = decoder.series(bytes("""
+                {"status":"success","data":[{"app":"api","namespace":"prod"},{"app":"api","pod":"b"}]}
+                """));
+        assertEquals(List.of(Map.of("app", "api", "namespace", "prod"), Map.of("app", "api", "pod", "b")),
+                response.labelSets());
+        assertThrows(UnsupportedOperationException.class, () -> response.labelSets().getFirst().clear());
+        assertTrue(decoder.series(bytes("{\"status\":\"success\",\"data\":[]}")).labelSets().isEmpty());
+        for (String json : List.of("{\"status\":\"success\"}",
+                "{\"status\":\"success\",\"data\":null}",
+                "{\"status\":\"success\",\"data\":[{\"app\":3}]}",
+                "{\"status\":\"success\",\"data\":[null]}")) {
+            assertEquals(UPSTREAM_INVALID_RESPONSE,
+                    assertThrows(LokiOperationException.class, () -> decoder.series(bytes(json))).error().code());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "SECRET invalid", "<html>SECRET</html>", "null", "{}", "[]",

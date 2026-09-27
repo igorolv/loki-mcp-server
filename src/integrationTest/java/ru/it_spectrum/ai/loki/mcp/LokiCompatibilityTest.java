@@ -111,12 +111,21 @@ class LokiCompatibilityTest {
                 var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
                 assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
                 var discovery = new DiscoveryService(registry, client);
-                var overview = discovery.discover("fixture", start, end, null);
+                var overview = discovery.discover("fixture", start, end, null, null);
                 assertTrue(overview.startsWith("Labels — fixture"), overview);
                 assertTrue(overview.contains("\nfixture\n") && overview.contains("\nshard\n"), overview);
                 assertEquals("Values of shard — fixture, "
                         + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
-                        + ": 2.\na\nb", discovery.discover("fixture", start, end, "shard"));
+                        + ": 2.\na\nb", discovery.discover("fixture", start, end, "shard", null));
+                var series = client.series("fixture", selector, base, base.plusSeconds(3));
+                assertEquals(2, series.labelSets().size());
+                assertEquals(List.of("a", "b"), series.labelSets().stream()
+                        .map(labels -> labels.get("shard")).sorted().toList());
+                String sets = discovery.discover("fixture", start, end, null, selector);
+                assertTrue(sets.contains("2 label sets returned by Loki"), sets);
+                assertTrue(sets.contains("shard=\"a\"") && sets.contains("shard=\"b\""), sets);
+                assertTrue(discovery.discover("fixture", start, end, "shard", selector)
+                        .contains("2 values from 2 label sets returned by Loki.\n\"a\"\n\"b\""));
             }
         }
     }

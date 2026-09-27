@@ -18,7 +18,7 @@ The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP
 }
 ~~~
 
-At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. listConnections shows each name, description (up to 512 characters), hint (up to 1024) and a short line of effective limits: the maximum windows for discoverLogs, queryLogs, countLogs totals/label groups, countLogs time-only buckets and exportLogs, plus the queryLogs line cap and one-request timeout. Durations use d, h, m, s or ms. It does not show the URL, authentication, tenant or full configuration. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC.
+At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. listConnections shows each name, description (up to 512 characters), hint (up to 1024) and a short line of effective limits: the separate discoverLogs windows for unscoped labels/values and match, the windows for queryLogs, countLogs totals/label groups, countLogs time-only buckets and exportLogs, plus the queryLogs line cap and one-request timeout. Durations use d, h, m, s or ms. It does not show the URL, authentication, tenant or full configuration. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC.
 
 url is an absolute HTTP/HTTPS URL and may include a path prefix. URL user info, query and fragment are forbidden. auth is omitted or one of:
 
@@ -66,7 +66,8 @@ All fields in a connection's limits object are optional:
 | maxIntervalSeconds | 86400 | Maximum queryLogs and exportLogs time window |
 | maxCountIntervalSeconds | 86400 | Maximum countLogs window for totals, labels and label/time grouping |
 | maxTimeCountIntervalSeconds | 604800 | Maximum countLogs window for time-only buckets |
-| maxDiscoveryIntervalSeconds | 604800 | Maximum discoverLogs time window |
+| maxDiscoveryIntervalSeconds | 604800 | Maximum discoverLogs time window without match |
+| maxSeriesIntervalSeconds | 86400 | Maximum discoverLogs time window with match |
 | maxExportLines | 500000 | Export stop after this many lines |
 | maxExportBytes | 268435456 | Export stop after this many bytes |
 | maxExportDurationMs | 25000 | Total exportLogs duration; a request uses only the remaining time |

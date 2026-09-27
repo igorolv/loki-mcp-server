@@ -2,7 +2,7 @@
 
 Every tool returns one readable text content, without an output schema or structuredContent. All data tools require an explicit connection from listConnections. queryLogs, countLogs and exportLogs require a LogQL **log query** starting with a stream selector. The same query can be passed to all three tools; metric expressions belong inside countLogs and are built by the server. The server never builds a query from log contents.
 
-start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds queryLogs and exportLogs. maxCountIntervalSeconds bounds countLogs totals, label grouping and combined label/time grouping; maxTimeCountIntervalSeconds bounds time-only buckets. maxDiscoveryIntervalSeconds bounds discoverLogs. listConnections displays these effective windows, the queryLogs maxEntries cap and requestTimeoutMs for each connection before a query. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
+start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds queryLogs and exportLogs. maxCountIntervalSeconds bounds countLogs totals, label grouping and combined label/time grouping; maxTimeCountIntervalSeconds bounds time-only buckets. maxDiscoveryIntervalSeconds bounds discoverLogs without match; maxSeriesIntervalSeconds bounds it with match. listConnections displays these effective windows, the queryLogs maxEntries cap and requestTimeoutMs for each connection before a query. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
 
 ## queryLogs(connection, query, start, end, limit = 50, raw = false, order = newest)
 
@@ -35,7 +35,7 @@ The format template syntax and directory settings are in [connections.md](connec
 
 ## Budget and errors
 
-The rendered text budget is maxResponseBytes minus 512 bytes reserved for the JSON-RPC envelope. queryLogs drops lines from the opposite end of the requested order; time bucket output drops trailing rows; discoverLogs drops values from the end of a sorted list. If even a minimal response cannot fit, the service returns Error RESPONSE_BUDGET_EXCEEDED.
+The rendered text budget is maxResponseBytes minus 512 bytes reserved for the JSON-RPC envelope. queryLogs drops lines from the opposite end of the requested order; time bucket output drops trailing rows; discoverLogs drops values or complete label sets from the end of a sorted list. If even a minimal response cannot fit, the service returns Error RESPONSE_BUDGET_EXCEEDED.
 
 Failures return Error <CODE>: <message> with isError=true. Spring AI builds the error result from the exception and currently repeats the text on a second line. Missing or mistyped arguments are rejected by the MCP SDK input validation as Tool (<name>) input validation failed: …; other invalid local arguments are INVALID_ARGUMENT. Loki HTTP 400 query text and a status:error query message are passed to the model, bounded to 400 characters, so it can correct its LogQL. Other upstream bodies and connection secrets are hidden. Transport codes and timeouts are in [http-client.md](http-client.md); an export-wide deadline before the first line returns OPERATION_TIMEOUT.
 
