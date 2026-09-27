@@ -289,10 +289,12 @@ class StdioSmokeTest {
                         "params", Map.of("name", "discoverLogs", "arguments", bad))));
                 var result = response(stdout, stderr).path("result");
                 assertTrue(result.path("isError").asBoolean());
-                assertTrue(text(result).startsWith(bad.containsKey("connection") ? "Error INVALID_ARGUMENT: Cannot parse time" : "Error CONNECTION_REQUIRED"), text(result));
+                assertTrue(text(result).startsWith(bad.containsKey("connection") ? "Error INVALID_ARGUMENT: Cannot parse time"
+                        : "Tool (discoverLogs) input validation failed: Validation failed: JSON schema validation errors: [: required property 'connection' not found]"), text(result));
             }
-            String[] errors = {"Error CONNECTION_REQUIRED", "Error UNKNOWN_CONNECTION", "Error UPSTREAM_FORBIDDEN", "Error INVALID_ARGUMENT: limit must be",
-                    "Error INVALID_ARGUMENT: Argument types", "Error UPSTREAM_BAD_REQUEST: Loki rejected the query: parse error at line 1, col 9: syntax error"};
+            // Missing and mistyped arguments are answered by the SDK input validation before the tool is called.
+            String[] errors = {"Tool (queryLogs) input validation failed", "Error UNKNOWN_CONNECTION", "Error UPSTREAM_FORBIDDEN", "Error INVALID_ARGUMENT: limit must be",
+                    "Tool (queryLogs) input validation failed", "Error UPSTREAM_BAD_REQUEST: Loki rejected the query: parse error at line 1, col 9: syntax error"};
             for (int index = 0; index < errors.length; index++) {
                 var arguments = new HashMap<String, Object>(Map.of("query", index == 2 ? "{kind=\"fail\"}" : index == 5 ? "{kind=\"broken\"}" : "{kind=\"test\"}",
                         "start", "now-1s", "end", "now"));
@@ -346,11 +348,14 @@ class StdioSmokeTest {
         assertFalse(serverLog.contains("Ошибка 🐈"), "Log line contents must not reach the server log");
         // Diagnostics: configured connections at startup, one line per tool call and per Loki request, connection in MDC.
         assertTrue(serverLog.contains("[server] ") && serverLog.contains("Configured connections: dev (UTC, auth BEARER), test (UTC, auth NONE)"), serverLog);
-        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.config.QueryToolsConfig - Tool queryLogs {end=1700000001000000000, query={kind=\"test\"}, start=1700000000000000000} -> ok, "), serverLog);
+        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.tools.ToolCallDiagnostics - Tool queryLogs {end=1700000001000000000, query={kind=\"test\"}, start=1700000000000000000} -> ok, "), serverLog);
         assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient - GET /loki/api/v1/query_range {start=1700000000000000000, end=1700000001000000000, query={kind=\"test\"}, limit=50, direction=backward} -> 200, "), serverLog);
-        assertTrue(serverLog.contains("Tool queryLogs {end=now, limit=MODEL_ARGUMENT, query={kind=\"test\"}, start=now-1s} -> INVALID_ARGUMENT, "), serverLog);
+        assertTrue(serverLog.contains("Tool queryLogs {end=now, limit=0, query={kind=\"test\"}, start=now-1s} -> INVALID_ARGUMENT, "), serverLog);
         assertTrue(serverLog.contains("GET /loki/api/v1/query_range {") && serverLog.contains("-> UPSTREAM_FORBIDDEN, "), serverLog);
-        assertTrue(serverLog.contains("[server] ru.it_spectrum.ai.loki.mcp.config.QueryToolsConfig - Tool listConnections {} -> ok, "), "MDC restored between calls: " + serverLog);
+        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.tools.ToolCallDiagnostics - Tool queryLogs {end=now, query={kind=\"fail\"}, start=now-1s} -> UPSTREAM_FORBIDDEN, "), serverLog);
+        // A call rejected by the SDK input validation never reaches the tool; the SDK logs it instead.
+        assertTrue(serverLog.contains("WARN  [server] io.modelcontextprotocol.util.ToolInputValidator - Tool (queryLogs) input validation failed: "), serverLog);
+        assertTrue(serverLog.contains("[server] ru.it_spectrum.ai.loki.mcp.tools.ToolCallDiagnostics - Tool listConnections {} -> ok, "), "MDC restored between calls: " + serverLog);
     }
 
     @Test

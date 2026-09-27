@@ -53,8 +53,7 @@ in a controlled cancellation.
   so that an unbounded decompressed body is never accepted. gzip is not supported yet.
 
 `maxEntries`, `maxIntervalSeconds` and `maxResponseBytes` are not applied in the transport
-layer: the services check the user limits and the window, the services and the
-`QueryToolsConfig` wrapper enforce the text budget (see
+layer: the services check the user limits and the window and enforce the text budget (see
 [queries.md](queries.md#budget-and-errors)). `queryRange` forwards the `limit` it received without
 silent changes; the service must validate it against the configuration. There are no
 application-level retries, mandatory probes or version checks.

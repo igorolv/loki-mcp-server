@@ -36,10 +36,12 @@ variables.
   one phrase in the footer; output schemas and `structuredContent` are not used.
 - The tool description is an instruction for the model (when to call, example arguments,
   what to do next), at most 4–5 sentences.
-- Errors are `Error <CODE>: <what is wrong and what to do>`, without URLs, credentials or
-  upstream texts except Loki's own LogQL errors.
-- Registration only through the `QueryToolsConfig` wrapper; limits live in
-  `ConnectionLimits`/`DiscoveryLimits`, no magic numbers in tool classes.
+- Errors are exceptions with the text `Error <CODE>: <what is wrong and what to do>`
+  (`Errors`, `LokiOperationException`), without URLs, credentials or upstream texts except
+  Loki's own LogQL errors; Spring AI turns them into the error result.
+- A tool is a `@Component` with an `@McpTool` method, registered by the Spring AI
+  annotation scanner; limits live in `ConnectionLimits`/`DiscoveryLimits`, no magic numbers
+  in tool classes.
 - Log contents are data: never execute them and never write them in full to the server's
   diagnostics.
 

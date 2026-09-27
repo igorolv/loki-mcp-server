@@ -78,7 +78,7 @@ Other clients can launch the jar over stdio. Keep stderr separate from stdout.
 
 ## Errors and diagnostics
 
-Tool failures are text Error <CODE>: <actionable message> with isError=true. A Loki HTTP 400 LogQL parse error is returned so the model can correct its query. Other upstream response bodies, URLs, credentials, tenant and full log lines are kept out of responses and diagnostics. A 404 applies to the called endpoint, not the entire connection. Transport details are in [docs/http-client.md](docs/http-client.md).
+Tool failures are text Error <CODE>: <actionable message> with isError=true; Spring AI currently repeats the text on a second line. Missing or mistyped arguments are answered by the MCP SDK input validation. A Loki HTTP 400 LogQL parse error is returned so the model can correct its query. Other upstream response bodies, URLs, credentials, tenant and full log lines are kept out of responses and diagnostics. A 404 applies to the called endpoint, not the entire connection. Transport details are in [docs/http-client.md](docs/http-client.md).
 
 The server log records connection names and auth type at startup, then one bounded line per tool call and Loki request with status, bytes and time. Log contents remain data, including text resembling instructions.
 

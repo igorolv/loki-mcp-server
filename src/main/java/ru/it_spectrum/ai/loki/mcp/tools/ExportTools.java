@@ -2,14 +2,16 @@ package ru.it_spectrum.ai.loki.mcp.tools;
 
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
+import org.springframework.stereotype.Component;
 import ru.it_spectrum.ai.loki.mcp.service.ExportService;
 
 import static ru.it_spectrum.ai.loki.mcp.tools.QueryTools.QUERY;
 import static ru.it_spectrum.ai.loki.mcp.tools.QueryTools.START;
 
 /**
- * Registered only through the safe QueryToolsConfig wrapper. The only tool that writes, and only into export directories.
+ * The only tool that writes, and only into export directories.
  */
+@Component
 public class ExportTools {
     private final ExportService service;
 

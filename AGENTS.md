@@ -54,7 +54,7 @@ LLM is needed.
 
 ## Stack and build
 
-Java 21, Gradle Kotlin DSL with a version catalog, Spring Boot 4.0.0, Spring AI 2.0.0,
+Java 21, Gradle Kotlin DSL with a version catalog, Spring Boot 4.2.0-M2, Spring AI 2.1.0-M1 (milestones),
 Gradle 9.3.1. Package `ru.it_spectrum.ai.loki.mcp`. Delivered as an executable jar
 `build/libs/loki-mcp-server.jar`. Check versions against `gradle/libs.versions.toml`;
 change dependencies through the catalog. Do not bring Java 25 from the Redmine donor
@@ -81,7 +81,8 @@ The process waits for JSON-RPC on stdin. Logs go to stderr and
 `~/.loki-mcp-server/logs/loki-mcp-server.log` (`LOKI_MCP_DATA_DIR` changes the directory).
 Never redirect stderr into stdout when an MCP client is attached. Diagnostics: at start-up
 the connection names with timezone and auth type; per tool call `Tool <name> {arguments} ->
-ok|<code>, bytes, ms`; per Loki request `GET <path> {parameters} -> 200|<code>, bytes, ms`;
+ok|<code>, bytes, ms` (a call rejected by the SDK input validation gets the SDK warning
+`Tool (<name>) input validation failed` instead); per Loki request `GET <path> {parameters} -> 200|<code>, bytes, ms`;
 the connection of the current call is in MDC (`[dev]`, outside a call `[server]`). Model
 arguments are logged trimmed to 200 characters; URLs, credentials, tenant, response bodies
 and the stand's log lines never reach diagnostics — the stdio smoke checks this. Never build
@@ -158,10 +159,14 @@ Tests:
   `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven
   original stream scope.
 
-`McpServerConfig` enables `immediateExecution(true)` like the donors and disables the SDK
-input validation. Register every tool through the safe wrapper `QueryToolsConfig`: it
-requires `connection`, validates the input schema, turns any exception into `Error <CODE>:
-<text>` with `isError=true` and rejects responses larger than `maxResponseBytes`. The server
+Follow the standard Spring AI mechanisms instead of replacing them; when one contradicts
+the current approach, change the approach. Tools are `@Component` beans with `@McpTool`
+methods registered by the Spring AI annotation scanner; the SDK validates arguments against
+the input schema. A tool method returns text and signals a failure with an exception:
+Spring AI returns its message with `isError=true`, so our exceptions carry `Error <CODE>:
+<text>`. `ToolCallDiagnostics` (an aspect) writes the per-call line and sets the MDC.
+`McpServerConfig` keeps `immediateExecution(true)` only because MCP SDK 2.0.x drops
+concurrent stdio responses (java-sdk #686). The server
 `instructions` are in `application.yml` (`spring.ai.mcp.server.instructions`).
 
 Loki query errors (HTTP 400, `status:error`) are passed to the model as text — it is the

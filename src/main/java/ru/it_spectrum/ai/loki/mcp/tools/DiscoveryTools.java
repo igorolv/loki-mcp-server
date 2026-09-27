@@ -2,11 +2,10 @@ package ru.it_spectrum.ai.loki.mcp.tools;
 
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
+import org.springframework.stereotype.Component;
 import ru.it_spectrum.ai.loki.mcp.service.DiscoveryService;
 
-/**
- * Registered only through the safe QueryToolsConfig wrapper.
- */
+@Component
 public class DiscoveryTools {
     private final DiscoveryService service;
 

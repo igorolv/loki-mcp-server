@@ -19,6 +19,7 @@ repositories {
 
 dependencies {
     implementation(libs.spring.boot.starter)
+    implementation(libs.spring.boot.starter.aspectj)
     implementation(libs.spring.ai.mcp.server)
     testImplementation(libs.spring.boot.starter.test)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

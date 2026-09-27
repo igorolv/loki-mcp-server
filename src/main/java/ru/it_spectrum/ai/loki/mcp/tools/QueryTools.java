@@ -2,8 +2,10 @@ package ru.it_spectrum.ai.loki.mcp.tools;
 
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
+import org.springframework.stereotype.Component;
 import ru.it_spectrum.ai.loki.mcp.service.QueryService;
 
+@Component
 public class QueryTools {
     static final String QUERY = "LogQL log query, e.g. {app=\"backend\"} |= \"ERROR\". Take label names and values from discoverLogs.";
     static final String START = "Window start, default now-1h. Examples: now-15m, now-2d, 2026-09-13T10:00:00+03:00.";

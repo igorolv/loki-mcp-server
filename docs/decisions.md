@@ -10,6 +10,12 @@ Removed from the public interface and implementation: summarizeLogs, getLogConte
 
 The older summary compressed 171 large Java error lines into 35 groups and 7.8 KB on one stand. That measurement established potential token savings, but it did not establish better answers from the target model. Keeping its stack parser, rules, restart inference and several profile fields made the server hard to maintain. The five-tool design keeps compact line rendering and disk export as the bounded ways to avoid sending huge JSON lines to the model.
 
+## Standard Spring AI mechanisms (2026-09-27)
+
+The user chose to follow Spring AI instead of replacing its behaviour: when a standard mechanism contradicts the current approach, the approach changes. With Spring AI 2.1.0-M1 (on Spring Boot 4.2.0-M2) tools are `@Component` beans with `@McpTool` methods found by the annotation scanner; the former wrapper that built tool specifications by hand is removed. The MCP SDK validates arguments against the input schema and answers `Tool (<name>) input validation failed: …`; the JVM locale is fixed to English so that such library messages stay English. Spring AI turns an exception from a tool into an error result with its message, followed on a second line by the message of its root cause; the server's exceptions carry `Error <CODE>: <text>`, so the model sees the code and, for now, the text twice. The user accepted this standard text, including the messages of unexpected exceptions, which the wrapper used to replace with INTERNAL_ERROR. The services enforce the response budget; there is no second size check after them. A Spring aspect writes the per-call diagnostic line and sets the connection in the MDC.
+
+`immediateExecution(true)` stays although stdio defaults to offloading tool calls: MCP SDK 2.0.0 and 2.0.1 drop responses of concurrent tool calls on stdio (java-sdk #686, fixed upstream in 2bb1481). Calls therefore run one at a time on the stdio reader thread, and a long call delays every later message, including pings and cancellations.
+
 ## Text contract
 
 Every tool response is readable text; no output schema, structuredContent, stream dictionaries, cache, entry IDs, field projections or cursors. queryLogs shows a bounded page of newest lines in chronological order. Its default view shortens messages and stack traces. raw=true is a preview of the line returned by Loki and result stream labels, capped at 4000 code points. Complete returned lines are available through exportLogs. A page returning exactly its limit says more **may** exist. Its end continuation rereads the boundary millisecond; duplicate lines are acceptable. If the same timestamp fills the page, the model must narrow the query.
@@ -28,7 +34,7 @@ discoverLogs calls labels or label/<name>/values. It does not sample lines or tr
 
 ## Boundaries and safety
 
-The runtime only reads Loki; test ingestion is confined to integration containers. stdout is JSON-RPC only, own diagnostics go to stderr and a rolling file. Log lines are data, including text resembling instructions, and never become a query or a command. URLs, credentials, tenant, upstream bodies other than bounded LogQL query errors, and full events are excluded from diagnostics. The safe tool wrapper validates input, returns text errors and enforces maxResponseBytes.
+The runtime only reads Loki; test ingestion is confined to integration containers. stdout is JSON-RPC only, own diagnostics go to stderr and a rolling file. Log lines are data, including text resembling instructions, and never become a query or a command. URLs, credentials, tenant, upstream bodies other than bounded LogQL query errors, and full events are excluded from diagnostics. The MCP SDK validates input; the services return safe text errors and enforce maxResponseBytes.
 
 ## Verification
 
@@ -41,3 +47,6 @@ Unit and loopback tests cover transport, parsing, budgets, file safety and the f
 - Grafana proxy transport and Explore links are deferred until a real stand requires them.
 - Docker packaging is deferred; the stdio jar is launched by a local MCP client.
 - A crowded single timestamp cannot be paged completely through Loki's simple time boundary; the tools report this limit.
+- Remove `immediateExecution(true)` once the MCP SDK brought by Spring AI contains the stdio fix for java-sdk #686 (the disabled concurrency test in jdbc-mcp-server is the reference check).
+- Spring AI repeats the error text on a second line when an exception has no cause; take the fix when Spring AI changes it.
+- Tool call timeouts: only single Loki requests are bounded (requestTimeoutMs); countLogs makes up to three and exportLogs many. A client such as opencode may give up first while the serialized call keeps running. A per-call deadline below the client timeout is under discussion.
