@@ -93,7 +93,10 @@ class StdioSmokeTest {
                 {"connections":{
                   "dev":{"description":"Development","hint":"Labels: kind, level","url":"http://127.0.0.1:1/private",
                     "auth":{"type":"BEARER","token":"SECRET_TOKEN"},"tenant":"SECRET_TENANT","serviceLabels":["kind"]},
-                  "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000},"serviceLabels":["kind"]},
+                  "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000,
+                    "maxDiscoveryIntervalSeconds":432000,"maxIntervalSeconds":172800,
+                    "maxCountIntervalSeconds":259200,"maxTimeCountIntervalSeconds":345600,
+                    "maxEntries":25,"requestTimeoutMs":4500},"serviceLabels":["kind"]},
                   "tiny":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":1024}}
                 }}
                 """.formatted(upstream.getAddress().getPort(), upstream.getAddress().getPort()));
@@ -194,7 +197,14 @@ class StdioSmokeTest {
                 JsonNode result = call.path("result");
                 assertFalse(result.path("isError").asBoolean(), result.toString());
                 assertFalse(result.has("structuredContent"), result.toString());
-                assertEquals("dev — Development. Labels: kind, level.\ntest.\ntiny.", text(result));
+                assertEquals("""
+                        dev — Development. Labels: kind, level.
+                          Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                        test.
+                          Limits: discoverLogs 5d; queryLogs 2d, max 25 lines; countLogs 3d (total/label/label+time), 4d (time-only); exportLogs 2d; request timeout 4500ms.
+                        tiny.
+                          Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                        """.stripTrailing(), text(result));
                 assertNoSecrets(call.toString());
             }
             // Oversized payloads and the minimum budget traverse the real outbound transport.
@@ -366,7 +376,7 @@ class StdioSmokeTest {
         // Diagnostics: configured connections at startup, one line per tool call and per Loki request, connection in MDC.
         assertTrue(serverLog.contains("[server] ") && serverLog.contains("Configured connections: dev (UTC, auth BEARER), test (UTC, auth NONE)"), serverLog);
         assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.tools.ToolCallDiagnostics - Tool queryLogs {end=1700000001000000000, query={kind=\"test\"}, start=1700000000000000000} -> ok, "), serverLog);
-        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient - GET /loki/api/v1/query_range {start=1700000000000000000, end=1700000001000000000, query={kind=\"test\"}, limit=50, direction=backward} -> 200, "), serverLog);
+        assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient - GET /loki/api/v1/query_range {start=1700000000000000000, end=1700000001000000000, query={kind=\"test\"}, limit=25, direction=backward} -> 200, "), serverLog);
         assertTrue(serverLog.contains("Tool queryLogs {end=now, limit=0, query={kind=\"test\"}, start=now-1s} -> INVALID_ARGUMENT, "), serverLog);
         assertTrue(serverLog.contains("GET /loki/api/v1/query_range {") && serverLog.contains("-> UPSTREAM_FORBIDDEN, "), serverLog);
         assertTrue(serverLog.contains("[test] ru.it_spectrum.ai.loki.mcp.tools.ToolCallDiagnostics - Tool queryLogs {end=now, query={kind=\"fail\"}, start=now-1s} -> UPSTREAM_FORBIDDEN, "), serverLog);

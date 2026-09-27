@@ -2,7 +2,7 @@
 
 Every tool returns one readable text content, without an output schema or structuredContent. All data tools require an explicit connection from listConnections. queryLogs, countLogs and exportLogs require a LogQL **log query** starting with a stream selector. The same query can be passed to all three tools; metric expressions belong inside countLogs and are built by the server. The server never builds a query from log contents.
 
-start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds queryLogs and exportLogs. maxCountIntervalSeconds bounds countLogs totals, label grouping and combined label/time grouping; maxTimeCountIntervalSeconds bounds time-only buckets. maxDiscoveryIntervalSeconds bounds discoverLogs. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
+start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds queryLogs and exportLogs. maxCountIntervalSeconds bounds countLogs totals, label grouping and combined label/time grouping; maxTimeCountIntervalSeconds bounds time-only buckets. maxDiscoveryIntervalSeconds bounds discoverLogs. listConnections displays these effective windows, the queryLogs maxEntries cap and requestTimeoutMs for each connection before a query. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
 
 ## queryLogs(connection, query, start, end, limit = 50, raw = false, order = newest)
 

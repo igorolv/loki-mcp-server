@@ -18,7 +18,7 @@ The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP
 }
 ~~~
 
-At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. description (up to 512 characters) and hint (up to 1024) are visible to the model through listConnections. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC.
+At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. listConnections shows each name, description (up to 512 characters), hint (up to 1024) and a short line of effective limits: the maximum windows for discoverLogs, queryLogs, countLogs totals/label groups, countLogs time-only buckets and exportLogs, plus the queryLogs line cap and one-request timeout. Durations use d, h, m, s or ms. It does not show the URL, authentication, tenant or full configuration. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC.
 
 url is an absolute HTTP/HTTPS URL and may include a path prefix. URL user info, query and fragment are forbidden. auth is omitted or one of:
 

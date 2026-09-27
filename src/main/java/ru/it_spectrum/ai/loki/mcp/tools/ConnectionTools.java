@@ -13,8 +13,9 @@ public class ConnectionTools {
     }
 
     @McpTool(name = "listConnections",
-            description = "List the configured Loki stands: one line per connection with its name, description and hints about "
-                    + "its labels. Call this first and pass the chosen name as 'connection' to every other tool.",
+            description = "List configured Loki stands with each name, description, operator hint and effective tool limits. "
+                    + "Call this first, use the shown windows and page limit, and pass the chosen name as 'connection' "
+                    + "to every other tool.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false,
                     idempotentHint = true, openWorldHint = false))
     public String listConnections() {

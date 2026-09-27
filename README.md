@@ -4,7 +4,7 @@ A local stdio MCP server for reading Grafana Loki with an agent. It exposes five
 
 | Tool | Purpose |
 |---|---|
-| listConnections | Show configured stands and their operator hints |
+| listConnections | Show configured stands, operator hints and effective tool limits |
 | discoverLogs | List label names, or values of one label, in a time window |
 | queryLogs | Read newest or oldest bounded pages of a LogQL log query as compact text; raw=true previews returned lines and stream labels |
 | countLogs | Count matching lines on Loki, optionally by label, clock aligned time bucket or both |
@@ -47,7 +47,7 @@ The server loads configuration strictly at startup without probing Loki. An unkn
 
 ## Using the tools
 
-1. Call listConnections and choose a stand.
+1. Call listConnections, choose a stand and use its displayed time windows, queryLogs line cap and request timeout to plan calls.
 2. Call discoverLogs(connection="dev") for label names, then discoverLogs(connection="dev", label="app") for values. Widen the window on a quiet stand.
 3. Use a LogQL log query with countLogs to check volume and queryLogs to read lines. For example, {app="backend"} |= "ERROR"; groupBy="time", step="1d" gives UTC-aligned 24-hour buckets, and groupBy="app,time" gives counts by app and time. A named `| regexp` capture can supply a groupBy label. Date markers distinguish buckets across midnight.
 4. Narrow the query when a page is crowded. queryLogs defaults to the newest page; order="oldest" starts at the beginning of the window. Its footer gives an end for older lines or a start for newer ones. Boundary lines can repeat, and a timestamp containing more lines than a page needs a narrower query.
@@ -55,7 +55,7 @@ The server loads configuration strictly at startup without probing Loki. An unkn
 
 queryLogs prints either end of the window in chronological order. Its default view shortens messages and stack traces to save model tokens. An optional framePattern in the connection's formatFile folds adjacent standalone frame lines in the compact view. raw=true shows every returned line with stream labels and up to 4000 code points; it is a **preview**. For complete lines use exportLogs. Export reads forward in pages, never overwrites an existing file and stays under its configured roots. If more lines share one nanosecond than Loki will return in one page, export reports that some may be missing.
 
-The default time window is now-1h to now. Accepted times include now-15m, RFC3339 with an offset, local time in the connection's timezone and epoch nanoseconds. queryLogs and exportLogs allow one day by default. countLogs allows one day for totals, label grouping or combined label/time grouping, and seven days for time-only buckets; discoverLogs allows seven days. A Loki request has a 30-second timeout by default. Export stops after 25 seconds by default and reports a partial file with a continuation if it has written lines. After a count timeout, retry a one-day subwindow or narrower query. Limits can be set per connection; see [docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md).
+The default time window is now-1h to now. Accepted times include now-15m, RFC3339 with an offset, local time in the connection's timezone and epoch nanoseconds. queryLogs and exportLogs allow one day by default. countLogs allows one day for totals, label grouping or combined label/time grouping, and seven days for time-only buckets; discoverLogs allows seven days. A Loki request has a 30-second timeout by default, and queryLogs allows at most 1000 lines per page by default. listConnections shows the effective values for each stand. Export stops after 25 seconds by default and reports a partial file with a continuation if it has written lines. After a count timeout, retry a one-day subwindow or narrower query. Limits can be set per connection; see [docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md).
 
 ## MCP client configuration
 

@@ -50,7 +50,15 @@ class ConnectionsTest {
         var secured = config.connections().get(1);
         assertEquals(ConnectionAuth.Type.BEARER, secured.auth().type());
         assertEquals("SECRET-token", secured.auth().token());
-        assertFalse(new ConnectionsService(new ConnectionRegistry(config.connections())).list().contains("SECRET"));
+        String listing = new ConnectionsService(new ConnectionRegistry(config.connections())).list();
+        assertEquals("""
+                dev — Development. Use {app=backend}.
+                  Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                secured.
+                  Limits: discoverLogs 7d; queryLogs 1d, max 1000 lines; countLogs 1d (total/label/label+time), 7d (time-only); exportLogs 1d; request timeout 30s.
+                """.stripTrailing(), listing);
+        assertFalse(listing.contains("SECRET"));
+        assertFalse(listing.contains("localhost"));
     }
 
     @Test
@@ -69,17 +77,22 @@ class ConnectionsTest {
 
     @Test
     void loadsSeparateSurveyLimits() throws Exception {
-        var limits = load("""
+        var config = load("""
                 {"connections":{"a":{"url":"http://localhost","limits":{
                   "maxIntervalSeconds":60,"maxCountIntervalSeconds":172800,
                   "maxTimeCountIntervalSeconds":345600,"maxDiscoveryIntervalSeconds":259200,
-                  "maxExportDurationMs":12000}}}}
-                """).connections().getFirst().limits();
+                  "maxEntries":37,"requestTimeoutMs":1250,"maxExportDurationMs":12000}}}}
+                """);
+        var limits = config.connections().getFirst().limits();
         assertEquals(60, limits.maxIntervalSeconds());
         assertEquals(172800, limits.maxCountIntervalSeconds());
         assertEquals(345600, limits.maxTimeCountIntervalSeconds());
         assertEquals(259200, limits.maxDiscoveryIntervalSeconds());
         assertEquals(12000, limits.maxExportDurationMs());
+        assertEquals("""
+                a.
+                  Limits: discoverLogs 3d; queryLogs 1m, max 37 lines; countLogs 2d (total/label/label+time), 4d (time-only); exportLogs 1m; request timeout 1250ms.
+                """.stripTrailing(), new ConnectionsService(new ConnectionRegistry(config.connections())).list());
     }
 
     @Test
