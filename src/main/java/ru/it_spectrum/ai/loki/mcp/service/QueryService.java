@@ -91,14 +91,19 @@ public class QueryService {
         if (usedLimit <= 0 || usedLimit > definition.limits().maxEntries()) {
             throw Errors.invalid("limit must be between 1 and " + definition.limits().maxEntries() + " for this connection.");
         }
-        var events = fetch(connection, query, range, usedLimit,
+        boolean canLookAhead = usedLimit < definition.limits().maxEntries();
+        var fetched = fetch(connection, query, range, usedLimit + (canLookAhead ? 1 : 0),
                 oldestFirst ? LokiHttpClient.Direction.FORWARD : LokiHttpClient.Direction.BACKWARD);
-        boolean atLimit = events.size() == usedLimit;
+        boolean hasMore = fetched.size() > usedLimit;
+        var events = hasMore ? new ArrayList<>(oldestFirst
+                ? fetched.subList(0, usedLimit) : fetched.subList(1, fetched.size())) : fetched;
+        boolean atLimit = events.size() == usedLimit && (hasMore || !canLookAhead);
         ZoneId zone = definition.timezone();
         var rows = pageRows(events, definition, Boolean.TRUE.equals(raw));
         String header = query.strip() + " — " + connection + ", " + window(range, zone) + ", "
                 + (events.isEmpty() ? "no matching lines." : atLimit
-                ? requestedOrder + " " + events.size() + " lines (more may exist):"
+                ? requestedOrder + " " + events.size() + " lines ("
+                + (hasMore ? "more exist" : "more may exist") + "):"
                 : "all " + events.size() + " lines:");
         return renderPage(header, rows, events.size(), atLimit, oldestFirst, zone,
                 definition.limits().maxResponseBytes() - ENVELOPE_BYTES);

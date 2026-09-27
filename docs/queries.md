@@ -6,7 +6,7 @@ start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/
 
 ## queryLogs(connection, query, start, end, limit = 50, raw = false, order = newest)
 
-One Loki query_range request reads at most limit lines, capped by maxEntries. order="newest" reads backward; order="oldest" reads forward. Both pages are rendered oldest to newest. The default view displays a local time, level, service, message and compact stack trace. The date is in the header and day changes inside a page have markers. When the connection format file has a framePattern, consecutive matching standalone lines with the same query-result labels are shown as `… N stack frame lines`; those labels do not prove original stream identity.
+One Loki query_range request asks for limit + 1 lines when that stays within maxEntries; otherwise it asks for limit. The extra line is used only to determine whether more lines exist beyond the page. At most limit lines are displayed. order="newest" reads backward; order="oldest" reads forward. Both pages are rendered oldest to newest. The default view displays a local time, level, service, message and compact stack trace. The date is in the header and day changes inside a page have markers. When the connection format file has a framePattern, consecutive matching standalone lines with the same query-result labels are shown as `… N stack frame lines`; those labels do not prove original stream identity.
 
 ~~~text
 {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), all 2 lines:
@@ -17,7 +17,7 @@ Shown all 2 matching lines.
 
 A message is cut at 400 code points; stack traces keep a few frames and show the number skipped. raw=true displays each line returned by Loki with the query result's stream labels, cut at 4000 code points. It bypasses frame folding, is a preview and can cut JSON. exportLogs writes complete returned lines.
 
-When Loki returns exactly limit lines, the header says “newest N lines (more may exist)” or “oldest N lines (more may exist)”; this does not claim that another line exists. The footer gives an end for older lines or a start for newer lines, rounded to a millisecond that rereads the boundary. Duplicates are possible. If more than a page of lines share one timestamp, repeating the boundary may return the same page; narrow the selector or filter. A response budget cut drops oldest displayed lines in newest order, or newest displayed lines in oldest order, and says “Output limit reached”. An empty page suggests widening the window, using discoverLogs or simplifying the filter.
+With lookahead, fewer than or exactly limit returned lines are "all N lines"; an extra returned line makes the header "newest N lines (more exist)" or "oldest N lines (more exist)". At limit = maxEntries, no extra line can be requested, so exactly limit returned lines say "more may exist". The extra line is not displayed, counted among fetched lines or used as a continuation boundary. The footer gives an end for older lines or a start for newer lines, rounded to a millisecond that rereads the boundary. Duplicates are possible. If more than a page of lines share one timestamp, repeating the boundary may return the same page even when lookahead confirms more lines; narrow the selector or filter. A response budget cut drops oldest displayed lines in newest order, or newest displayed lines in oldest order, and says “Output limit reached”. An empty page suggests widening the window, using discoverLogs or simplifying the filter.
 
 ## countLogs(connection, query, start, end, groupBy, step)
 

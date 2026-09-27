@@ -90,7 +90,7 @@ class LokiCompatibilityTest {
                 assertTrue(logs.endsWith("Shown all 3 matching lines."), logs);
                 assertEquals(2, logs.lines().filter(l -> l.startsWith(time)).count());
                 var limited = service.logs("fixture", selector, start, end, 2, null);
-                assertTrue(limited.contains("newest 2 lines (more may exist):"), limited);
+                assertTrue(limited.contains("newest 2 lines (more exist):"), limited);
                 String olderEnd = QueryTime.iso(base.plusNanos(124000000), ZoneOffset.UTC);
                 assertTrue(limited.contains("Older: repeat with end=\"" + olderEnd + "\""), limited);
                 var older = service.logs("fixture", selector, start, olderEnd, 10, null);

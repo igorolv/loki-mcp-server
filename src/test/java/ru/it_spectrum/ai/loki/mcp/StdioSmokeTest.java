@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -54,6 +55,7 @@ class StdioSmokeTest {
     @Timeout(60)
     void executableJarSpeaksOnlyJsonRpcOnStdout(boolean overrideFile) throws Exception {
         var upstream = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        var sawLookaheadLimit = new AtomicBoolean();
         upstream.createContext("/", exchange -> {
             try (exchange) {
                 String path = exchange.getRequestURI().getPath();
@@ -74,6 +76,16 @@ class StdioSmokeTest {
                         Map.of("resultType", "streams", "result", List.of(Map.of("stream", Map.of("kind", "test"),
                                 "values", java.util.stream.IntStream.range(0, 12).mapToObj(i -> List.of("170000000012345678" + (i % 10),
                                         mapper.writeValueAsString(Map.of("message", "Ошибка 🐈\"\\\n".repeat(1000))))).toList())))));
+                else if (query.contains("lookahead")) {
+                    sawLookaheadLimit.set(query.contains("limit=2"));
+                    body = """
+                            {"status":"success","data":{"resultType":"streams","result":[
+                              {"stream":{"kind":"test"},"values":[
+                                ["1700000000123456788","older"],["1700000000123456789","newer"]
+                              ]}
+                            ]}}
+                            """;
+                }
                 else
                     body = "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{\"kind\":\"test\",\"level\":\"error\"},\"values\":[[\"1700000000123456789\",\"Ошибка 🐈\"]]}]}}";
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
@@ -288,6 +300,17 @@ class StdioSmokeTest {
             assertFalse(grouped.path("isError").asBoolean(), text(grouped));
             assertTrue(text(grouped).contains("By kind and time (1s buckets, bucket start):"), text(grouped));
             assertNoSecrets(text(forward) + text(grouped));
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 62, "method", "tools/call",
+                    "params", Map.of("name", "queryLogs", "arguments", Map.of("connection", "test",
+                            "query", "{kind=\"test\"} |= \"lookahead\"", "start", "1700000000000000000",
+                            "end", "1700000001000000000", "limit", 1)))));
+            var lookedAhead = response(stdout, stderr).path("result");
+            assertFalse(lookedAhead.path("isError").asBoolean(), text(lookedAhead));
+            assertTrue(sawLookaheadLimit.get());
+            assertTrue(text(lookedAhead).contains("newest 1 lines (more exist):"), text(lookedAhead));
+            assertTrue(text(lookedAhead).contains("newer"), text(lookedAhead));
+            assertFalse(text(lookedAhead).contains("older"), text(lookedAhead));
+            assertNoSecrets(text(lookedAhead));
             for (int id = 70; id < 86; id++) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
                         "params", Map.of("name", "discoverLogs", "arguments", id % 2 == 0

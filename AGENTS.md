@@ -178,7 +178,8 @@ may repeat the argument value (an unparseable time) but never secrets.
 - Keep nanoseconds internally; print local time of the connection with milliseconds.
 - Distinguish streams, lines and processed lines; never print `totalLinesProcessed` as a
   match count.
-- The page header and footer name the window, `newest N lines (more may exist)`, `oldest N lines (more may exist)` or `all N`,
+- The page header and footer name the window, `newest N lines (more exist)`, `oldest N lines (more exist)` when
+  one extra line confirms continuation, `more may exist` when limit = maxEntries, or `all N` when complete,
   and a ready-made `end` for older lines or `start` for newer lines (rounded to the millisecond). Continuation is a
   repeated `queryLogs` with that boundary; a duplicate boundary line is acceptable. A timestamp
   filling the page can stall continuation and must be narrowed by query.

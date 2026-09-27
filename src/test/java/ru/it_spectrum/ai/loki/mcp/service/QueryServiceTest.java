@@ -1,6 +1,8 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
@@ -77,6 +79,65 @@ class QueryServiceTest {
         assertTrue(fewer.startsWith("{app=~\".+\"} — one, 2026-09-13 11:00:00–12:00:00 (Z), all 2 lines:"), fewer);
         assertTrue(fewer.endsWith("Shown all 2 matching lines."), fewer);
         verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, LokiHttpClient.Direction.BACKWARD, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"newest", "oldest"})
+    void lookaheadDistinguishesShortExactAndLongPagesAcrossStreams(String order) {
+        String first = QueryTime.nanos(now.minusSeconds(3));
+        String second = QueryTime.nanos(now.minusSeconds(2));
+        var one = new LogStream(Map.of("app", "a"), List.of(entry(first, "first")));
+        var two = new LogStream(Map.of("app", "b"), List.of(entry(second, "second")));
+        var three = new LogStream(Map.of("app", "c"), List.of(entry(QueryTime.nanos(now.minusSeconds(1)), "third")));
+        var direction = order.equals("oldest") ? LokiHttpClient.Direction.FORWARD : LokiHttpClient.Direction.BACKWARD;
+
+        range(new Streams(List.of(one)));
+        String shortPage = service.logs("one", "{app=~\".+\"}", "now-1h", "now", 2, false, order);
+        assertTrue(shortPage.contains(", all 1 lines:"), shortPage);
+        assertTrue(shortPage.endsWith("Shown all 1 matching lines."), shortPage);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, direction, null);
+
+        clearInvocations(client);
+        range(new Streams(List.of(one, two)));
+        String exactPage = service.logs("one", "{app=~\".+\"}", "now-1h", "now", 2, false, order);
+        assertTrue(exactPage.contains(", all 2 lines:"), exactPage);
+        assertTrue(exactPage.endsWith("Shown all 2 matching lines."), exactPage);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, direction, null);
+
+        clearInvocations(client);
+        range(new Streams(List.of(one, two, three)));
+        String longPage = service.logs("one", "{app=~\".+\"}", "now-1h", "now", 2, false, order);
+        assertTrue(longPage.contains(order + " 2 lines (more exist):"), longPage);
+        assertEquals(2, longPage.lines().filter(line -> line.contains("  first") || line.contains("  second")
+                || line.contains("  third")).count(), longPage);
+        assertFalse(longPage.contains(order.equals("oldest") ? "  third" : "  first"), longPage);
+        assertTrue(longPage.contains(order.equals("oldest") ? "Newer: repeat with start=\""
+                : "Older: repeat with end=\""), longPage);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, direction, null);
+
+        clearInvocations(client);
+        String cappedPage = service.logs("one", "{app=~\".+\"}", "now-1h", "now", 3, false, order);
+        assertTrue(cappedPage.contains(order + " 3 lines (more may exist):"), cappedPage);
+        assertEquals(3, cappedPage.lines().filter(line -> line.contains("  first") || line.contains("  second")
+                || line.contains("  third")).count(), cappedPage);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3, direction, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"newest", "oldest"})
+    void lookaheadDoesNotClaimToPageThroughOneCrowdedTimestamp(String order) {
+        String timestamp = QueryTime.nanos(now.minusSeconds(1));
+        range(new Streams(List.of(
+                new LogStream(Map.of("app", "a"), List.of(entry(timestamp, "duplicate"), entry(timestamp, "duplicate"))),
+                new LogStream(Map.of("app", "b"), List.of(entry(timestamp, "other"))))));
+
+        String text = service.logs("one", "{app=~\".+\"}", "now-1h", "now", 2, false, order);
+
+        assertTrue(text.contains(order + " 2 lines (more exist):"), text);
+        assertEquals(2, text.lines().filter(line -> line.startsWith("11:59:59.123")).count(), text);
+        assertTrue(text.contains("boundary lines may repeat. If the same timestamp fills every page, narrow the query."), text);
+        verify(client).queryRange("one", "{app=~\".+\"}", now.minusSeconds(3600), now, 3,
+                order.equals("oldest") ? LokiHttpClient.Direction.FORWARD : LokiHttpClient.Direction.BACKWARD, null);
     }
 
     @Test
@@ -246,10 +307,9 @@ class QueryServiceTest {
 
         String text = service.logs("one", "{app=\"x\"}", "now-1h", "now", 2, false, "oldest");
 
-        assertTrue(text.contains("oldest 2 lines (more may exist):"), text);
-        assertTrue(text.contains("Newest shown 2026-09-13T11:59:59.123+00:00. "
-                + "Newer: repeat with start=\"2026-09-13T11:59:59.123+00:00\""), text);
-        verify(client).queryRange("one", "{app=\"x\"}", now.minusSeconds(3600), now, 2,
+        assertTrue(text.contains("all 2 lines:"), text);
+        assertTrue(text.endsWith("Shown all 2 matching lines."), text);
+        verify(client).queryRange("one", "{app=\"x\"}", now.minusSeconds(3600), now, 3,
                 LokiHttpClient.Direction.FORWARD, null);
         assertThrows(LokiOperationException.class,
                 () -> service.logs("one", "{app=\"x\"}", null, null, null, null, "ascending"));
@@ -258,8 +318,8 @@ class QueryServiceTest {
     @Test
     void oldestOrderKeepsEarliestLinesWhenResponseBudgetCutsPage() {
         var entries = new java.util.ArrayList<LogEntry>();
-        for (int i = 0; i < 40; i++) {
-            entries.add(entry(QueryTime.nanos(now.minusSeconds(40 - i)),
+        for (int i = 0; i < 41; i++) {
+            entries.add(entry(QueryTime.nanos(now.minusSeconds(41 - i)),
                     "line " + i + " " + "x".repeat(80)));
         }
         range(new Streams(List.of(new LogStream(Map.of("app", "x"), entries))));
@@ -271,6 +331,7 @@ class QueryServiceTest {
         assertFalse(text.contains("line 39 "), text);
         assertTrue(text.contains("Output limit reached: showing "), text);
         assertTrue(text.contains(" oldest of 40 fetched lines. Newest shown "), text);
+        assertFalse(text.contains("line 40 "), text);
         assertTrue(text.contains("Newer: repeat with start=\""), text);
     }
 
