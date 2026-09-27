@@ -22,7 +22,8 @@ final class TransportErrors {
             case UPSTREAM_RATE_LIMITED -> "Loki rate limit reached; retry later.";
             case UPSTREAM_UNAVAILABLE -> "Loki is temporarily unavailable.";
             case UPSTREAM_HTTP_ERROR -> "Unexpected HTTP status from Loki; check the configured endpoint.";
-            case UPSTREAM_TIMEOUT -> "Loki request timed out; narrow the window or the query.";
+            case UPSTREAM_TIMEOUT -> "Loki request timed out; retry a one-day subwindow or narrow the LogQL query. "
+                    + "If one day still times out, shorten the window further.";
             case UPSTREAM_CONNECTION_ERROR -> "Could not communicate with Loki; check connection settings and network.";
             case UPSTREAM_RESPONSE_TOO_LARGE -> "Loki response exceeds maxHttpResponseBytes; reduce the query scope.";
             case UPSTREAM_INVALID_RESPONSE -> "Loki returned an invalid or unsupported response.";

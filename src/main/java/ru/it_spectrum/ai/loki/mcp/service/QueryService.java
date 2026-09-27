@@ -208,12 +208,13 @@ public class QueryService {
     public String count(String connection, String query, String start, String end, String groupBy, String stepText) {
         var definition = registry.require(connection);
         requireLogQuery(query);
-        var range = QueryTime.range(start, end, clock.instant(), definition.timezone(),
-                definition.limits().maxCountIntervalSeconds());
-        ZoneId zone = definition.timezone();
-        String where = query.strip() + " in " + window(range, zone) + " (" + connection + ")";
         String grouping = groupBy == null ? "" : groupBy.strip();
         String timeLabel = grouping.endsWith(",time") ? grouping.substring(0, grouping.length() - 5).strip() : null;
+        long maximum = grouping.equals("time") ? definition.limits().maxTimeCountIntervalSeconds()
+                : definition.limits().maxCountIntervalSeconds();
+        var range = QueryTime.range(start, end, clock.instant(), definition.timezone(), maximum);
+        ZoneId zone = definition.timezone();
+        String where = query.strip() + " in " + window(range, zone) + " (" + connection + ")";
         if (stepText != null && !stepText.isBlank() && !grouping.equals("time") && timeLabel == null) {
             throw Errors.invalid("step requires groupBy=\"time\" or groupBy=\"<label>,time\".");
         }

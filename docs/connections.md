@@ -64,9 +64,11 @@ All fields in a connection's limits object are optional:
 | maxResponseBytes | 65536 | One MCP response; minimum 1024 |
 | maxEntries | 1000 | Maximum query page |
 | maxIntervalSeconds | 86400 | Maximum queryLogs and exportLogs time window |
-| maxCountIntervalSeconds | 604800 | Maximum countLogs time window |
+| maxCountIntervalSeconds | 86400 | Maximum countLogs window for totals, labels and label/time grouping |
+| maxTimeCountIntervalSeconds | 604800 | Maximum countLogs window for time-only buckets |
 | maxDiscoveryIntervalSeconds | 604800 | Maximum discoverLogs time window |
 | maxExportLines | 500000 | Export stop after this many lines |
 | maxExportBytes | 268435456 | Export stop after this many bytes |
+| maxExportDurationMs | 25000 | Total exportLogs duration; a request uses only the remaining time |
 
 Every limit must be a positive integer; maxResponseBytes must be at least 1024. The tool text budget reserves 512 bytes of maxResponseBytes for the JSON-RPC envelope. A file over 1 MiB, duplicate keys, unknown fields, wrong types or invalid values stop startup. The error is a safe CONFIGURATION_ERROR without source text. The [example connection file](../examples/connections.json) shows several stands.

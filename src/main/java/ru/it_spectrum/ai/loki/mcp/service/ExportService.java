@@ -26,6 +26,8 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 
@@ -43,6 +45,7 @@ public class ExportService {
     private final LokiHttpClient client;
     private final ExportRoots roots;
     private final Clock clock;
+    private final LongSupplier nanoTime;
 
     @Autowired
     public ExportService(ConnectionRegistry registry, LokiHttpClient client, ExportRoots roots) {
@@ -50,10 +53,16 @@ public class ExportService {
     }
 
     public ExportService(ConnectionRegistry registry, LokiHttpClient client, ExportRoots roots, Clock clock) {
+        this(registry, client, roots, clock, System::nanoTime);
+    }
+
+    ExportService(ConnectionRegistry registry, LokiHttpClient client, ExportRoots roots, Clock clock,
+                  LongSupplier nanoTime) {
         this.registry = registry;
         this.client = client;
         this.roots = roots;
         this.clock = clock;
+        this.nanoTime = nanoTime;
     }
 
     private static String megabytes(long bytes) {
@@ -174,6 +183,7 @@ public class ExportService {
         final QueryTime.Range window;
         final LineWriter writer;
         final EventNormalizer normalizer;
+        final long startedNanos = nanoTime.getAsLong();
         final Map<String, Integer> boundaryKeys = new HashMap<>();
         long boundary = Long.MIN_VALUE;
         long first;
@@ -203,9 +213,14 @@ public class ExportService {
             Instant cursor = window.start();
             try {
                 while (true) {
+                    int timeoutMs = remainingMs();
+                    if (timeoutMs == 0) {
+                        stopAtDeadline();
+                        return;
+                    }
                     List<LogEvent> events;
                     try {
-                        events = fetch(cursor, page);
+                        events = fetch(cursor, page, timeoutMs);
                     } catch (LokiOperationException tooLarge) {
                         if (tooLarge.error().code() != ErrorCode.UPSTREAM_RESPONSE_TOO_LARGE || page == 1) throw tooLarge;
                         page = Math.max(1, page / 4);
@@ -244,12 +259,28 @@ public class ExportService {
                     page = (int) Math.max(1, Math.min(limits.maxEntries(), limits.maxHttpResponseBytes() / 3 / average));
                 }
             } catch (LokiOperationException failure) {
+                if (failure.error().code() == ErrorCode.UPSTREAM_TIMEOUT && remainingMs() == 0) {
+                    stopAtDeadline();
+                    return;
+                }
                 if (lines == 0) throw failure;
                 stopped = "Stopped by an error: " + failure.error().text();
             } catch (IOException failure) {
                 if (lines == 0) throw Errors.invalid("Cannot write into " + file.target + ". Pass another directory.");
                 stopped = "Stopped: cannot write more into " + file.target + ".";
             }
+        }
+
+        private int remainingMs() {
+            long elapsed = TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - startedNanos);
+            long remaining = definition.limits().maxExportDurationMs() - elapsed;
+            return remaining <= 0 ? 0 : (int) Math.min(remaining, definition.limits().requestTimeoutMs());
+        }
+
+        private void stopAtDeadline() {
+            if (lines == 0) throw Errors.failure(ErrorCode.OPERATION_TIMEOUT,
+                    "Export time limit reached before any line was written; narrow the window or query.");
+            stopped = "Stopped at the export time limit of " + definition.limits().maxExportDurationMs() + " ms.";
         }
 
         /**
@@ -284,8 +315,9 @@ public class ExportService {
             boundaryKeys.merge(key(event), 1, Integer::sum);
         }
 
-        private List<LogEvent> fetch(Instant from, int limit) {
-            var response = client.queryRange(definition.name(), query, from, window.end(), limit, LokiHttpClient.Direction.FORWARD, null);
+        private List<LogEvent> fetch(Instant from, int limit, int timeoutMs) {
+            var response = client.queryRange(definition.name(), query, from, window.end(), limit,
+                    LokiHttpClient.Direction.FORWARD, null, timeoutMs);
             if (!(response.data() instanceof LokiResponses.Streams streams))
                 throw Errors.invalid("This is a metric expression; exportLogs writes log lines. Pass a log query.");
             var events = new ArrayList<LogEvent>();

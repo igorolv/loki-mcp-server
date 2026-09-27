@@ -51,7 +51,7 @@ public final class ConnectionsLoader {
                         : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)),
                         ConnectionsLoader::loadFormatFile);
                 Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null,
-                        null, null) : entry.limits();
+                        null, null, null, null) : entry.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
                         or(l.requestTimeoutMs(), d.requestTimeoutMs()), or(l.maxHttpResponseBytes(), d.maxHttpResponseBytes()),
@@ -60,7 +60,9 @@ public final class ConnectionsLoader {
                         or(l.maxExportLines(), d.maxExportLines()),
                         l.maxExportBytes() == null ? d.maxExportBytes() : l.maxExportBytes(),
                         l.maxCountIntervalSeconds() == null ? d.maxCountIntervalSeconds() : l.maxCountIntervalSeconds(),
-                        l.maxDiscoveryIntervalSeconds() == null ? d.maxDiscoveryIntervalSeconds() : l.maxDiscoveryIntervalSeconds());
+                        l.maxTimeCountIntervalSeconds() == null ? d.maxTimeCountIntervalSeconds() : l.maxTimeCountIntervalSeconds(),
+                        l.maxDiscoveryIntervalSeconds() == null ? d.maxDiscoveryIntervalSeconds() : l.maxDiscoveryIntervalSeconds(),
+                        or(l.maxExportDurationMs(), d.maxExportDurationMs()));
                 definitions.add(new ConnectionDefinition(pair.getKey(), entry.description(), entry.hint(),
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
                         ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
@@ -170,6 +172,7 @@ public final class ConnectionsLoader {
     private record Limits(Integer connectTimeoutMs, Integer requestTimeoutMs, Integer maxHttpResponseBytes,
                           Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,
                           Integer maxExportLines, Long maxExportBytes,
-                          Long maxCountIntervalSeconds, Long maxDiscoveryIntervalSeconds) {
+                           Long maxCountIntervalSeconds, Long maxTimeCountIntervalSeconds,
+                           Long maxDiscoveryIntervalSeconds, Integer maxExportDurationMs) {
     }
 }

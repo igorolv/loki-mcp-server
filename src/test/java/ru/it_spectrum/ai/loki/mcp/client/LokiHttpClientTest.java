@@ -250,6 +250,15 @@ class LokiHttpClientTest {
     }
 
     @Test
+    void callerCanShortenOneRequestForAnExportDeadline() {
+        handler = exchange -> awaitRelease();
+        var client = plain(8192, 3000);
+        assertTimeout(Duration.ofSeconds(1), () -> assertSafe(assertThrows(LokiOperationException.class,
+                () -> client.queryRange("local", "{app=\"test\"}", START, END, 10,
+                        LokiHttpClient.Direction.FORWARD, null, 100)), UPSTREAM_TIMEOUT));
+    }
+
+    @Test
     void connectTimeoutCoversStalledTlsHandshake() throws Exception {
         try (var socket = new ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
             var accepted = executor.submit(() -> {

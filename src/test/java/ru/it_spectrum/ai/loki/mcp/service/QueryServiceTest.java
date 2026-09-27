@@ -184,7 +184,7 @@ class QueryServiceTest {
     }
 
     @Test
-    void defaultCountWindowAllowsThreeDaysButPageStillHasOneDayLimit() {
+    void defaultCountWindowSeparatesTimeOnlyBucketsFromOtherCounts() {
         var defaults = new ConnectionRegistry(List.of(new ConnectionDefinition("default", null,
                 URI.create("http://localhost:6"), ConnectionAuth.NONE, null, ZoneOffset.UTC,
                 ConnectionLimits.DEFAULTS)));
@@ -193,8 +193,18 @@ class QueryServiceTest {
                 .thenReturn(new QueryResponse(new Vector(List.of(new VectorSample(Map.of(),
                         new MetricSample(BigDecimal.ONE, "7"))))));
 
-        assertTrue(counting.count("default", "{app=\"x\"}", "now-3d", "now", null).startsWith("7 lines match"));
-        verify(client).queryInstant("default", "sum(count_over_time({app=\"x\"} [259200s]))", now);
+        assertTrue(counting.count("default", "{app=\"x\"}", "now-1d", "now", null).startsWith("7 lines match"));
+        verify(client).queryInstant("default", "sum(count_over_time({app=\"x\"} [86400s]))", now);
+        assertThrows(LokiOperationException.class,
+                () -> counting.count("default", "{app=\"x\"}", "now-3d", "now", null));
+        assertThrows(LokiOperationException.class,
+                () -> counting.count("default", "{app=\"x\"}", "now-3d", "now", "app"));
+        assertThrows(LokiOperationException.class,
+                () -> counting.count("default", "{app=\"x\"}", "now-3d", "now", "app,time"));
+        when(client.queryRange(eq("default"), anyString(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(new QueryResponse(new Matrix(List.of())));
+        assertTrue(counting.count("default", "{app=\"x\"}", "now-3d", "now", "time")
+                .startsWith("0 lines match"));
         assertThrows(LokiOperationException.class,
                 () -> counting.logs("default", "{app=\"x\"}", "now-3d", "now", null, null));
     }

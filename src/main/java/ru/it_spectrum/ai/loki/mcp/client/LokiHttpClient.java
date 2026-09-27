@@ -59,15 +59,25 @@ public final class LokiHttpClient implements AutoCloseable {
 
     public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
                                     int limit, Direction direction, BigDecimal stepSeconds) {
+        return queryRange(connection, query, start, end, limit, direction, stepSeconds,
+                registry.require(connection).limits().requestTimeoutMs());
+    }
+
+    /**
+     * The caller may shorten one request to fit the remaining duration of a larger operation.
+     */
+    public QueryResponse queryRange(String connection, String query, Instant start, Instant end,
+                                    int limit, Direction direction, BigDecimal stepSeconds, int timeoutMs) {
         var definition = registry.require(connection);
         var params = window(start, end);
-        require(query != null && !query.isBlank() && limit > 0 && direction != null);
+        require(query != null && !query.isBlank() && limit > 0 && direction != null && timeoutMs > 0);
         require(stepSeconds == null || stepSeconds.signum() > 0);
         params.add(new Param("query", query));
         params.add(new Param("limit", Integer.toString(limit)));
         params.add(new Param("direction", direction == Direction.FORWARD ? "forward" : "backward"));
         if (stepSeconds != null) params.add(new Param("step", stepSeconds.toPlainString()));
-        return decoder.query(get(definition, "/loki/api/v1/query_range", params));
+        return decoder.query(get(definition, "/loki/api/v1/query_range", params,
+                Math.min(timeoutMs, definition.limits().requestTimeoutMs())));
     }
 
     public QueryResponse queryInstant(String connection, String query, Instant time) {
@@ -90,9 +100,13 @@ public final class LokiHttpClient implements AutoCloseable {
     }
 
     private byte[] get(ConnectionDefinition connection, String path, List<Param> params) {
+        return get(connection, path, params, connection.limits().requestTimeoutMs());
+    }
+
+    private byte[] get(ConnectionDefinition connection, String path, List<Param> params, int timeoutMs) {
         long started = System.nanoTime();
         try {
-            byte[] body = send(connection, path, params);
+            byte[] body = send(connection, path, params, timeoutMs);
             log.info("GET {} {} -> 200, {} bytes, {} ms", path, describe(params), body.length, millis(started));
             return body;
         } catch (LokiOperationException failure) {
@@ -101,7 +115,7 @@ public final class LokiHttpClient implements AutoCloseable {
         }
     }
 
-    private byte[] send(ConnectionDefinition connection, String path, List<Param> params) {
+    private byte[] send(ConnectionDefinition connection, String path, List<Param> params, int timeoutMs) {
         CompletableFuture<HttpResponse<byte[]>> pending = null;
         var subscriber = new AtomicReference<LimitedBodySubscriber>();
         try {
@@ -109,7 +123,7 @@ public final class LokiHttpClient implements AutoCloseable {
             String query = params.stream().map(p -> encode(p.name()) + "=" + encode(p.value()))
                     .collect(java.util.stream.Collectors.joining("&"));
             var request = HttpRequest.newBuilder(URI.create(base + path + "?" + query))
-                    .timeout(Duration.ofMillis(connection.limits().requestTimeoutMs()))
+                    .timeout(Duration.ofMillis(timeoutMs))
                     .header("Accept", "application/json").header("Accept-Encoding", "identity").GET();
             var auth = connection.auth();
             switch (auth.type()) {
@@ -134,7 +148,7 @@ public final class LokiHttpClient implements AutoCloseable {
                 return body;
             });
             // Unlike an InputStream body handler, completion means the entire bounded body arrived.
-            var response = pending.get(connection.limits().requestTimeoutMs(), TimeUnit.MILLISECONDS);
+            var response = pending.get(timeoutMs, TimeUnit.MILLISECONDS);
             // A 400 body is Loki's explanation of what is wrong with the model's own query; it is passed on.
             if (response.statusCode() == 400)
                 throw TransportErrors.badRequest(new String(response.body(), StandardCharsets.UTF_8));

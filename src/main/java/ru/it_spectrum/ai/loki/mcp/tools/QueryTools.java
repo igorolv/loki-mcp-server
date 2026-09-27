@@ -37,8 +37,8 @@ public class QueryTools {
             description = "Count log lines matching a LogQL log query without returning those lines. "
                     + "Example: query={app=\"backend\"} |= \"ERROR\", groupBy=\"time\". "
                     + "Omit groupBy for one total, use a label for values, time for buckets, or app,time for both; step=\"1d\" sets the bucket width. "
-                    + "After a LogQL regexp stage with a named capture, groupBy can use that extracted label. "
-                    + "Then narrow the query and read lines with queryLogs.",
+                    + "For a multi-day label count, query one-day windows separately; only time-only buckets allow seven days by default. "
+                    + "A named LogQL regexp capture can supply a groupBy label; inspect matching lines with queryLogs.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String countLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,

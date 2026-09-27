@@ -44,7 +44,8 @@ in a controlled cancellation.
 
 - The connect timeout bounds establishing a new connection, including the TLS handshake.
 - The request timeout bounds waiting for the complete response, including the body after
-  the headers. On timeout or interruption the read is cancelled; the interrupt flag is kept.
+  the headers. exportLogs may give one page a shorter timeout to fit its remaining total
+  duration. On timeout or interruption the read is cancelled; the interrupt flag is kept.
 - The body subscriber counts the bytes actually received and cancels the read before
   copying a chunk that would exceed the budget. The declared Content-Length is checked too.
   Chunked responses go through the same control. The limit is on the body, not on total JVM
