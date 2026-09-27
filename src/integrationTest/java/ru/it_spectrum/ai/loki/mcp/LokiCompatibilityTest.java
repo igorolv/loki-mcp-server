@@ -90,7 +90,7 @@ class LokiCompatibilityTest {
                 assertTrue(logs.endsWith("Shown all 3 matching lines."), logs);
                 assertEquals(2, logs.lines().filter(l -> l.startsWith(time)).count());
                 var limited = service.logs("fixture", selector, start, end, 2, null);
-                assertTrue(limited.contains("newest 2 of more:"), limited);
+                assertTrue(limited.contains("newest 2 lines (more may exist):"), limited);
                 String olderEnd = QueryTime.iso(base.plusNanos(124000000), ZoneOffset.UTC);
                 assertTrue(limited.contains("Older: repeat with end=\"" + olderEnd + "\""), limited);
                 var older = service.logs("fixture", selector, start, olderEnd, 10, null);
@@ -98,19 +98,6 @@ class LokiCompatibilityTest {
                 var raw = service.logs("fixture", selector + " |= \"🐈\"", start, end, 10, true);
                 assertTrue(raw.contains(time + " {fixture=\"s04\", level=\"info\", "), raw);
                 assertTrue(raw.contains("shard=\"a\"}  " + ecs + "\n"), raw);
-                // Error -> context: the selector without the filter shows the neighbour in the other stream and the later line.
-                var context = service.context("fixture", selector, time, 5, 5);
-                assertTrue(context.contains(", lines: 0 before, 2 at that time, 1 after:\n"), context);
-                assertEquals(2, context.lines().filter(l -> l.startsWith(">>> " + time)).count(), context);
-                assertTrue(context.contains("\n" + LogText.TIME.format(base.plusSeconds(1).plusNanos(987654321).atZone(ZoneOffset.UTC)) + " INFO  a  second\n"), context);
-                assertTrue(context.contains("No earlier lines within 24h before this time. No later lines within 24h after this time."), context);
-                var precise = service.context("fixture", selector, base.plusSeconds(1).plusNanos(987654321).toString(), 1, 0);
-                assertTrue(precise.contains("lines: 1 before, 1 at that time, 0 after:\n" + time + " "), precise);
-                assertTrue(precise.contains("\n>>> " + LogText.TIME.format(base.plusSeconds(1).plusNanos(987654321).atZone(ZoneOffset.UTC)) + " INFO  a  second\n"), precise);
-                var nothing = service.context("fixture", selector, base.plusSeconds(2).toString(), 1, 1);
-                assertTrue(nothing.contains("lines: 1 before, 0 at that time, 0 after:\n") && nothing.contains("\n>>> (no line at exactly this time"), nothing);
-                assertTrue(assertThrows(LokiOperationException.class, () -> service.context("fixture", selector + " |= \"x\"", time, null, null))
-                        .getMessage().contains("stream selector only"));
                 assertTrue(service.logs("fixture", selector + " |= `absent`", start, end, null, null).contains("no matching lines."));
                 assertEquals("3 lines match " + selector + " in " + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC) + " (fixture).",
                         service.count("fixture", selector, start, end, null));
@@ -121,28 +108,15 @@ class LokiCompatibilityTest {
                 assertTrue(byTime.contains("By time (1s buckets, bucket start):"), byTime);
                 assertEquals(3, byTime.lines().filter(l -> l.matches("  \\d\\d:\\d\\d:\\d\\d +\\d+.*")).count(), byTime);
                 assertTrue(service.count("fixture", "{fixture=\"absent\"}", start, end, "time").startsWith("0 lines match"));
-                var summary = service.summarize("fixture", selector, start, end, null);
-                assertTrue(summary.contains(": all 3 lines, spanning " + time + "–"), summary);
-                assertTrue(summary.contains(", 3 distinct messages.\n"), summary);
-                assertTrue(summary.contains("\n    1×  " + time + "  INFO  a  Ошибка 🐈\n         IOException: x\n"), summary); // root cause by simple type name
-                assertTrue(summary.contains("\n    1×  " + time + "  -     b  same timestamp other stream\n"), summary);
-                assertTrue(summary.endsWith("Counts are for the 3 sampled lines only; countLogs gives the number for the whole window. To read one group: queryLogs with |= \"<distinctive part of its message>\"."), summary);
                 var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
                 assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
                 var discovery = new DiscoveryService(registry, client);
-                var scoped = discovery.discover("fixture", selector, start, end, null);
-                assertTrue(scoped.startsWith("Streams matching " + selector), scoped);
-                assertTrue(scoped.contains("\n  shard: a, b\n"), scoped);
-                assertTrue(scoped.contains("Line format (3 newest lines sampled): JSON 1, plain text 2.\nLevels seen: INFO.\n"), scoped);
-                assertTrue(scoped.contains("JSON fields (after | json): error_stack_trace, log_level, message, service_name."), scoped);
-                assertTrue(scoped.contains("| json | log_level=~\"(?i)error\""), scoped);
-                var overview = discovery.discover("fixture", null, start, end, null);
-                assertTrue(overview.startsWith("Labels in "), overview);
-                assertTrue(overview.contains("\n  fixture: s04\n") && overview.contains("\n  shard: a, b\n"), overview);
-                assertTrue(discovery.discover("fixture", "{fixture=\"absent\"}", start, end, null).contains("No lines sampled in this window"));
-                assertEquals("Values of shard in streams matching " + selector + ", " + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
-                        + " (fixture): 2.\na\nb", discovery.discover("fixture", selector, start, end, "shard"));
-                assertTrue(discovery.discover("fixture", null, start, end, "shard").startsWith("Values of shard, "));
+                var overview = discovery.discover("fixture", start, end, null);
+                assertTrue(overview.startsWith("Labels — fixture"), overview);
+                assertTrue(overview.contains("\nfixture\n") && overview.contains("\nshard\n"), overview);
+                assertEquals("Values of shard — fixture, "
+                        + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
+                        + ": 2.\na\nb", discovery.discover("fixture", start, end, "shard"));
             }
         }
     }

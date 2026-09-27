@@ -15,19 +15,15 @@ public class DiscoveryTools {
     }
 
     @McpTool(name = "discoverLogs",
-            description = "See what logs exist before writing a query: label names and their values, whether lines are JSON or plain text, "
-                    + "which JSON fields and levels appear, one example line, and a suggested selector for the next call. "
-                    + "Call it without a selector first to list all labels of the stand, then with a selector like {app=\"backend\"} "
-                    + "to look inside one service. The overview shows at most 10 values per label; to get every value of one label "
-                    + "(e.g. all services) pass label=\"app\" and nothing but the values is returned. "
-                    + "A label missing here may still exist in another time window.",
+            description = "Discover label names and values before writing LogQL. Call without label to list label names, "
+                    + "then pass label=\"app\" to list its values. Use the names and values to write a stream selector "
+                    + "for queryLogs or countLogs. Widen the window if a quiet stand has no labels in the last hour.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String discoverLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
-            @McpToolParam(description = "Optional stream selector to narrow the scope, e.g. {namespace=\"dev\"}. Selector only, no filters. Omit to list all labels", required = false) String selector,
             @McpToolParam(description = QueryTools.START, required = false) String start,
             @McpToolParam(description = QueryTools.END, required = false) String end,
-            @McpToolParam(description = "Optional label name, e.g. \"app\": list all its values (up to 200) instead of the overview", required = false) String label) {
-        return service.discover(connection, selector, start, end, label);
+            @McpToolParam(description = "Optional label name, e.g. \"app\": list its values", required = false) String label) {
+        return service.discover(connection, start, end, label);
     }
 }

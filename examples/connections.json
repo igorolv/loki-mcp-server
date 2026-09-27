@@ -8,37 +8,44 @@
     },
     "dev": {
       "description": "asva2 DEV stand: Kubernetes, Loki 2.6.1, read-only ingress",
-      "hint": "service takes a system name (listed at the end) or a helm release: ssj-main is the main branch of ССЖ, ssj-pr-1285 a PR stand (label instance). This stand has no applicationName or userId labels, and app is asv-app/sp-app for every Java service. One user's requests: text=\"\\\"userId\\\":\\\"11952\\\"\" (the JSON field, set inside HTTP requests only). One task or error id across services: text=\"taskExecutionId=13548\" or text=\"ERR-...\" without service. Which config a service got: service=\"config-server\", text=\"ssj-ui-backend\". Stack trace lines of non-JSON services carry no level: after a level=\"error\" line, read getLogContext with a selector without level. Loki 2.6.1: no detected_level.",
+      "hint": "Kubernetes, Loki 2.6.1. Start with {namespace=~\"dev|asv-dev\"}. On this stand instance names helm releases (ssj-main for ССЖ); applicationName may be absent. For errors use a line filter such as |= \"ERROR\". To follow an id across services, omit the service matcher and add |= \"taskExecutionId=13548\" or the error id. For one user, search the JSON line text with |= \"\\\"userId\\\":\\\"11952\\\"\". Stack trace frames may be separate lines without a level.",
       "url": "${LOKI_DEV_URL}",
       "timezone": "Europe/Moscow",
-      "serviceLabels": ["applicationName", "instance", "container"],
-      "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
-      "ignoredFrames": ["\\.doFilter(Internal)?$"],
-      "versionFields": { "service.version": "", "build.version": "build", "git.commit": "commit" },
-      "rulesFile": ["asva2-rules.json", "java-rules.json"],
-      "scope": "{namespace=~\"dev|asv-dev\"}",
-      "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }
+      "serviceLabels": [
+        "applicationName",
+        "instance",
+        "container"
+      ],
+      "formatFile": "java-formats.json"
     },
     "tst": {
       "description": "asva2 TST stand: docker-compose on the infra host, Loki 3.5, 7-day retention",
-      "hint": "Almost no traffic outside ССЖ and logs are kept 7 days: widen to start=\"now-6h\" or \"now-24h\" before concluding that a service is silent. service takes a system name (listed at the end), a Spring service (ssj-backend; container nsi-connect logs as nsi-backend) or a container (label service: ssj-connect, config-server, nginx, kafka, keycloak). One user's requests: query {job=\"docker\", userId=\"11952\"} (HTTP requests only). One task or error id across services: text=\"taskExecutionId=13548\" or text=\"ERR-...\" without service. Which config a service got: service=\"config-server\", text=\"ssj-ui-backend\". Loki 3.5: | detected_level=\"error\" covers more lines than level=\"error\". Stack trace lines of non-JSON services carry no level: read getLogContext with a selector without level.",
+      "hint": "Docker, Loki 3.x, quiet outside ССЖ; widen the window before concluding that a service is silent. Start with {job=\"docker\"}. The service label or container names a service; for errors try | detected_level=\"error\" or |= \"ERROR\". Search a task or error id across services with a line filter on {job=\"docker\"}. Stack trace frames may be separate lines without a level.",
       "url": "${LOKI_TST_URL}",
       "timezone": "Europe/Moscow",
-      "serviceLabels": ["applicationName", "service", "container"],
-      "applicationPackages": ["ru.it_spectrum.asv", "ru.it_spectrum.core"],
-      "ignoredFrames": ["\\.doFilter(Internal)?$"],
-      "versionFields": { "service.version": "", "build.version": "build", "git.commit": "commit" },
-      "rulesFile": ["asva2-rules.json", "java-rules.json"],
-      "scope": "{job=\"docker\"}",
-      "levels": { "error": "|~ \"ERROR|Exception|Caused by\"" }
+      "serviceLabels": [
+        "applicationName",
+        "service",
+        "container"
+      ],
+      "formatFile": "java-formats.json"
     },
     "secured": {
       "description": "Loki behind authentication, configured through environment variables",
       "url": "${LOKI_URL}",
-      "auth": { "type": "BEARER", "token": "${LOKI_TOKEN}" },
+      "auth": {
+        "type": "BEARER",
+        "token": "${LOKI_TOKEN}"
+      },
       "tenant": "${LOKI_TENANT}",
-      "serviceLabels": ["applicationName", "service", "container"],
-      "limits": { "maxEntries": 500 }
+      "serviceLabels": [
+        "applicationName",
+        "service",
+        "container"
+      ],
+      "limits": {
+        "maxEntries": 500
+      }
     }
   }
 }

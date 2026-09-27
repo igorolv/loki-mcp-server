@@ -32,7 +32,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 
 /**
  * Writes every line of a window to files on the local disk, oldest first, in full: the original line ({@code raw}),
- * a named layout of the connection's rules catalogue, or a template given in the call. Reads the window forward in
+ * a named layout of the connection's format file, or a template given in the call. Reads the window forward in
  * pages, each starting at the time of the last line written; lines of that nanosecond that were already written are
  * skipped by stream and text, so a boundary line is neither lost nor doubled (real duplicates keep their count).
  */
@@ -81,12 +81,11 @@ public class ExportService {
         return name.startsWith(".") ? "_" + name : name;
     }
 
-    public String export(String connection, String query, String service, String level, String textFilter, String start, String end,
-                         String format, String directory, Boolean splitByService) {
+    public String export(String connection, String query, String start, String end, String format, String directory,
+                         Boolean splitByService) {
         var definition = registry.require(connection);
-        var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
-        query = QueryIntent.resolve(definition, client, query, service, level, textFilter, window);
         QueryService.requireLogQuery(query);
+        var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
         var writer = writer(definition, format);
         Path target = roots.resolve(directory);
         ZoneId zone = definition.timezone();
@@ -117,10 +116,8 @@ public class ExportService {
         ZoneId zone = definition.timezone();
         String where = run.query.strip() + " — " + connection + ", " + window(run.window, zone);
         if (run.lines == 0) {
-            String text = "Export of " + where + ": no matching lines, no file written.\nTry a wider window (e.g. start=\"now-6h\"), "
-                    + "check labels and fields with discoverLogs, or simplify the filter.";
-            String why = new SelectorCheck(client).explain(connection, run.query, run.window);
-            return why == null ? text : text + "\n" + why;
+            return "Export of " + where + ": no matching lines, no file written.\n"
+                    + "Try a wider window, inspect labels with discoverLogs, or simplify the LogQL filter.";
         }
         String header = "Export of " + where + ": " + run.lines + (run.lines == 1 ? " line, " : " lines, ") + megabytes(run.bytes)
                 + " MB, " + iso(instant(run.first), zone) + " – " + iso(instant(run.last), zone)

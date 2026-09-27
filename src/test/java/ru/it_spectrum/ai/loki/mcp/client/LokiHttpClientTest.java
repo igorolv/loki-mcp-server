@@ -139,24 +139,18 @@ class LokiHttpClientTest {
     }
 
     @Test
-    void requestsMetadataWithExplicitWindowAndRepeatedSelectors() throws Exception {
+    void requestsMetadataWithExplicitWindow() throws Exception {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, 200, "{\"status\":\"success\",\"data\":[\"pod\",\"app\"]}", false);
-        assertEquals(List.of("pod", "app"), client.labels("local", START, END, null).values());
+        assertEquals(List.of("pod", "app"), client.labels("local", START, END).values());
         Captured request = requests.poll(2, TimeUnit.SECONDS);
         assertEquals("/loki/api/v1/labels", request.uri().getPath());
         assertEquals("1720000000123456789", parameter(request, "start"));
         assertNull(parameter(request, "query"));
-        client.labelValues("local", "service_name", START, END, "{pod=\"a+b\"}");
+        client.labelValues("local", "service_name", START, END);
         request = requests.poll(2, TimeUnit.SECONDS);
         assertEquals("/loki/api/v1/label/service_name/values", request.uri().getPath());
-        assertEquals("{pod=\"a+b\"}", parameter(request, "query"));
-        handler = exchange -> respond(exchange, 200, "{\"status\":\"success\",\"data\":[{\"pod\":\"a\"}]}", false);
-        var selectors = List.of("{pod=\"a\"}", "{pod=\"b\"}");
-        assertEquals(Map.of("pod", "a"), client.series("local", selectors, START, END).streams().getFirst());
-        request = requests.poll(2, TimeUnit.SECONDS);
-        assertEquals("/loki/api/v1/series", request.uri().getPath());
-        assertEquals(selectors, parameters(request, "match[]"));
+        assertNull(parameter(request, "query"));
     }
 
     @Test
@@ -220,7 +214,7 @@ class LokiHttpClientTest {
     void unavailableMetadataEndpointDoesNotDisableQuery() {
         var client = plain(8192, 3000);
         handler = exchange -> respond(exchange, exchange.getRequestURI().getPath().endsWith("labels") ? 404 : 200, EMPTY, false);
-        assertSafe(assertThrows(LokiOperationException.class, () -> client.labels("local", START, END, null)), ENDPOINT_UNAVAILABLE);
+        assertSafe(assertThrows(LokiOperationException.class, () -> client.labels("local", START, END)), ENDPOINT_UNAVAILABLE);
         assertNotNull(range(client));
     }
 
@@ -326,9 +320,8 @@ class LokiHttpClientTest {
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryInstant("SECRET/", "q", START)), INVALID_CONNECTION);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryInstant("local", " ", START)), INVALID_ARGUMENT);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryInstant("local", "q", Instant.MAX)), INVALID_ARGUMENT);
-        assertSafe(assertThrows(LokiOperationException.class, () -> client.labelValues("local", "../config", START, END, null)), INVALID_ARGUMENT);
-        assertSafe(assertThrows(LokiOperationException.class, () -> client.series("local", List.of(), START, END)), INVALID_ARGUMENT);
-        assertSafe(assertThrows(LokiOperationException.class, () -> client.labels("local", END, START, null)), INVALID_ARGUMENT);
+        assertSafe(assertThrows(LokiOperationException.class, () -> client.labelValues("local", "../config", START, END)), INVALID_ARGUMENT);
+        assertSafe(assertThrows(LokiOperationException.class, () -> client.labels("local", END, START)), INVALID_ARGUMENT);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryRange("local", "q", START, END, 0, LokiHttpClient.Direction.FORWARD, null)), INVALID_ARGUMENT);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryRange("local", "q", START, END, 1, null, null)), INVALID_ARGUMENT);
         assertSafe(assertThrows(LokiOperationException.class, () -> client.queryRange("local", "q", START, END, 1, LokiHttpClient.Direction.FORWARD, BigDecimal.ZERO)), INVALID_ARGUMENT);

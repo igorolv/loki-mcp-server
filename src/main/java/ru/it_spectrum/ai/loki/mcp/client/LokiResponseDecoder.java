@@ -36,35 +36,16 @@ final class LokiResponseDecoder {
                 case "matrix" -> matrix(result);
                 default -> throw TransportErrors.error(UPSTREAM_INVALID_RESPONSE);
             };
-            Long processed = null;
-            if (data.has("stats")) {
-                JsonNode stats = object(data.path("stats"));
-                if (stats.has("summary")) {
-                    JsonNode summary = object(stats.path("summary"));
-                    if (summary.has("totalLinesProcessed")) {
-                        JsonNode count = summary.path("totalLinesProcessed");
-                        check(count.isIntegralNumber() && count.canConvertToLong() && count.longValue() >= 0);
-                        processed = count.longValue();
-                    }
-                }
-            }
-            return new QueryResponse(decoded, new QueryStats(processed), warnings(root));
+            return new QueryResponse(decoded);
         } catch (Exception ignored) {
             throw TransportErrors.error(UPSTREAM_INVALID_RESPONSE);
         }
     }
 
-    // Loki 2.6.1 omits "data" entirely from /labels, /label/{name}/values and /series when nothing matches.
+    // Loki 2.6.1 can omit "data" from label metadata responses when nothing matches.
     LabelResponse labels(byte[] bytes) {
         JsonNode root = root(bytes);
-        return new LabelResponse(root.has("data") ? strings(root.path("data")) : List.of(), warnings(root));
-    }
-
-    SeriesResponse series(byte[] bytes) {
-        JsonNode root = root(bytes);
-        var streams = new ArrayList<Map<String, String>>();
-        if (root.has("data")) for (JsonNode stream : array(root.path("data"))) streams.add(labelsMap(stream));
-        return new SeriesResponse(streams, warnings(root));
+        return new LabelResponse(root.has("data") ? strings(root.path("data")) : List.of());
     }
 
     private JsonNode root(byte[] bytes) {
@@ -134,10 +115,6 @@ final class LokiResponseDecoder {
         var map = new LinkedHashMap<String, String>();
         node.properties().forEach(entry -> map.put(entry.getKey(), string(entry.getValue())));
         return map;
-    }
-
-    private List<String> warnings(JsonNode root) {
-        return root.has("warnings") ? strings(root.path("warnings")) : List.of();
     }
 
     private List<String> strings(JsonNode node) {

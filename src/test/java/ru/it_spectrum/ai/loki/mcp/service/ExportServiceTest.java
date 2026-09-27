@@ -40,7 +40,7 @@ class ExportServiceTest {
     private ExportService service(int maxEntries, int maxExportLines, List<LineFormat> formats, List<LineLayout> layouts) {
         var limits = new ConnectionLimits(100, 100, 1_000_000, 4096, maxEntries, 86400, maxExportLines, 1_000_000);
         var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null,
-                ZoneId.of("Europe/Moscow"), limits, List.of("app"), List.of(), List.of(), null, Map.of(), formats, layouts);
+                ZoneId.of("Europe/Moscow"), limits, List.of("app"), formats, layouts);
         return new ExportService(new ConnectionRegistry(List.of(definition)), client, new ExportRoots(List.of(root)),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
@@ -68,7 +68,7 @@ class ExportServiceTest {
                 grouped.computeIfAbsent(hit.labels, k -> new ArrayList<>()).add(hit.entry);
             var result = new ArrayList<LogStream>();
             grouped.forEach((labels, entries) -> result.add(new LogStream(labels, entries)));
-            return new QueryResponse(new Streams(result), new QueryStats(0L), List.of());
+            return new QueryResponse(new Streams(result));
         }).when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
     }
 
@@ -82,7 +82,7 @@ class ExportServiceTest {
         loki(Map.of(BACKEND, List.of(entry(ns(1, 0), "a"), entry(ns(2, 5), "b"), entry(ns(3, 0), "d"), entry(ns(3, 0), "d"),
                         entry(ns(4, 0), "e")),
                 FRONTEND, List.of(entry(ns(2, 5), "b"))));
-        var text = service(3, 1000, List.of()).export("dev", "{app=~\".+\"}", null, null, null, "now-1h", "now", null, null, null);
+        var text = service(3, 1000, List.of()).export("dev", "{app=~\".+\"}", "now-1h", "now", null, null, null);
         var file = root.resolve("dev_20260924-140000_20260924-150000.log");
         var lines = read(file);
         assertEquals(List.of("a", "b", "b", "d", "d", "e"), lines);
@@ -94,7 +94,7 @@ class ExportServiceTest {
 
     @Test
     void springLayoutRewritesJsonAndPlainLinesInFull() throws IOException {
-        var catalogue = ConnectionsLoader.loadCatalogue(Path.of("examples/java-rules.json"));
+        var catalogue = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
         String stack = "java.lang.IllegalStateException: boom\\n\\tat a.B.c(B.java:1)\\n\\tat a.B.d(B.java:2)";
         loki(Map.of(BACKEND, List.of(entry(ns(1, 123_000_000), "{\"@timestamp\":\"x\",\"log\":{\"level\":\"ERROR\",\"logger\":\"a.B\"},"
                 + "\"process\":{\"pid\":7,\"thread\":{\"name\":\"main\"}},\"message\":\"failed\",\"error\":{\"stack_trace\":\"" + stack + "\"}}"),
@@ -103,7 +103,7 @@ class ExportServiceTest {
                 entry(ns(2, 200), "\tat a.B.c(B.java:1)"),
                 entry(ns(2, 300), "10.0.0.1 - - \"GET /index.html HTTP/1.1\" 200"))));
         var service = service(100, 1000, catalogue.formats(), catalogue.layouts());
-        service.export("dev", "{app=\"backend\"}", null, null, null, null, null, "spring", null, false);
+        service.export("dev", "{app=\"backend\"}", null, null, "spring", null, false);
         var lines = read(root.resolve("dev_20260924-140000_20260924-150000.log"));
         assertEquals(List.of(
                 "2026-09-24T14:00:01.123+03:00 ERROR 7 --- [backend] [main] a.B : failed",
@@ -121,7 +121,7 @@ class ExportServiceTest {
     void templateAndSplitByServiceWriteOneFilePerService() throws IOException {
         loki(Map.of(BACKEND, List.of(entry(ns(1, 0), "{\"message\":\"one\",\"user\":\"u1\"}"), entry(ns(3, 0), "{\"message\":\"three\"}")),
                 FRONTEND, List.of(entry(ns(2, 0), "{\"message\":\"two\",\"user\":\"u2\"}"))));
-        var text = service(100, 1000, List.of()).export("dev", "{app=~\".+\"}", null, null, null, null, null,
+        var text = service(100, 1000, List.of()).export("dev", "{app=~\".+\"}", null, null,
                 "{time:HH:mm:ss} {app} {user}{{x}} {message}", "incident", true);
         var directory = root.resolve("incident").resolve("dev_20260924-140000_20260924-150000");
         assertEquals(List.of("14:00:01 backend u1{x} one", "14:00:03 backend {x} three"), read(directory.resolve("backend.log")));
@@ -134,8 +134,8 @@ class ExportServiceTest {
     void neverOverwritesAndStopsAtTheLineLimitWithAContinuation() throws IOException {
         loki(Map.of(BACKEND, List.of(entry(ns(1, 0), "a"), entry(ns(2, 500_000), "b"), entry(ns(3, 0), "c"))));
         var service = service(100, 2, List.of());
-        var first = service.export("dev", "{app=\"backend\"}", null, null, null, null, null, "raw", null, null);
-        var second = service.export("dev", "{app=\"backend\"}", null, null, null, null, null, "raw", null, null);
+        var first = service.export("dev", "{app=\"backend\"}", null, null, "raw", null, null);
+        var second = service.export("dev", "{app=\"backend\"}", null, null, "raw", null, null);
         assertEquals(List.of("a", "b"), read(root.resolve("dev_20260924-140000_20260924-150000.log")));
         assertEquals(List.of("a", "b"), read(root.resolve("dev_20260924-140000_20260924-150000-2.log")));
         assertTrue(first.endsWith("Stopped at the export limit of this connection (2 lines). Continue into another file with "
@@ -146,21 +146,16 @@ class ExportServiceTest {
     @Test
     void emptyResultWritesNoFileAndDirectoryMustStayInsideTheRoots() throws IOException {
         loki(Map.of());
-        doReturn(new LabelResponse(List.of("backend"), List.of())).when(client).labelValues(anyString(), anyString(), any(), any(), any());
-        doReturn(new SeriesResponse(List.of(BACKEND), List.of())).when(client).series(anyString(), anyList(), any(), any());
         var service = service(100, 1000, List.of());
-        var text = service.export("dev", "{app=\"backend\"} |= \"nothing\"", null, null, null, null, null, null, null, null);
+        var text = service.export("dev", "{app=\"backend\"} |= \"nothing\"", null, null, null, null, null);
         assertTrue(text.contains("no matching lines, no file written"), text);
         try (var files = Files.list(root)) {
             assertEquals(0, files.count());
         }
-        var outside = assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null,
-                null, null, null, root.resolve("..").resolve("elsewhere").toString(), null));
+        var outside = assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null, root.resolve("..").resolve("elsewhere").toString(), null));
         assertTrue(outside.error().message().startsWith("directory must be inside one of the export directories: " + root), outside.error().message());
-        assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null,
-                null, null, null, "../escape", null));
-        var format = assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null,
-                null, null, "spring", null, null));
+        assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null, "../escape", null));
+        var format = assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, "spring", null, null));
         assertTrue(format.error().message().startsWith("format must be one of: raw, or a template"), format.error().message());
     }
 
@@ -170,7 +165,7 @@ class ExportServiceTest {
         for (int i = 0; i < 5; i++) same.add(entry(ns(1, 0), "same " + i));
         same.add(entry(ns(2, 0), "after"));
         loki(Map.of(BACKEND, same));
-        var text = service(3, 1000, List.of()).export("dev", "{app=\"backend\"}", null, null, null, null, null, null, null, null);
+        var text = service(3, 1000, List.of()).export("dev", "{app=\"backend\"}", null, null, null, null, null);
         assertEquals(List.of("same 0", "same 1", "same 2", "after"), read(root.resolve("dev_20260924-140000_20260924-150000.log")));
         assertTrue(text.contains("At least 3 lines share the time 2026-09-24T14:00:01.000+03:00; lines of that nanosecond beyond the "
                 + "first 3 may be missing. Every other matching line is written."), text);

@@ -77,27 +77,16 @@ public final class LokiHttpClient implements AutoCloseable {
                 List.of(new Param("query", query), new Param("time", nanos(time)))));
     }
 
-    public LabelResponse labels(String connection, Instant start, Instant end, String selector) {
+    public LabelResponse labels(String connection, Instant start, Instant end) {
         var definition = registry.require(connection);
-        return decoder.labels(get(definition, "/loki/api/v1/labels", metadataParams(start, end, selector)));
+        return decoder.labels(get(definition, "/loki/api/v1/labels", window(start, end)));
     }
 
-    public LabelResponse labelValues(String connection, String label, Instant start, Instant end, String selector) {
+    public LabelResponse labelValues(String connection, String label, Instant start, Instant end) {
         var definition = registry.require(connection);
         require(label != null && label.matches("[a-zA-Z_][a-zA-Z0-9_]*"));
         return decoder.labels(get(definition, "/loki/api/v1/label/" + label + "/values",
-                metadataParams(start, end, selector)));
-    }
-
-    public SeriesResponse series(String connection, List<String> selectors, Instant start, Instant end) {
-        var definition = registry.require(connection);
-        var params = window(start, end);
-        require(selectors != null && !selectors.isEmpty());
-        for (String selector : selectors) {
-            require(selector != null && !selector.isBlank());
-            params.add(new Param("match[]", selector));
-        }
-        return decoder.series(get(definition, "/loki/api/v1/series", params));
+                window(start, end)));
     }
 
     private byte[] get(ConnectionDefinition connection, String path, List<Param> params) {
@@ -188,15 +177,6 @@ public final class LokiHttpClient implements AutoCloseable {
         closed = true;
         clients.values().forEach(HttpClient::shutdownNow);
         clients.clear();
-    }
-
-    private List<Param> metadataParams(Instant start, Instant end, String selector) {
-        var params = window(start, end);
-        if (selector != null) {
-            require(!selector.isBlank());
-            params.add(new Param("query", selector));
-        }
-        return params;
     }
 
     private List<Param> window(Instant start, Instant end) {

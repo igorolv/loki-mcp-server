@@ -14,10 +14,7 @@ public final class LokiResponses {
     public sealed interface QueryData permits Streams, Vector, Matrix {
     }
 
-    public record QueryResponse(QueryData data, QueryStats stats, List<String> warnings) {
-        public QueryResponse {
-            warnings = List.copyOf(warnings);
-        }
+    public record QueryResponse(QueryData data) {
     }
 
     public record Streams(List<LogStream> streams) implements QueryData {
@@ -70,23 +67,10 @@ public final class LokiResponses {
         }
     }
 
-    /**
-     * Work performed upstream, not a count of matches. Null means stats were not supplied.
-     */
-    public record QueryStats(Long totalLinesProcessed) {
-    }
-
-    public record LabelResponse(List<String> values, List<String> warnings) {
+    public record LabelResponse(List<String> values) {
         public LabelResponse {
             values = List.copyOf(values);
-            warnings = List.copyOf(warnings);
         }
     }
 
-    public record SeriesResponse(List<Map<String, String>> streams, List<String> warnings) {
-        public SeriesResponse {
-            streams = streams.stream().map(Map::copyOf).toList();
-            warnings = List.copyOf(warnings);
-        }
-    }
 }

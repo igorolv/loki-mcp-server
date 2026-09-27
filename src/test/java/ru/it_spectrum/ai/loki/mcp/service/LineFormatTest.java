@@ -1,10 +1,8 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import org.junit.jupiter.api.Test;
-import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionsLoader;
 import ru.it_spectrum.ai.loki.mcp.connection.LineFormat;
-import ru.it_spectrum.ai.loki.mcp.connection.LogRule;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import java.nio.file.Path;
@@ -15,10 +13,10 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Plain Spring Boot console lines split by the format of examples/java-rules.json; the code knows no layout.
+ * Plain Spring Boot console lines split by the format of examples/java-formats.json; the code knows no layout.
  */
 class LineFormatTest {
-    private static final ConnectionsLoader.Catalogue JAVA = ConnectionsLoader.loadCatalogue(Path.of("examples/java-rules.json"));
+    private static final ConnectionsLoader.FormatsFile JAVA = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
     // Spring Boot 3 (no application name), 3.4+ (application name before the thread) and 2 (a space instead of T).
     private static final String BOOT3 = "2026-09-24T15:10:16.432+03:00  WARN 1 --- [           main] ConfigServletWebServerApplicationContext : "
             + "Exception encountered during context initialization - cancelling refresh attempt";
@@ -66,28 +64,6 @@ class LineFormatTest {
         // A shipper that sends every line apart leaves nothing after the colon.
         var empty = event("2026-09-24T15:26:11.242+03:00 ERROR 1 --- [           main] o.s.b.d.LoggingFailureAnalysisReporter   : ");
         assertEquals("(empty message, logger o.s.b.d.LoggingFailureAnalysisReporter)", normalizer.view(empty, List.of("instance")).message());
-    }
-
-    @Test
-    void linesOfOneMessageGroupTogetherAcrossThreadsAndTimesAndRulesSeeTheLogger() {
-        var events = List.of(event(BOOT2),
-                event("2021-03-01 10:05:00.456 ERROR 12345 --- [scheduling-2] c.e.orders.OrderJob : Order 18 failed"),
-                event("2021-03-01 10:06:00.789 ERROR 12345 --- [http-nio-8080-exec-3] c.e.orders.OrderJob : Order 19 failed"));
-        var rules = List.of(new LogRule("order-job", LogRule.Category.CONFIGURATION, null, null, Pattern.compile("^c\\.e\\.orders\\."),
-                "orders", "The order job of this stand is misconfigured.", null));
-        var groups = LogSummary.group(events, normalizer, List.of("instance"), List.of(), rules);
-        assertEquals(1, groups.size());
-        assertEquals(3, groups.getFirst().count);
-        assertEquals("[configuration: orders]", groups.getFirst().rule.tag());
-    }
-
-    @Test
-    void startLinesInTheConsoleLayoutAreRecognised() {
-        var mark = ServiceStarts.mark(event("2026-09-24T15:26:09.001+03:00  INFO 1 --- [           main] c.e.orders.Application                   : "
-                + "Started Application in 12.5 seconds (process running for 13.1)"), normalizer, List.of("instance"),
-                ConnectionDefinition.DEFAULT_VERSION_FIELDS);
-        assertNotNull(mark);
-        assertEquals(ServiceStarts.Kind.STARTED, mark.kind());
     }
 
     @Test

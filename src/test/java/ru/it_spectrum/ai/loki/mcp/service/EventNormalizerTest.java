@@ -94,15 +94,15 @@ class EventNormalizerTest {
         assertNull(view.service());
         assertNull(view.traceId());
         assertEquals("{\"foo\":\"bar\"}", view.message());
-        assertEquals(PLAIN, view(Map.of(), "{".repeat(DiscoveryLimits.PARSE_CHARACTERS + 1)).format());
+        assertEquals(PLAIN, view(Map.of(), "{".repeat(EventParseLimits.PARSE_CHARACTERS + 1)).format());
         var values = new LinkedHashMap<String, String>();
         var types = new LinkedHashMap<String, String>();
         normalizer.parse("{\"x\":".repeat(25) + "1" + "}".repeat(25), values, types);
-        assertTrue(types.containsKey("x".repeat(1) + ".x".repeat(DiscoveryLimits.JSON_DEPTH - 1)));
+        assertTrue(types.containsKey("x".repeat(1) + ".x".repeat(EventParseLimits.JSON_DEPTH - 1)));
         String wide = java.util.stream.IntStream.range(0, 150).mapToObj(i -> "\"f" + i + "\":1").collect(java.util.stream.Collectors.joining(",", "{", "}"));
         types.clear();
         values.clear();
         normalizer.parse(wide, values, types);
-        assertEquals(DiscoveryLimits.FIELDS, types.size());
+        assertEquals(EventParseLimits.FIELDS, types.size());
     }
 }

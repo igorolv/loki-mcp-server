@@ -33,7 +33,7 @@ public final class LogText {
 
     /**
      * One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines.
-     * Raw: {@code HH:mm:ss.SSS {stream labels}  original line} — the "show everything" mode also shows pod/instance.
+     * Raw preview: {@code HH:mm:ss.SSS {stream labels}  original line}, shortened at {@link #RAW_CHARS} code points.
      */
     public static String line(LogEvent event, EventNormalizer.View view, ZoneId zone, boolean raw) {
         var text = new StringBuilder(TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone)));

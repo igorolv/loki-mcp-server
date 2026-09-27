@@ -59,12 +59,11 @@ class StdioSmokeTest {
                 String path = exchange.getRequestURI().getPath();
                 String query = java.net.URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
                 int status = query.contains("fail") ? 403 : query.contains("broken") ? 400
-                                                            : path.endsWith("/series") && query.contains("blocked") ? 404 : 200;
+                                                            : path.endsWith("/label/blocked/values") ? 404 : 200;
                 String body;
                 if (status == 403) body = "SECRET_TOKEN upstream error";
                 else if (status == 400) body = "parse error at line 1, col 9: syntax error";
                 else if (status == 404) body = "SECRET_TOKEN path blocked";
-                else if (path.endsWith("/series")) body = "{\"status\":\"success\",\"data\":[{\"kind\":\"test\"}]}";
                 else if (path.endsWith("/labels")) body = "{\"status\":\"success\",\"data\":[\"kind\"]}";
                 else if (path.endsWith("/values")) body = "{\"status\":\"success\",\"data\":[\"test\"]}";
                 else if (path.endsWith("/query"))
@@ -152,7 +151,7 @@ class StdioSmokeTest {
                     {"jsonrpc":"2.0","id":18,"method":"tools/list"}
                     """);
             JsonNode catalog = response(stdout, stderr).path("result").path("tools");
-            assertEquals(7, catalog.size());
+            assertEquals(5, catalog.size());
             var names = new HashSet<String>();
             for (var declaration : catalog) {
                 names.add(declaration.path("name").asText());
@@ -165,11 +164,21 @@ class StdioSmokeTest {
                         declaration.path("annotations").path("openWorldHint").asBoolean());
                 assertEquals("object", declaration.path("inputSchema").path("type").asText());
             }
-            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "exportLogs")), names);
+            assertEquals(new HashSet<>(List.of("listConnections", "discoverLogs", "countLogs", "queryLogs", "exportLogs")), names);
             JsonNode tool = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
-            assertEquals(List.of("connection"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
-            assertTrue(tool.path("inputSchema").path("properties").has("service") && tool.path("inputSchema").path("properties").has("level"), tool.toString());
+            assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
+            assertFalse(tool.path("inputSchema").path("properties").has("service"), tool.toString());
+            for (String name : List.of("countLogs", "exportLogs")) {
+                JsonNode schema = StreamSupport.stream(catalog.spliterator(), false)
+                        .filter(declaration -> declaration.path("name").asText().equals(name)).findFirst().orElseThrow()
+                        .path("inputSchema");
+                assertEquals(List.of("connection", "query"), mapper.convertValue(schema.path("required"), List.class));
+            }
+            JsonNode discovery = StreamSupport.stream(catalog.spliterator(), false)
+                    .filter(declaration -> declaration.path("name").asText().equals("discoverLogs")).findFirst().orElseThrow()
+                    .path("inputSchema");
+            assertFalse(discovery.path("properties").has("selector"), discovery.toString());
             for (int id = 19; id <= 34; id++) {
                 send(input, "{\"jsonrpc\":\"2.0\",\"id\":" + id
                         + ",\"method\":\"tools/call\",\"params\":{\"name\":\"listConnections\",\"arguments\":{}}}");
@@ -182,7 +191,7 @@ class StdioSmokeTest {
                 JsonNode result = call.path("result");
                 assertFalse(result.path("isError").asBoolean(), result.toString());
                 assertFalse(result.has("structuredContent"), result.toString());
-                assertEquals("dev — Development. Labels: kind, level. Without LogQL: service, level (error, warn), text; service is required.\ntest. Without LogQL: service, level (error, warn), text; service is required.\ntiny. Without LogQL: service, level (error, warn), text; service is required.", text(result));
+                assertEquals("dev — Development. Labels: kind, level.\ntest.\ntiny.", text(result));
                 assertNoSecrets(call.toString());
             }
             // Oversized payloads and the minimum budget traverse the real outbound transport.
@@ -193,8 +202,7 @@ class StdioSmokeTest {
                 args.put("start", "1700000000000000000");
                 args.put("end", "1700000001000000000");
                 if (name.equals("countLogs")) args.put("query", "{kind=\"large\"}");
-                else if (name.equals("discoverLogs")) args.put("selector", "{kind=\"large\"}");
-                else {
+                else if (name.equals("queryLogs")) {
                     args.put("query", "{kind=\"large\"}");
                     args.put("limit", 12);
                 }
@@ -222,18 +230,13 @@ class StdioSmokeTest {
                     }
                     if (index % 4 == 2) assertTrue(text.startsWith("3 lines match {kind=\"large\"}"), text);
                     if (index % 4 == 3)
-                        assertTrue(text.startsWith("Streams matching {kind=\"large\"} in 2023-11-14") && text.contains("Next: use countLogs"), text);
+                        assertTrue(text.startsWith("Labels — test, 2023-11-14"), text);
                 }
             }
             for (int id = 35; id < 51; id++) {
-                String name = id % 4 == 0 ? "queryLogs" : id % 4 == 1 ? "countLogs" : id % 4 == 2 ? "getLogContext" : id % 8 == 3 ? "summarizeLogs" : "queryLogs";
+                String name = id % 4 == 1 ? "countLogs" : "queryLogs";
                 var arguments = new HashMap<String, Object>(Map.of("connection", "test"));
-                if (name.equals("getLogContext")) {
-                    arguments.put("selector", "{kind=\"test\"}");
-                    arguments.put("time", "2023-11-14T22:13:20.123Z");
-                } else {
-                    arguments.putAll(Map.of("query", "{kind=\"test\"}", "start", "1700000000000000000", "end", "1700000001000000000"));
-                }
+                arguments.putAll(Map.of("query", "{kind=\"test\"}", "start", "1700000000000000000", "end", "1700000001000000000"));
                 if (id % 8 == 1) arguments.put("groupBy", "kind");
                 if (id % 8 == 7) arguments.put("raw", true);
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
@@ -250,11 +253,6 @@ class StdioSmokeTest {
                 if (id % 4 == 1) {
                     assertTrue(text.startsWith("3 lines match {kind=\"test\"} in 2023-11-14 22:13:20–22:13:21 (Z) (test)."), text);
                     assertEquals(id % 8 == 1, text.contains("By kind:\n  test    3"), text);
-                } else if (id % 4 == 2) {
-                    assertTrue(text.startsWith("Context in {kind=\"test\"} around 2023-11-14 22:13:20.123"), text);
-                } else if (id % 8 == 3) {
-                    assertTrue(text.startsWith("Summary of {kind=\"test\"} — test, 2023-11-14 22:13:20–22:13:21 (Z): all 1 lines, spanning 22:13:20.123–22:13:20.123, 1 distinct message.\n"), text);
-                    assertTrue(text.contains("\n    1×  22:13:20.123  ERROR test  Ошибка 🐈\nCounts are for the 1 sampled lines only;"), text);
                 } else if (id % 8 == 7) {
                     assertTrue(text.contains("\n22:13:20.123 {kind=\"test\", level=\"error\"}  Ошибка 🐈\nShown all 1 matching lines."), text);
                 } else {
@@ -266,7 +264,7 @@ class StdioSmokeTest {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
                         "params", Map.of("name", "discoverLogs", "arguments", id % 2 == 0
                                 ? Map.of("connection", "test", "start", "1700000000000000000", "end", "1700000001000000000")
-                                : Map.of("connection", "test", "selector", "{kind=\"blocked\"}", "start", "now-1s", "end", "now")))));
+                                : Map.of("connection", "test", "label", "blocked", "start", "now-1s", "end", "now")))));
             }
             ids.clear();
             for (int i = 0; i < 16; i++) {
@@ -277,17 +275,15 @@ class StdioSmokeTest {
                 String text = text(result);
                 if (id % 2 == 0) {
                     assertFalse(result.path("isError").asBoolean(), text);
-                    assertTrue(text.startsWith("Labels in 2023-11-14 22:13:20–22:13:21 (Z) (test): 1.\nLabels:\n  kind: test\n"), text);
-                    assertTrue(text.contains("Levels seen: ERROR."), text);
-                    assertTrue(text.contains("Next: use countLogs or queryLogs with a selector like {kind=\"test\"}"), text);
+                    assertTrue(text.startsWith("Labels — test, 2023-11-14 22:13:20–22:13:21 (Z): 1.\nkind\n"), text);
                 } else {
                     assertTrue(result.path("isError").asBoolean(), text);
                     assertTrue(text.startsWith("Error ENDPOINT_UNAVAILABLE"), text);
                 }
                 assertNoSecrets(call.toString());
             }
-            for (var bad : List.of(Map.of("selector", "{kind=\"test\"}"),
-                    Map.of("connection", "test", "selector", "{kind=\"test\"}", "start", "MODEL_ARGUMENT"))) {
+            for (var bad : List.of(Map.of("label", "kind"),
+                    Map.of("connection", "test", "label", "kind", "start", "MODEL_ARGUMENT"))) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 86, "method", "tools/call",
                         "params", Map.of("name", "discoverLogs", "arguments", bad))));
                 var result = response(stdout, stderr).path("result");

@@ -1,7 +1,7 @@
 # HTTP client
 
 `LokiHttpClient` is the internal transport layer under [queryLogs, countLogs,
-summarizeLogs, getLogContext, exportLogs](queries.md) and [discoverLogs](discovery.md);
+exportLogs](queries.md) and [discoverLogs](discovery.md);
 `listConnections` does not use HTTP. Spring creates the client as a bean; creation makes no
 network requests.
 
@@ -15,12 +15,10 @@ requests to fixed endpoints are available:
 | `queryInstant` | `/loki/api/v1/query` | connection, query, time |
 | `labels` | `/loki/api/v1/labels` | connection, start/end |
 | `labelValues` | `/loki/api/v1/label/<name>/values` | connection, label, start/end |
-| `series` | `/loki/api/v1/series` | connection, selectors, start/end |
 
-In `queryRange` the optional `stepSeconds` is a positive `BigDecimal`. In
-`labels`/`labelValues` the optional selector is passed as `query`. `series` sends every
-selector as a separate `match[]`. Label names are checked against the basic
-`[a-zA-Z_][a-zA-Z0-9_]*` syntax. There is no arbitrary URL/path, no write endpoint and no
+In `queryRange` the optional `stepSeconds` is a positive `BigDecimal`.
+Label names are checked against the basic `[a-zA-Z_][a-zA-Z0-9_]*` syntax.
+There is no arbitrary URL/path, no write endpoint and no
 `/config` read.
 
 Time is accepted as an absolute `Instant` and sent as an epoch-nanosecond string within
@@ -57,17 +55,17 @@ in a controlled cancellation.
 `maxEntries`, `maxIntervalSeconds` and `maxResponseBytes` are not applied in the transport
 layer: the services check the user limits and the window, the services and the
 `QueryToolsConfig` wrapper enforce the text budget (see
-[queries.md](queries.md#size-limit)). `queryRange` forwards the `limit` it received without
+[queries.md](queries.md#budget-and-errors)). `queryRange` forwards the `limit` it received without
 silent changes; the service must validate it against the configuration. There are no
 application-level retries, mandatory probes or version checks.
 
 ## Decoding
 
 `LokiResponses` holds transport records; they are not MCP output schemas. `streams`,
-`vector`, `matrix`, label/value lists and series are supported. An unknown resultType or a
+`vector`, `matrix` and label/value lists are supported. An unknown resultType or a
 malformed known shape is an error, not an empty sample. New unknown object fields are
 allowed. Duplicate JSON keys and trailing JSON are rejected. Empty result arrays are fine;
-so is a `{"status":"success"}` without `data` for `/series` and `/label/<name>/values`,
+so is a `{"status":"success"}` without `data` for `/label/<name>/values`,
 which Loki 2.6.1 sends for an empty result — decoded as an empty list.
 
 For logs the upstream order, every repetition, the original line, the string nanosecond
@@ -85,10 +83,9 @@ Metric timestamps must be JSON numbers in seconds and are parsed into `BigDecima
 values are kept as strings, including `NaN`, `+Inf`, `-Inf` and exponent notation. String
 log timestamps and numeric metric time are deliberately not interchangeable.
 
-`QueryStats.totalLinesProcessed` is the nullable number of lines Loki processed; it is not
-the number of matches or events. Nothing else from stats is published. A missing figure
-stays unknown. `warnings` are kept as upstream data: they are never echoed to the model,
-used as instructions or written to diagnostic logs.
+Loki `stats` and `warnings` are not used for the five-tool interface. In particular,
+`totalLinesProcessed` is not a match count. They are not echoed to the model, used as
+instructions or written to diagnostic logs.
 
 ## Errors
 
@@ -133,5 +130,5 @@ stream/metric/metadata DTOs, empty and malformed responses, auth/tenant isolatio
 redirect refusal, byte budgets with Content-Length and chunked, Unicode, header/body/TLS
 timeouts, cancellation and the absence of secrets in exceptions. Compatibility with Loki
 2.6.1 and 3.6.0 is checked by the separate `integrationTest` task (see
-[queries.md](queries.md)), including `/series` and [discoverLogs](discovery.md); the live
+[queries.md](queries.md)) and [discoverLogs](discovery.md); the live
 check is `scripts/live_smoke/run_smoke.py`.

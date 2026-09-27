@@ -13,7 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static ru.it_spectrum.ai.loki.mcp.service.DiscoveryLimits.*;
+import static ru.it_spectrum.ai.loki.mcp.service.EventParseLimits.*;
 
 /**
  * Picks level, service, logger, message, trace id and stack trace out of labels, structured metadata and a JSON line,
@@ -107,7 +107,7 @@ public final class EventNormalizer {
             } else message = line;
             // A line format replaces the first line with the message it found there; the rest of the line stays. An
             // empty message is the rest of the line (a report that starts on the next line), else it says so: a
-            // shipper that sends every line apart leaves the report in the next entries, which getLogContext shows.
+            // shipper that sends every line apart leaves the report in the next entries.
             String found = values.get("message");
             if (found != null && !found.isBlank())
                 message = newline >= 0 && stack == null ? found + line.substring(newline) : found;

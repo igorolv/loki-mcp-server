@@ -5,7 +5,7 @@ import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import java.util.regex.Pattern;
 
 /**
- * A plain-text line layout of a rules catalogue: a regular expression over the first line of a line that is not JSON,
+ * A plain-text line format: a regular expression over the first line of a line that is not JSON,
  * whose named groups become the line's fields. {@code message} is required and replaces the whole line as the message;
  * {@code level}, {@code logger} and {@code service} are read like the JSON fields of those names; any other group
  * ({@code thread}, {@code pid}, …) is a field of the line. The first format that finds a match wins.

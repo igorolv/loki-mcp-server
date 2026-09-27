@@ -3,7 +3,6 @@ package ru.it_spectrum.ai.loki.mcp.connection;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -13,7 +12,6 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
@@ -21,6 +19,7 @@ import java.util.regex.Pattern;
 
 public final class ConnectionsLoader {
     private static final int MAX_FILE_BYTES = 1024 * 1024;
+    private static final int MAX_PATTERN_CHARS = 1000;
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -36,9 +35,6 @@ public final class ConnectionsLoader {
         return loadConfig(path, environment).connections();
     }
 
-    /**
-     * The connections and the export directories of the file; {@code exportRoots} is empty when the file names none.
-     */
     public static Config loadConfig(Path path, UnaryOperator<String> environment) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
@@ -48,15 +44,16 @@ public final class ConnectionsLoader {
                 throw Errors.configuration();
             }
             var definitions = new ArrayList<ConnectionDefinition>();
-            var rulesByFile = new HashMap<Path, Catalogue>();
+            var loaded = new HashMap<Path, FormatsFile>();
             for (var pair : config.connections().entrySet()) {
-                Entry e = pair.getValue();
-                if (e == null) throw Errors.configuration();
-                Auth a = e.auth();
+                Entry entry = pair.getValue();
+                if (entry == null) throw Errors.configuration();
+                Auth a = entry.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
-                var catalogue = catalogue(path, e.rulesFile(), environment, rulesByFile);
-                Limits l = e.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : e.limits();
+                FormatsFile formats = entry.formatFile() == null ? FormatsFile.EMPTY
+                        : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)), ConnectionsLoader::loadFormats);
+                Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : entry.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
                         or(l.requestTimeoutMs(), d.requestTimeoutMs()), or(l.maxHttpResponseBytes(), d.maxHttpResponseBytes()),
@@ -64,130 +61,70 @@ public final class ConnectionsLoader {
                         l.maxIntervalSeconds() == null ? d.maxIntervalSeconds() : l.maxIntervalSeconds(),
                         or(l.maxExportLines(), d.maxExportLines()),
                         l.maxExportBytes() == null ? d.maxExportBytes() : l.maxExportBytes());
-                definitions.add(new ConnectionDefinition(pair.getKey(), e.description(), e.hint(),
-                        URI.create(resolve(e.url(), environment)), auth, resolve(e.tenant(), environment),
-                        ZoneId.of(e.timezone() == null ? "UTC" : e.timezone()), limits,
-                        e.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : e.serviceLabels(),
-                        e.applicationPackages() == null ? List.of() : e.applicationPackages(),
-                        catalogue.rules(), e.scope(), e.levels() == null ? Map.of() : e.levels(), catalogue.formats(),
-                        catalogue.layouts(), ignoredFrames(e.ignoredFrames()),
-                        e.versionFields() == null ? ConnectionDefinition.DEFAULT_VERSION_FIELDS : e.versionFields(),
-                        catalogue.systems()));
+                definitions.add(new ConnectionDefinition(pair.getKey(), entry.description(), entry.hint(),
+                        URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
+                        ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
+                        entry.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : entry.serviceLabels(),
+                        formats.formats(), formats.layouts()));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
-            // Jackson, URI and filesystem errors can include source values. Do not retain their cause.
+            // Parser and filesystem errors can quote credentials or URLs; keep them out of diagnostics.
             throw Errors.configuration();
         }
     }
 
-    /**
-     * The rules and formats of every file of {@code rulesFile} (one path or a list), in order: the stand's own file
-     * first, then generic sets. A file shared by connections is loaded once.
-     */
-    private static Catalogue catalogue(Path connections, JsonNode rulesFile, UnaryOperator<String> environment,
-                                       Map<Path, Catalogue> loaded) {
-        if (rulesFile == null || rulesFile.isNull()) return Catalogue.EMPTY;
-        var files = new ArrayList<String>();
-        if (rulesFile.isString()) files.add(rulesFile.asString());
-        else if (rulesFile.isArray() && !rulesFile.isEmpty()) for (var file : rulesFile) {
-            if (!file.isString()) throw Errors.configuration();
-            files.add(file.asString());
+    public static FormatsFile loadFormats(Path path) {
+        try (var input = Files.newInputStream(path)) {
+            byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
+            if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
+            FormatConfig file = MAPPER.readValue(bytes, FormatConfig.class);
+            if (file == null) throw Errors.configuration();
+            var formats = new ArrayList<LineFormat>();
+            if (file.formats() != null) {
+                for (Format entry : file.formats()) {
+                    if (entry == null) throw Errors.configuration();
+                    formats.add(new LineFormat(entry.id(), compile(entry.pattern())));
+                }
+            }
+            var layouts = new ArrayList<LineLayout>();
+            if (file.layouts() != null) {
+                for (Layout entry : file.layouts()) {
+                    if (entry == null) throw Errors.configuration();
+                    layouts.add(new LineLayout(entry.id(), entry.template()));
+                }
+            }
+            return new FormatsFile(List.copyOf(formats), List.copyOf(layouts));
+        } catch (Exception ignored) {
+            throw Errors.configuration();
         }
-        else throw Errors.configuration();
-        var rules = new ArrayList<LogRule>();
-        var formats = new ArrayList<LineFormat>();
-        var layouts = new ArrayList<LineLayout>();
-        var systems = new ArrayList<ServiceSystem>();
-        for (String file : files) {
-            if (file.isBlank()) throw Errors.configuration();
-            var catalogue = loaded.computeIfAbsent(rulesPath(connections, resolve(file, environment)), ConnectionsLoader::loadCatalogue);
-            rules.addAll(catalogue.rules());
-            formats.addAll(catalogue.formats());
-            // The first file that names a layout wins: the stand's own file can redefine a generic one.
-            for (var layout : catalogue.layouts())
-                if (layouts.stream().noneMatch(l -> l.id().equals(layout.id()))) layouts.add(layout);
-            systems.addAll(catalogue.systems());
-        }
-        // One file: its shared copy, so that connections naming it hold the same lists.
-        return files.size() == 1 ? loaded.get(rulesPath(connections, resolve(files.getFirst(), environment))) : new Catalogue(rules, formats, layouts, systems);
     }
 
-    /**
-     * Absolute export directories; a relative one is resolved against the directory of the connections file.
-     */
+    private static Pattern compile(String regex) {
+        if (regex == null || regex.isBlank() || regex.length() > MAX_PATTERN_CHARS) throw Errors.configuration();
+        try {
+            return Pattern.compile(regex);
+        } catch (RuntimeException ignored) {
+            throw Errors.configuration();
+        }
+    }
+
     private static List<Path> exportRoots(Path connections, List<String> roots, UnaryOperator<String> environment) {
         if (roots == null) return List.of();
         if (roots.isEmpty() || roots.size() > ExportRoots.MAX_ROOTS) throw Errors.configuration();
         var paths = new ArrayList<Path>();
         for (String root : roots) {
             if (root == null || root.isBlank()) throw Errors.configuration();
-            paths.add(rulesPath(connections, resolve(root, environment)));
+            paths.add(resolvePath(connections, resolve(root, environment)));
         }
         return List.copyOf(paths);
     }
 
-    /**
-     * A relative rulesFile is resolved against the directory of the connections file.
-     */
-    private static Path rulesPath(Path connections, String rulesFile) {
-        Path rules = Path.of(rulesFile);
-        if (rules.isAbsolute()) return rules.normalize();
+    private static Path resolvePath(Path connections, String value) {
+        Path path = Path.of(value);
+        if (path.isAbsolute()) return path.normalize();
         Path directory = connections.toAbsolutePath().getParent();
-        return (directory == null ? rules : directory.resolve(rules)).normalize();
-    }
-
-    public static List<LogRule> loadRules(Path path) {
-        return loadCatalogue(path).rules();
-    }
-
-    public static Catalogue loadCatalogue(Path path) {
-        try (var input = Files.newInputStream(path)) {
-            byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
-            if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
-            RulesFile file = MAPPER.readValue(bytes, RulesFile.class);
-            if (file == null || file.rules() == null) throw Errors.configuration();
-            var formats = new ArrayList<LineFormat>();
-            if (file.formats() != null)
-                for (Format f : file.formats()) {
-                    if (f == null) throw Errors.configuration();
-                    formats.add(new LineFormat(f.id(), LogRule.compile(f.pattern())));
-                }
-            var layouts = new ArrayList<LineLayout>();
-            if (file.layouts() != null)
-                for (Layout l : file.layouts()) {
-                    if (l == null) throw Errors.configuration();
-                    layouts.add(new LineLayout(l.id(), l.template()));
-                }
-            var systems = new ArrayList<ServiceSystem>();
-            if (file.systems() != null)
-                for (SystemEntry entry : file.systems()) {
-                    if (entry == null) throw Errors.configuration();
-                    systems.add(new ServiceSystem(entry.names(), entry.about(), entry.services()));
-                }
-            var rules = new ArrayList<LogRule>();
-            for (Rule r : file.rules()) {
-                if (r == null || r.category() == null) throw Errors.configuration();
-                Match m = r.match() == null ? new Match(null, null, null) : r.match();
-                rules.add(new LogRule(r.id(), LogRule.Category.valueOf(r.category().toUpperCase(java.util.Locale.ROOT)),
-                        LogRule.compile(m.exception()), LogRule.compile(m.message()), LogRule.compile(m.logger()),
-                        r.subject(), r.advice(), r.filter()));
-            }
-            return new Catalogue(List.copyOf(rules), List.copyOf(formats), List.copyOf(layouts), List.copyOf(systems));
-        } catch (Exception ignored) {
-            // Same policy as the connections file: never retain parser messages that quote the source.
-            throw Errors.configuration();
-        }
-    }
-
-    private static List<Pattern> ignoredFrames(List<String> patterns) {
-        if (patterns == null) return List.of();
-        var compiled = new ArrayList<Pattern>();
-        for (String pattern : patterns) {
-            if (pattern == null) throw Errors.configuration();
-            compiled.add(LogRule.compile(pattern));
-        }
-        return compiled;
+        return (directory == null ? path : directory.resolve(path)).normalize();
     }
 
     private static int or(Integer value, int fallback) {
@@ -210,17 +147,10 @@ public final class ConnectionsLoader {
         return result.toString();
     }
 
-    /**
-     * What a rules catalogue holds: the rules, tried in order, the plain-text line formats, tried in order, the line
-     * templates of exportLogs and the names of the parts of the project.
-     */
-    public record Catalogue(List<LogRule> rules, List<LineFormat> formats, List<LineLayout> layouts, List<ServiceSystem> systems) {
-        static final Catalogue EMPTY = new Catalogue(List.of(), List.of(), List.of(), List.of());
+    public record FormatsFile(List<LineFormat> formats, List<LineLayout> layouts) {
+        static final FormatsFile EMPTY = new FormatsFile(List.of(), List.of());
     }
 
-    /**
-     * The whole connections file: the connections and the export directories it names (empty: none).
-     */
     public record Config(List<ConnectionDefinition> connections, List<Path> exportRoots) {
     }
 
@@ -228,27 +158,16 @@ public final class ConnectionsLoader {
     }
 
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
-                         Limits limits, List<String> serviceLabels, List<String> applicationPackages,
-                         JsonNode rulesFile, String scope, Map<String, String> levels, List<String> ignoredFrames,
-                         LinkedHashMap<String, String> versionFields) {
+                         Limits limits, List<String> serviceLabels, String formatFile) {
     }
 
-    private record SystemEntry(List<String> names, String about, List<String> services) {
-    }
-
-    private record RulesFile(List<Rule> rules, List<Format> formats, List<Layout> layouts, List<SystemEntry> systems) {
+    private record FormatConfig(List<Format> formats, List<Layout> layouts) {
     }
 
     private record Layout(String id, String template) {
     }
 
     private record Format(String id, String pattern) {
-    }
-
-    private record Rule(String id, String category, Match match, String subject, String advice, String filter) {
-    }
-
-    private record Match(String exception, String message, String logger) {
     }
 
     private record Auth(ConnectionAuth.Type type, String username, String password, String token) {

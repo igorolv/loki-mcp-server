@@ -6,7 +6,7 @@ import ru.it_spectrum.ai.loki.mcp.service.LogLayout;
 import java.util.regex.Pattern;
 
 /**
- * A named line template of a rules catalogue that exportLogs writes lines in, the reverse of a {@link LineFormat}:
+ * A named line template that exportLogs writes lines in, the reverse of a {@link LineFormat}:
  * {@code format="spring"} names the layout with id {@code spring}. The template syntax is {@link LogLayout}'s.
  */
 public record LineLayout(String id, String template) {

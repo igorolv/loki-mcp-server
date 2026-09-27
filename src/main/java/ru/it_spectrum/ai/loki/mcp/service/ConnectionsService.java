@@ -3,7 +3,6 @@ package ru.it_spectrum.ai.loki.mcp.service;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.LineLayout;
-import ru.it_spectrum.ai.loki.mcp.connection.ServiceSystem;
 
 @Service
 public class ConnectionsService {
@@ -14,8 +13,7 @@ public class ConnectionsService {
     }
 
     /**
-     * One line per connection: name, description, the operator's hint and what service/level/text queries start from, and the
-     * layouts exportLogs can write.
+     * One line per connection: name, description, operator hint and export layouts.
      * Never URLs or credentials.
      */
     public String list() {
@@ -25,11 +23,6 @@ public class ConnectionsService {
             if (connection.description() != null) text.append(" — ").append(connection.description());
             if (connection.hint() != null) text.append(". ").append(connection.hint());
             if (text.charAt(text.length() - 1) != '.') text.append('.');
-            text.append(" Without LogQL: service, level (").append(String.join(", ", connection.allLevels().keySet())).append("), text")
-                    .append(connection.scope() == null ? "; service is required." : ", searched in " + connection.scope() + ".");
-            if (!connection.systems().isEmpty())
-                text.append(" service also takes a system name: ")
-                        .append(String.join("; ", connection.systems().stream().map(ServiceSystem::toString).toList())).append('.');
             if (!connection.layouts().isEmpty())
                 text.append(" exportLogs formats: raw, ").append(String.join(", ", connection.layouts().stream().map(LineLayout::id).toList())).append('.');
             text.append('\n');

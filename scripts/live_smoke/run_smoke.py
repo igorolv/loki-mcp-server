@@ -6,8 +6,7 @@ that the server resolves itself, so no URL or credential ever reaches this scrip
     python scripts/live_smoke/run_smoke.py --connection dev
     python scripts/live_smoke/run_smoke.py --connection dev --connection tst --window now-24h --verbose
 
-The checks are neutral: the selector for the log steps is taken from the "Next:" line of discoverLogs,
-so nothing about a particular stand is hard-coded. Nothing is written to Loki.
+The checks choose a current label value through discoverLogs, so no stand selector is hard-coded. Nothing is written to Loki.
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ import threading
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "summarizeLogs", "getLogContext", "exportLogs"}
+TOOLS = {"listConnections", "discoverLogs", "countLogs", "queryLogs", "exportLogs"}
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)}")
 
 
@@ -107,39 +106,36 @@ class Smoke:
         self.check("listConnections names the connection", not err and any(line.startswith(self.connection + " ") or line == self.connection
                                                                             for line in text.splitlines()), first_line(text))
         overview, err = self.call("discoverLogs", start=self.window)
-        self.check("discoverLogs overview", not err and overview.startswith("Labels in "), first_line(overview))
-        match = re.search(r"selector like (\{[^\n]*?})", overview)
-        if not match or "<label>" in match.group(1):
-            self.skip("log steps", "discoverLogs suggested no concrete selector; pass a busier window with --window")
+        self.check("discoverLogs label names", not err and overview.startswith("Labels — "), first_line(overview))
+        names = [line for line in overview.splitlines()[1:] if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", line)]
+        preferred = ("app", "service_name", "service", "job", "container", "instance", "namespace")
+        names.sort(key=lambda name: (preferred.index(name) if name in preferred else len(preferred), name))
+        selector = None
+        for label in names:
+            values, values_error = self.call("discoverLogs", label=label, start=self.window)
+            self.check(f"discoverLogs values of {label}", not values_error and values.startswith("Values of "), first_line(values))
+            if values_error:
+                continue
+            value = next((line for line in values.splitlines()[1:] if line and not line.startswith("(+")), None)
+            if value:
+                selector = "{" + label + "=" + json.dumps(value, ensure_ascii=False) + "}"
+                break
+        if selector is None:
+            self.skip("log steps", "no label value in this window; try --window now-24h")
             return
-        selector = match.group(1)
-        scoped, err = self.call("discoverLogs", selector=selector, start=self.window)
-        self.check("discoverLogs with selector", not err and scoped.startswith("Streams matching "), first_line(scoped))
-        label = re.search(r"\n  ([A-Za-z_][A-Za-z0-9_]*): ", overview)
-        if label:
-            values, err = self.call("discoverLogs", label=label.group(1), start=self.window)
-            self.check("discoverLogs label values", not err and values.startswith("Values of "), first_line(values))
         count, err = self.call("countLogs", query=selector, start=self.window)
         self.check("countLogs total", not err and re.match(r"\d+ lines match ", count) is not None, first_line(count))
         buckets, err = self.call("countLogs", query=selector, start=self.window, groupBy="time")
-        self.check("countLogs by time", not err and ("By time (" in buckets or buckets.startswith("0 lines match")), first_line(buckets))
+        self.check("countLogs by time", not err and "By time (" in buckets, first_line(buckets))
         page, err = self.call("queryLogs", query=selector, start=self.window, limit=5)
-        self.check("queryLogs page", not err and (" lines:" in page.splitlines()[0] or " of more:" in page.splitlines()[0]
-                                                 or "no matching lines." in page), first_line(page))
-        summary, err = self.call("summarizeLogs", query=selector, start=self.window, sample=200)
-        self.check("summarizeLogs", not err and summary.startswith("Summary of ") and ("Counts are for the" in summary or "no matching lines" in summary),
-                   first_line(summary))
-        line = next((l for l in page.splitlines()[1:] if re.match(r"\d\d:\d\d:\d\d\.\d{3} ", l)), None)
-        if line is None:
-            self.skip("getLogContext / raw", "no line in the page to anchor on")
-            return
-        moment = line[:12]
-        context, err = self.call("getLogContext", selector=selector, time=moment, before=3, after=3)
-        self.check("getLogContext around a printed line", not err and context.startswith("Context in ") and ">>>" in context, first_line(context))
-        raw, err = self.call("queryLogs", query=selector, start=self.window, limit=2, raw=True)
-        self.check("queryLogs raw with stream labels", not err and re.search(r"\n\d\d:\d\d:\d\d\.\d{3} \{", raw) is not None, first_line(raw))
-        pipeline, err = self.call("getLogContext", selector=selector + ' |= "x"', time=moment)
-        self.check("getLogContext rejects a pipeline", err and "stream selector only" in pipeline, first_line(pipeline))
+        self.check("queryLogs page", not err and (" lines:" in first_line(page) or " lines (more may exist):" in first_line(page)
+                                                 or "no matching lines." in first_line(page)), first_line(page))
+        if any(re.match(r"\d\d:\d\d:\d\d\.\d{3} ", line) for line in page.splitlines()[1:]):
+            raw, err = self.call("queryLogs", query=selector, start=self.window, limit=2, raw=True)
+            self.check("queryLogs raw preview", not err and re.search(r"\n\d\d:\d\d:\d\d\.\d{3} \{", raw) is not None,
+                       first_line(raw))
+        else:
+            self.skip("queryLogs raw preview", "no line in the page")
         broken, err = self.call("queryLogs", query=selector + " |= ", start=self.window)
         self.check("Loki parse error is passed on as text", err and "Loki rejected the query" in broken, first_line(broken))
 
@@ -180,12 +176,11 @@ def main() -> int:
             continue
         if not args.connection and not variables:
             continue  # a literal URL such as the local example is not a live stand
-        rules = profile.get("rulesFile")
-        if rules:
-            # The temporary connections.json lives elsewhere; a relative rulesFile is resolved against the original file.
+        format_file = profile.get("formatFile")
+        if format_file:
+            # The temporary connections file lives elsewhere; keep the original format file path.
             base = Path(args.connections_file).resolve().parent
-            resolved = [r if Path(r).is_absolute() else str(base / r) for r in ([rules] if isinstance(rules, str) else rules)]
-            profile = dict(profile, rulesFile=resolved[0] if isinstance(rules, str) else resolved)
+            profile = dict(profile, formatFile=str((base / format_file).resolve()))
         chosen[name] = profile
     if not chosen:
         print("no profile selected: set LOKI_DEV_URL / LOKI_TST_URL (see examples/connections.json) or pass --connection", file=sys.stderr)

@@ -42,8 +42,6 @@ class LokiResponseDecoderTest {
         assertEquals(Map.of("trace_id", "abc"), first.structuredMetadata());
         assertEquals(first, streams.getFirst().entries().get(1));
         assertEquals(Map.of(), streams.get(1).entries().getFirst().structuredMetadata());
-        assertEquals(98765L, response.stats().totalLinesProcessed());
-        assertEquals(List.of("partial upstream sample"), response.warnings());
         assertThrows(UnsupportedOperationException.class, () -> first.structuredMetadata().clear());
     }
 
@@ -58,7 +56,6 @@ class LokiResponseDecoderTest {
         var samples = assertInstanceOf(Vector.class, vector.data()).samples();
         assertEquals(new BigDecimal("1720000000.123456789"), samples.getFirst().sample().timestampSeconds());
         assertEquals(List.of("NaN", "+Inf", "-Inf"), samples.stream().map(v -> v.sample().value()).toList());
-        assertNull(vector.stats().totalLinesProcessed());
         var matrix = decoder.query(bytes("""
                 {"status":"success","data":{"resultType":"matrix","result":[
                   {"metric":{"service":"arbitrary"},"values":[[1.000000001,"1.25e-3"],[2,"0"]]}]}}
@@ -71,25 +68,18 @@ class LokiResponseDecoderTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"streams", "vector", "matrix"})
-    void acceptsEmptyResultsWithoutInventingStatistics(String type) {
+    void acceptsEmptyResults(String type) {
         var response = decoder.query(bytes("{\"status\":\"success\",\"data\":{\"resultType\":\"" + type + "\",\"result\":[]}}"));
         assertNotNull(response.data());
-        assertNull(response.stats().totalLinesProcessed());
-        assertTrue(response.warnings().isEmpty());
     }
 
     @Test
     void decodesMetadataAndEmptyMetadata() {
         assertEquals(List.of("a", "b"), decoder.labels(bytes("{\"status\":\"success\",\"data\":[\"a\",\"b\"]}")).values());
         assertTrue(decoder.labels(bytes("{\"status\":\"success\",\"data\":[]}")).values().isEmpty());
-        var series = decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":\"a\"},{\"pod\":\"b\"}]}"));
-        assertEquals(List.of(Map.of("pod", "a"), Map.of("pod", "b")), series.streams());
-        assertTrue(decoder.series(bytes("{\"status\":\"success\",\"data\":[]}")).streams().isEmpty());
         // Loki 2.6.1 answers {"status":"success"} without "data" when nothing matches.
         assertTrue(decoder.labels(bytes("{\"status\":\"success\"}")).values().isEmpty());
-        assertTrue(decoder.series(bytes("{\"status\":\"success\"}")).streams().isEmpty());
         assertThrows(LokiOperationException.class, () -> decoder.labels(bytes("{\"status\":\"success\",\"data\":[3]}")));
-        assertThrows(LokiOperationException.class, () -> decoder.series(bytes("{\"status\":\"success\",\"data\":[{\"pod\":2}]}")));
     }
 
     @ParameterizedTest
@@ -99,9 +89,6 @@ class LokiResponseDecoderTest {
             "{\"status\":\"success\",\"data\":{\"resultType\":\"future\",\"result\":[]}}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\"}}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":null}}",
-            "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[],\"stats\":{\"summary\":{\"totalLinesProcessed\":-1}}}}",
-            "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[],\"stats\":{\"summary\":{\"totalLinesProcessed\":\"12\"}}}}",
-            "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[],\"stats\":{\"summary\":{\"totalLinesProcessed\":9223372036854775808}}}}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{},\"values\":[[123,\"SECRET\"]]}]}}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{},\"values\":[[\"123.5\",\"SECRET\"]]}]}}",
             "{\"status\":\"success\",\"data\":{\"resultType\":\"streams\",\"result\":[{\"stream\":{},\"values\":[[\"9223372036854775808\",\"SECRET\"]]}]}}",
