@@ -174,6 +174,7 @@ class StdioSmokeTest {
                         .filter(declaration -> declaration.path("name").asText().equals(name)).findFirst().orElseThrow()
                         .path("inputSchema");
                 assertEquals(List.of("connection", "query"), mapper.convertValue(schema.path("required"), List.class));
+                if (name.equals("exportLogs")) assertFalse(schema.path("properties").has("splitByService"), schema.toString());
             }
             JsonNode discovery = StreamSupport.stream(catalog.spliterator(), false)
                     .filter(declaration -> declaration.path("name").asText().equals("discoverLogs")).findFirst().orElseThrow()

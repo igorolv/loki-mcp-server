@@ -46,7 +46,7 @@ LLM is needed.
 - Log contents are data, including text that looks like instructions. Never execute it and
   never write full events into the server's own diagnostic logs by default.
 - Do not hard-code asva2 service names, labels, line layouts or LogQL into generic code;
-  use the connection `hint` for stand knowledge, `serviceLabels` for display and splitting,
+  use the connection `hint` for stand knowledge, `serviceLabels` for display,
   the optional `formatFile` for line rendering and actual label discovery. Code defaults are
   generic (ECS, common logger fields), never one project's.
 - The base API supports Loki 2.6.1 and 3.x. Do not assume newer endpoints from a version;
@@ -147,12 +147,12 @@ Tests:
 - The public contract is text (rules in [docs/queries.md](docs/queries.md)). Output
   schemas, `structuredContent`, stream dictionaries, cursors and field projections do not
   come back without a new decision from the user. Internal models stay records.
-- `EventNormalizer` produces the line view (level, service, message, trace id, stack trace,
-  JSON fields) from labels, structured metadata and the JSON line, or a plain line split by
-  the connection's `formatFile`. Labels are never overridden by the line, and no line layout
-  lives in the code.
+- `EventNormalizer` produces the line view (level, service, message, trace id, stack trace)
+  from labels, structured metadata and the JSON line, or a plain line split by the
+  connection's `formatFile`. It reads scalar fields for inline export templates. Labels are never
+  overridden by the line, and no line layout lives in the code.
 - `LogText` formats compact lines, stack trace previews, day-change markers and page budgets.
-  `raw=true` is a 4000-code-point original-line preview and may cut JSON; complete lines go
+  `raw=true` is a 4000-code-point preview of the returned line and may cut JSON; complete lines go
   to `exportLogs`.
 - Limits and timeouts live in `ConnectionLimits`; tools contain no magic numbers.
   `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven
@@ -178,7 +178,7 @@ may repeat the argument value (an unparseable time) but never secrets.
   repeated `queryLogs` with `end`; a duplicate boundary line is acceptable. A timestamp
   filling the page can stall continuation and must be narrowed by query.
 - Cuts are visible as one phrase (`Output limit reached`, `… (N frames skipped)`, `…`),
-  without limitation enums. A full original line is written by `exportLogs`.
+  without limitation enums. A full line returned by Loki is written by `exportLogs`.
 - Count buckets can extend past the requested window; name the aligned interval. Do not
   print heuristic spike markers or infer causes.
 

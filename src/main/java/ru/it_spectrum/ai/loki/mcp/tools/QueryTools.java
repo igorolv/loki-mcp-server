@@ -17,7 +17,7 @@ public class QueryTools {
     @McpTool(name = "queryLogs",
             description = "Read the newest log lines matching a LogQL query in a window. The response is chronological, "
                     + "with a compact level, service and message view. Example: {app=\"backend\"} |= \"ERROR\". "
-                    + "Use raw=true to preview the original line with its stream labels; long lines are shortened. "
+                    + "Use raw=true to preview the line returned by Loki with its stream labels; long lines are shortened. "
                     + "To read older lines, repeat with the end value in the footer; use exportLogs for complete files.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String queryLogs(
@@ -26,7 +26,7 @@ public class QueryTools {
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "Maximum lines to show, default 50", required = false) Integer limit,
-            @McpToolParam(description = "Show an original-line preview with stream labels, default false", required = false) Boolean raw) {
+            @McpToolParam(description = "Preview the line returned by Loki with stream labels, default false", required = false) Boolean raw) {
         return service.logs(connection, query, start, end, limit, raw);
     }
 

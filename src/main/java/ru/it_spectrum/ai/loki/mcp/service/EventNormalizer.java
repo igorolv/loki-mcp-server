@@ -34,25 +34,20 @@ public final class EventNormalizer {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private static final Pattern PLAIN_LEVEL = Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\b");
     private final List<LineFormat> formats;
-    public EventNormalizer() {
-        this(List.of());
-    }
     public EventNormalizer(List<LineFormat> formats) {
         this.formats = List.copyOf(formats);
     }
 
-    private static void visit(JsonNode node, String path, int depth, Map<String, String> values, Map<String, String> types) {
+    private static void visit(JsonNode node, String path, int depth, Map<String, String> values, int[] remaining) {
         for (var property : node.properties()) {
-            if (types.size() >= FIELDS) return;
+            if (remaining[0] == 0) return;
+            remaining[0]--;
             String name = path.isEmpty() ? property.getKey() : path + "." + property.getKey();
             JsonNode value = property.getValue();
             if (value.isObject()) {
-                if (depth + 1 < JSON_DEPTH && !value.isEmpty()) visit(value, name, depth + 1, values, types);
-                else types.put(name, "object");
-            } else {
-                types.put(name, value.isArray() ? "array" : value.isString() ? "string" : value.isNumber() ? "number"
-                                                                                          : value.isBoolean() ? "boolean" : "null");
-                if (value.isValueNode() && !value.isNull()) values.put(name, value.asString());
+                if (depth + 1 < JSON_DEPTH && !value.isEmpty()) visit(value, name, depth + 1, values, remaining);
+            } else if (value.isValueNode() && !value.isNull()) {
+                values.put(name, value.asString());
             }
         }
     }
@@ -65,18 +60,9 @@ public final class EventNormalizer {
         return null;
     }
 
-    /**
-     * Field name as Loki's json parser exposes it after {@code | json}: nested keys joined and sanitized with underscores.
-     */
-    public static String lokiFieldName(String dottedPath) {
-        String name = dottedPath.replaceAll("[^a-zA-Z0-9_]", "_");
-        return Character.isDigit(name.charAt(0)) ? "_" + name : name;
-    }
-
     public View view(LogEvent event, List<String> serviceLabels) {
         var values = new LinkedHashMap<String, String>();
-        var types = new LinkedHashMap<String, String>();
-        Format format = parse(event.line(), values, types);
+        Format format = parse(event.line(), values);
         String level = first(event.labels(), LEVEL_LABELS);
         // Loki 3.x stamps detected_level="unknown" when it finds nothing; that is the absence of a level, not a level.
         if (level == null) level = first(event.structuredMetadata(), LEVEL_LABELS);
@@ -116,14 +102,14 @@ public final class EventNormalizer {
             else if (found != null)
                 message = logger == null ? EMPTY_MESSAGE + ")" : EMPTY_MESSAGE + ", logger " + logger + ")";
         }
-        return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, logger, message, trace, stack, types);
+        return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, logger, message, trace, stack);
     }
 
     /**
-     * Fills dotted field paths with values (scalars) and JSON types. Returns PLAIN when the line is not a JSON object;
-     * the named groups of the first line format that finds a match in its first line are its values then (no types).
+     * Fills dotted field paths with scalar values. Returns PLAIN when the line is not a JSON object;
+     * the named groups of the first matching line format are its values then.
      */
-    public Format parse(String line, Map<String, String> values, Map<String, String> types) {
+    public Format parse(String line, Map<String, String> values) {
         if (line.isEmpty() || line.charAt(0) != '{') {
             plain(line, values);
             return Format.PLAIN;
@@ -136,7 +122,7 @@ public final class EventNormalizer {
             return Format.PLAIN;
         }
         if (root == null || !root.isObject()) return Format.PLAIN;
-        visit(root, "", 0, values, types);
+        visit(root, "", 0, values, new int[]{FIELDS});
         return Format.JSON;
     }
 
@@ -161,9 +147,6 @@ public final class EventNormalizer {
     public enum Format {JSON, PLAIN}
 
     public record View(Format format, String level, String service, String logger, String message, String traceId,
-                       String stackTrace, Map<String, String> jsonFields) {
-        public View {
-            jsonFields = Map.copyOf(jsonFields);
-        }
+                       String stackTrace) {
     }
 }

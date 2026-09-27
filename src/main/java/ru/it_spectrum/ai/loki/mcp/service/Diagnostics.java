@@ -7,7 +7,7 @@ import java.util.TreeMap;
 
 /**
  * Formatting for the server's own log: what was asked, how it went, how long it took.
- * Argument values are the model's own text (queries, selectors, times) and are logged as such, cut to a fixed length;
+ * Argument values are the model's own text (queries, labels, times) and are logged as such, cut to a fixed length;
  * connection URLs, credentials, tenant and log line contents never pass through here.
  */
 public final class Diagnostics {

@@ -13,7 +13,7 @@ public final class Errors {
     }
 
     public static LokiOperationException failure(ErrorCode code, String safeMessage) {
-        return new LokiOperationException(new ToolError(code, safeMessage, false));
+        return new LokiOperationException(new ToolError(code, safeMessage));
     }
 
     /**
@@ -27,6 +27,6 @@ public final class Errors {
         if (exception instanceof LokiOperationException known) {
             return known.error();
         }
-        return new ToolError(ErrorCode.INTERNAL_ERROR, "Operation failed internally.", false);
+        return new ToolError(ErrorCode.INTERNAL_ERROR, "Operation failed internally.");
     }
 }

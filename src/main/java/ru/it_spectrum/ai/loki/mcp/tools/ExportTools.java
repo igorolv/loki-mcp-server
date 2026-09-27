@@ -20,8 +20,8 @@ public class ExportTools {
     @McpTool(name = "exportLogs",
             description = "Save matching log lines of a window to a local file, oldest first, when the user asks to save logs. "
                     + "Pass the same LogQL query as queryLogs, e.g. {app=\"backend\"} |= \"ERROR\". "
-                    + "format=\"raw\" keeps the original lines; a layout name such as \"spring\" "
-                    + "(listConnections names them) or a template like \"{time} {level:5} [{thread}] {logger} : {message}{stack}\" rewrites them. "
+                    + "format=\"raw\" keeps the lines returned by Loki, including any LogQL line_format stage; "
+                    + "a template like \"{time} {level:5} [{thread}] {logger} : {message}{stack}\" rewrites them locally. "
                     + "The answer gives the file path, the line count, and a start value to continue with when a limit stopped it.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = true))
     public String exportLogs(
@@ -29,11 +29,10 @@ public class ExportTools {
             @McpToolParam(description = QUERY) String query,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = "Window end. Default \"now\". Same formats as start.", required = false) String end,
-            @McpToolParam(description = "\"raw\" (default), a layout name like \"spring\", or a template with {time}, {level}, {service}, "
+            @McpToolParam(description = "\"raw\" (default), or a template with {time}, {level}, {service}, "
                     + "{logger}, {message}, {stack} and line fields like {thread}", required = false) String format,
             @McpToolParam(description = "Directory to write into: leave it out for the default export directory, or a subdirectory "
-                    + "name like \"incident-42\"; the user's configuration lists the allowed directories", required = false) String directory,
-            @McpToolParam(description = "true writes one file per service into a new directory. Default false: one file", required = false) Boolean splitByService) {
-        return this.service.export(connection, query, start, end, format, directory, splitByService);
+                    + "name like \"incident-42\"; the user's configuration lists the allowed directories", required = false) String directory) {
+        return this.service.export(connection, query, start, end, format, directory);
     }
 }

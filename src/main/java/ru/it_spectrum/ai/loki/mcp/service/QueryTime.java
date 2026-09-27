@@ -1,8 +1,14 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import java.math.BigInteger;
-import java.time.*;
+import java.time.DateTimeException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -13,36 +19,8 @@ public final class QueryTime {
     public static final String FORMATS = "Use \"now\", \"now-15m\" (ns/ms/s/m/h/d), RFC3339 like \"2026-09-13T10:00:00+03:00\", "
             + "local time \"2026-09-13T10:00:00\" in the connection timezone, or epoch nanoseconds.";
     private static final Pattern RELATIVE = Pattern.compile("(?:now-)?([1-9][0-9]*)(ns|ms|s|m|h|d)");
-    private static final Pattern DURATION = Pattern.compile("([1-9][0-9]*)(ms|s|m|h|d)");
-    private static final Pattern TIME_OF_DAY = Pattern.compile("([01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.([0-9]{1,9}))?)?");
-    private static final Pattern FRACTION = Pattern.compile(".*:[0-5][0-9]\\.([0-9]{1,9})(?:[Zz]|[+-][0-9]{2}:?[0-9]{2})?");
 
     private QueryTime() {
-    }
-
-    /**
-     * Time of a line: every {@link #parse} format plus a bare time of day, resolved to the nearest such moment in the past.
-     */
-    public static Point point(String value, Instant now, ZoneId zone) {
-        String text = value == null ? "" : value.strip();
-        var timeOfDay = TIME_OF_DAY.matcher(text);
-        if (timeOfDay.matches()) {
-            var local = LocalTime.parse(text);
-            var today = now.atZone(zone).toLocalDate();
-            Instant at = ZonedDateTime.of(today, local, zone).toInstant();
-            if (at.isAfter(now)) at = ZonedDateTime.of(today.minusDays(1), local, zone).toInstant();
-            return new Point(at, text.length() == 5 ? Duration.ofMinutes(1) : precision(timeOfDay.group(2)));
-        }
-        Instant at = parse(text, now, zone);
-        if (text.matches("-?[0-9]+")) return new Point(at, Duration.ofNanos(1));
-        if (text.equals("now") || RELATIVE.matcher(text).matches()) return new Point(at, Duration.ofSeconds(1));
-        var fraction = FRACTION.matcher(text);
-        return new Point(at, precision(fraction.matches() ? fraction.group(1) : null));
-    }
-
-    private static Duration precision(String fractionDigits) {
-        int digits = fractionDigits == null ? 0 : fractionDigits.length();
-        return Duration.ofNanos((long) Math.pow(10, 9 - digits));
     }
 
     /**
@@ -89,16 +67,6 @@ public final class QueryTime {
         }
     }
 
-    /**
-     * Durations like 30s, 5m, 2h, 1d.
-     */
-    public static Duration duration(String value) {
-        var matcher = value == null ? null : DURATION.matcher(value.strip());
-        if (matcher == null || !matcher.matches())
-            throw Errors.invalid("Cannot parse duration \"" + value + "\". Use ms, s, m, h or d, e.g. \"5m\".");
-        return duration(Long.parseLong(matcher.group(1)), matcher.group(2));
-    }
-
     private static Duration duration(long amount, String unit) {
         return switch (unit) {
             case "ns" -> Duration.ofNanos(amount);
@@ -116,16 +84,6 @@ public final class QueryTime {
     public static String lokiDuration(Duration duration) {
         long ms = duration.toMillis();
         return ms % 1000 == 0 ? (ms / 1000) + "s" : ms + "ms";
-    }
-
-    /**
-     * Readable duration for footers: 24h, 90m, 45s.
-     */
-    public static String human(Duration duration) {
-        long seconds = duration.toSeconds();
-        if (seconds > 0 && seconds % 3600 == 0) return (seconds / 3600) + "h";
-        if (seconds > 0 && seconds % 60 == 0) return (seconds / 60) + "m";
-        return lokiDuration(duration);
     }
 
     public static String nanos(Instant time) {
@@ -150,7 +108,7 @@ public final class QueryTime {
      * Next millisecond boundary at or after the instant: an exclusive end that never drops sub-millisecond neighbours.
      */
     public static Instant ceilMillis(Instant time) {
-        Instant floor = time.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        Instant floor = time.truncatedTo(ChronoUnit.MILLIS);
         return floor.equals(time) ? time : floor.plusMillis(1);
     }
 
@@ -160,15 +118,4 @@ public final class QueryTime {
         }
     }
 
-    /**
-     * A moment as the model wrote it: the instant and the precision of the text, so "10:12:03" covers the whole second.
-     */
-    public record Point(Instant at, Duration precision) {
-        /**
-         * Exclusive end of the instants this text denotes.
-         */
-        public Instant end() {
-            return at.plus(precision);
-        }
-    }
 }

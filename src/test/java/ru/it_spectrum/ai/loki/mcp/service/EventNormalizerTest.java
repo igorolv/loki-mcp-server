@@ -13,7 +13,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.JSON;
 import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.PLAIN;
 
 class EventNormalizerTest {
-    private final EventNormalizer normalizer = new EventNormalizer();
+    private final EventNormalizer normalizer = new EventNormalizer(List.of());
 
     private static LogEvent event(Map<String, String> labels, String line, Map<String, String> metadata) {
         return new LogEvent("1700000000123456789", labels, line, metadata);
@@ -21,7 +21,7 @@ class EventNormalizerTest {
 
     @Test
     void detectedLevelUnknownIsNoLevel() {
-        var normalizer = new EventNormalizer();
+        var normalizer = new EventNormalizer(List.of());
         var unknown = new LogEvent("1", Map.of("app", "x"), "plain line without level", Map.of("detected_level", "unknown"));
         assertNull(normalizer.view(unknown, List.of("app")).level());
         var error = new LogEvent("1", Map.of("app", "x"), "plain line", Map.of("detected_level", "error"));
@@ -33,7 +33,7 @@ class EventNormalizerTest {
     }
 
     @Test
-    void ecsJsonYieldsLevelServiceMessageTraceAndStackWithLokiFieldNames() {
+    void ecsJsonYieldsLevelServiceMessageTraceAndStack() {
         var view = view(Map.of(), """
                 {"service":{"name":"backend"},"log":{"level":"error"},"@timestamp":"2026-01-01T00:00:00Z",
                  "message":"Ошибка 🐈","trace":{"id":"abc123"},"error":{"stack_trace":"java.io.IOException: x\\n\\tat a.b(C.java:1)"},
@@ -45,13 +45,6 @@ class EventNormalizerTest {
         assertEquals("Ошибка 🐈", view.message());
         assertEquals("abc123", view.traceId());
         assertTrue(view.stackTrace().startsWith("java.io.IOException"));
-        assertEquals("string", view.jsonFields().get("service.name"));
-        assertEquals("array", view.jsonFields().get("tags"));
-        assertEquals("number", view.jsonFields().get("count"));
-        assertEquals("object", view.jsonFields().get("empty"));
-        assertEquals("service_name", EventNormalizer.lokiFieldName("service.name"));
-        assertEquals("_timestamp", EventNormalizer.lokiFieldName("@timestamp"));
-        assertEquals("_1abc", EventNormalizer.lokiFieldName("1abc"));
     }
 
     @Test
@@ -96,13 +89,11 @@ class EventNormalizerTest {
         assertEquals("{\"foo\":\"bar\"}", view.message());
         assertEquals(PLAIN, view(Map.of(), "{".repeat(EventParseLimits.PARSE_CHARACTERS + 1)).format());
         var values = new LinkedHashMap<String, String>();
-        var types = new LinkedHashMap<String, String>();
-        normalizer.parse("{\"x\":".repeat(25) + "1" + "}".repeat(25), values, types);
-        assertTrue(types.containsKey("x".repeat(1) + ".x".repeat(EventParseLimits.JSON_DEPTH - 1)));
+        normalizer.parse("{\"x\":".repeat(25) + "1" + "}".repeat(25), values);
+        assertTrue(values.isEmpty());
         String wide = java.util.stream.IntStream.range(0, 150).mapToObj(i -> "\"f" + i + "\":1").collect(java.util.stream.Collectors.joining(",", "{", "}"));
-        types.clear();
         values.clear();
-        normalizer.parse(wide, values, types);
-        assertEquals(EventParseLimits.FIELDS, types.size());
+        normalizer.parse(wide, values);
+        assertEquals(EventParseLimits.FIELDS, values.size());
     }
 }

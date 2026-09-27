@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LogTextTest {
     private final ZoneId zone = ZoneId.of("Europe/Moscow");
-    private final EventNormalizer normalizer = new EventNormalizer();
+    private final EventNormalizer normalizer = new EventNormalizer(List.of());
 
     private LogEvent event(String line) {
         return new LogEvent(QueryTime.nanos(Instant.parse("2026-09-13T07:12:03.123456789Z")), Map.of("app", "backend", "level", "error"), line, Map.of());

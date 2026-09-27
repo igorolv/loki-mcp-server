@@ -68,7 +68,7 @@ allowed. Duplicate JSON keys and trailing JSON are rejected. Empty result arrays
 so is a `{"status":"success"}` without `data` for `/label/<name>/values`,
 which Loki 2.6.1 sends for an empty result — decoded as an empty list.
 
-For logs the upstream order, every repetition, the original line, the string nanosecond
+For logs the upstream order, every repetition, the line returned by Loki, the string nanosecond
 timestamp and the explicitly passed flat string-to-string metadata in the third tuple
 element are kept. The client neither sorts nor deduplicates events. Missing separate
 metadata yields an empty map: that is not proof that the original entry had none.
@@ -97,24 +97,24 @@ control characters removed, a JSON body contributes only `error`). Other unsucce
 statuses are handled from the headers: their body is not kept, so HTML or plain text from
 an ingress never reaches diagnostics.
 
-| Condition | Code | retryable |
-|---|---|---|
-| Invalid local arguments | `INVALID_ARGUMENT` | false |
-| HTTP 400 | `UPSTREAM_BAD_REQUEST` | false |
-| HTTP 401 / 403 | `UPSTREAM_UNAUTHORIZED` / `UPSTREAM_FORBIDDEN` | false |
-| HTTP 404 | `ENDPOINT_UNAVAILABLE` | false |
-| HTTP 429 | `UPSTREAM_RATE_LIMITED` | true |
-| HTTP 408 / 504, timeout | `UPSTREAM_TIMEOUT` | true |
-| Other HTTP 5xx | `UPSTREAM_UNAVAILABLE` | true |
-| Any other status, including redirects | `UPSTREAM_HTTP_ERROR` | false |
-| Network / TLS failure | `UPSTREAM_CONNECTION_ERROR` | true |
-| Body budget exceeded | `UPSTREAM_RESPONSE_TOO_LARGE` | false |
-| Invalid JSON / shape / encoding | `UPSTREAM_INVALID_RESPONSE` | false |
-| JSON `status:error` with HTTP 200 | `UPSTREAM_QUERY_ERROR` | false |
-| Interruption / call after close | `OPERATION_CANCELLED` | false |
+| Condition | Code |
+|---|---|
+| Invalid local arguments | `INVALID_ARGUMENT` |
+| HTTP 400 | `UPSTREAM_BAD_REQUEST` |
+| HTTP 401 / 403 | `UPSTREAM_UNAUTHORIZED` / `UPSTREAM_FORBIDDEN` |
+| HTTP 404 | `ENDPOINT_UNAVAILABLE` |
+| HTTP 429 | `UPSTREAM_RATE_LIMITED` |
+| HTTP 408 / 504, timeout | `UPSTREAM_TIMEOUT` |
+| Other HTTP 5xx | `UPSTREAM_UNAVAILABLE` |
+| Any other status, including redirects | `UPSTREAM_HTTP_ERROR` |
+| Network / TLS failure | `UPSTREAM_CONNECTION_ERROR` |
+| Body budget exceeded | `UPSTREAM_RESPONSE_TOO_LARGE` |
+| Invalid JSON / shape / encoding | `UPSTREAM_INVALID_RESPONSE` |
+| JSON `status:error` with HTTP 200 | `UPSTREAM_QUERY_ERROR` |
+| Interruption / call after close | `OPERATION_CANCELLED` |
 
-`retryable` is a hint; the client never retries by itself. A 404 concerns only the called
-endpoint: the client does not mark the whole connection unavailable.
+The client never retries by itself. A 404 concerns only the called endpoint: the client
+does not mark the whole connection unavailable.
 
 ## Verification
 

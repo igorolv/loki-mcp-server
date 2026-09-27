@@ -16,14 +16,14 @@ import static org.junit.jupiter.api.Assertions.*;
  * Plain Spring Boot console lines split by the format of examples/java-formats.json; the code knows no layout.
  */
 class LineFormatTest {
-    private static final ConnectionsLoader.FormatsFile JAVA = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
+    private static final List<LineFormat> JAVA = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
     // Spring Boot 3 (no application name), 3.4+ (application name before the thread) and 2 (a space instead of T).
     private static final String BOOT3 = "2026-09-24T15:10:16.432+03:00  WARN 1 --- [           main] ConfigServletWebServerApplicationContext : "
             + "Exception encountered during context initialization - cancelling refresh attempt";
     private static final String BOOT34 = "2026-09-24T12:27:01.057Z  INFO 1 --- [config-server] [nio-8888-exec-6] o.s.c.c.s.e.NativeEnvironmentRepository  : "
             + "Adding property source: Config resource 'file [/tmp/config-repo-17/dev/application.yaml]'";
     private static final String BOOT2 = "2021-03-01 10:00:00.123 ERROR 12345 --- [scheduling-1] c.e.orders.OrderJob : Order 17 failed";
-    private final EventNormalizer normalizer = new EventNormalizer(JAVA.formats());
+    private final EventNormalizer normalizer = new EventNormalizer(JAVA);
 
     private static LogEvent event(String line) {
         return new LogEvent("1", Map.of("instance", "app-main"), line, Map.of());
@@ -37,7 +37,6 @@ class LineFormatTest {
         assertEquals("ConfigServletWebServerApplicationContext", view.logger());
         assertEquals("Exception encountered during context initialization - cancelling refresh attempt", view.message());
         assertEquals("app-main", view.service());
-        assertTrue(view.jsonFields().isEmpty());
         var boot34 = normalizer.view(event(BOOT34), List.of("instance"));
         assertEquals("o.s.c.c.s.e.NativeEnvironmentRepository", boot34.logger());
         assertTrue(boot34.message().startsWith("Adding property source: "), boot34.message());
@@ -47,7 +46,7 @@ class LineFormatTest {
         // The application name serves as the service when no label names one.
         assertEquals("config-server", normalizer.view(new LogEvent("1", Map.of(), BOOT34, Map.of()), List.of("instance")).service());
         // Without formats the line is the message, as before.
-        assertEquals(BOOT3, new EventNormalizer().view(event(BOOT3), List.of("instance")).message());
+        assertEquals(BOOT3, new EventNormalizer(List.of()).view(event(BOOT3), List.of("instance")).message());
     }
 
     @Test
@@ -70,6 +69,6 @@ class LineFormatTest {
     void aFormatNeedsAMessageGroup() {
         assertThrows(LokiOperationException.class, () -> new LineFormat("x", Pattern.compile("^(?<level>\\w+)")));
         assertThrows(LokiOperationException.class, () -> new LineFormat("Bad id", Pattern.compile("(?<message>.*)")));
-        assertEquals(List.of("spring-boot-console", "logback-classic"), JAVA.formats().stream().map(LineFormat::id).toList());
+        assertEquals(List.of("spring-boot-console", "logback-classic"), JAVA.stream().map(LineFormat::id).toList());
     }
 }

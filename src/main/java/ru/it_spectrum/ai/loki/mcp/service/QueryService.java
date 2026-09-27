@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
-import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
@@ -20,7 +19,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.ENVELOPE_BYTES;
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.fit;
@@ -44,7 +42,6 @@ public class QueryService {
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
     private final Clock clock;
-    private final ConcurrentHashMap<String, EventNormalizer> normalizers = new ConcurrentHashMap<>();
 
     @Autowired
     public QueryService(ConnectionRegistry registry, LokiHttpClient client) {
@@ -67,10 +64,6 @@ public class QueryService {
         }
     }
 
-    private EventNormalizer normalizer(ConnectionDefinition definition) {
-        return normalizers.computeIfAbsent(definition.name(), name -> new EventNormalizer(definition.formats()));
-    }
-
     public String logs(String connection, String query, String start, String end, Integer limit, Boolean raw) {
         var definition = registry.require(connection);
         requireLogQuery(query);
@@ -82,9 +75,10 @@ public class QueryService {
         var events = fetch(connection, query, range, usedLimit, LokiHttpClient.Direction.BACKWARD);
         boolean atLimit = events.size() == usedLimit;
         ZoneId zone = definition.timezone();
+        var normalizer = new EventNormalizer(definition.formats());
         var lines = new ArrayList<String>(events.size());
         for (var event : events) {
-            lines.add(line(event, normalizer(definition).view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
+            lines.add(line(event, normalizer.view(event, definition.serviceLabels()), zone, Boolean.TRUE.equals(raw)));
         }
         String header = query.strip() + " — " + connection + ", " + window(range, zone) + ", "
                 + (events.isEmpty() ? "no matching lines." : atLimit ? "newest " + events.size() + " lines (more may exist):"

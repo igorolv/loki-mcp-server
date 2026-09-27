@@ -7,7 +7,6 @@ import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
-import ru.it_spectrum.ai.loki.mcp.connection.LineLayout;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
@@ -31,16 +30,14 @@ import java.util.*;
 import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
 
 /**
- * Writes every line of a window to files on the local disk, oldest first, in full: the original line ({@code raw}),
- * a named layout of the connection's format file, or a template given in the call. Reads the window forward in
+ * Writes every line of a window to a file on the local disk, oldest first, in full: the line returned by Loki
+ * ({@code raw}) or a template given in the call. Reads forward in
  * pages, each starting at the time of the last line written; lines of that nanosecond that were already written are
  * skipped by stream and text, so a boundary line is neither lost nor doubled (real duplicates keep their count).
  */
 @Service
 public class ExportService {
     static final String RAW = "raw";
-    static final int MAX_FILES = 100;
-    static final int FILES_SHOWN = 10;
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private final ConnectionRegistry registry;
     private final LokiHttpClient client;
@@ -71,47 +68,31 @@ public class ExportService {
         return new TreeMap<>(event.labels()) + "\u0000" + event.line();
     }
 
-    /**
-     * {@code billing-backend} as a file name: letters, digits, dot, dash and underscore.
-     */
-    static String fileName(String service) {
-        if (service == null || service.isBlank()) return "unknown";
-        String name = service.strip().replaceAll("[^A-Za-z0-9._-]", "_");
-        if (name.length() > 100) name = name.substring(0, 100);
-        return name.startsWith(".") ? "_" + name : name;
-    }
-
-    public String export(String connection, String query, String start, String end, String format, String directory,
-                         Boolean splitByService) {
+    public String export(String connection, String query, String start, String end, String format, String directory) {
         var definition = registry.require(connection);
         QueryService.requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
-        var writer = writer(definition, format);
+        var writer = writer(format);
         Path target = roots.resolve(directory);
         ZoneId zone = definition.timezone();
         String base = connection + "_" + STAMP.format(window.start().atZone(zone)) + "_" + STAMP.format(window.end().atZone(zone));
         var normalizer = new EventNormalizer(definition.formats());
         var run = new Run(definition, query, window, writer, normalizer);
-        try (var files = new ExportFiles(target, base, Boolean.TRUE.equals(splitByService))) {
-            run.read(files);
-            return report(run, files, definition, writer.name);
+        try (var file = new ExportFile(target, base)) {
+            run.read(file);
+            return report(run, file, definition, writer.name);
         }
     }
 
-    private LineWriter writer(ConnectionDefinition definition, String format) {
+    private LineWriter writer(String format) {
         String name = format == null || format.isBlank() ? RAW : format.strip();
         if (name.equals(RAW)) return new LineWriter(RAW, null);
         if (name.contains("{")) return new LineWriter("template", LogLayout.compile(name));
-        for (LineLayout layout : definition.layouts())
-            if (layout.id().equals(name)) return new LineWriter(name, LogLayout.compile(layout.template()));
-        var known = new ArrayList<String>();
-        known.add(RAW);
-        for (var layout : definition.layouts()) known.add(layout.id());
-        throw Errors.invalid("format must be one of: " + String.join(", ", known)
-                + ", or a template like \"{time} {level:5} [{thread}] {logger} : {message}{stack}\".");
+        throw Errors.invalid("format must be raw or a template like "
+                + "\"{time} {level:5} [{thread}] {logger} : {message}{stack}\".");
     }
 
-    private String report(Run run, ExportFiles files, ConnectionDefinition definition, String format) {
+    private String report(Run run, ExportFile file, ConnectionDefinition definition, String format) {
         String connection = definition.name();
         ZoneId zone = definition.timezone();
         String where = run.query.strip() + " — " + connection + ", " + window(run.window, zone);
@@ -122,16 +103,7 @@ public class ExportService {
         String header = "Export of " + where + ": " + run.lines + (run.lines == 1 ? " line, " : " lines, ") + megabytes(run.bytes)
                 + " MB, " + iso(instant(run.first), zone) + " – " + iso(instant(run.last), zone)
                 + ", format " + format + ", oldest first.";
-        var lines = new ArrayList<String>();
-        if (files.split) {
-            lines.add("Directory: " + files.directory() + " (" + files.outputs.size() + (files.outputs.size() == 1 ? " file):" : " files):"));
-            var outputs = new ArrayList<>(files.outputs.values());
-            outputs.sort(Comparator.comparingLong((Output o) -> o.lines).reversed());
-            for (var output : outputs.subList(0, Math.min(FILES_SHOWN, outputs.size())))
-                lines.add("  " + output.path.getFileName() + "  " + output.lines + (output.lines == 1 ? " line, " : " lines, ")
-                        + megabytes(output.bytes) + " MB");
-            if (outputs.size() > FILES_SHOWN) lines.add("  (+" + (outputs.size() - FILES_SHOWN) + " more files)");
-        } else lines.add("File: " + files.outputs.values().iterator().next().path);
+        var lines = List.of("File: " + file.path);
         var footer = new StringBuilder();
         if (run.crowded != null) footer.append(run.crowded).append(' ');
         if (run.stopped != null) {
@@ -149,54 +121,25 @@ public class ExportService {
     private record LineWriter(String name, LogLayout template) {
     }
 
-    private static final class Output {
-        final Path path;
-        final OutputStream stream;
-        long lines;
-        long bytes;
-
-        Output(Path path, OutputStream stream) {
-            this.path = path;
-            this.stream = stream;
-        }
-    }
-
     /**
-     * The files of one export, opened on their first line so that an empty export leaves nothing behind. One file
-     * {@code <base>.log}, or a directory {@code <base>} with a file per service; an existing name gets a suffix, never
-     * overwritten. Services past {@link #MAX_FILES} share {@code other.log}.
+     * Opens one file on the first line, so an empty export leaves nothing behind. An existing name gets a suffix.
      */
-    private static final class ExportFiles implements AutoCloseable {
+    private static final class ExportFile implements AutoCloseable {
         final Path target;
         final String base;
-        final boolean split;
-        final Map<String, Output> outputs = new LinkedHashMap<>();
-        Path directory;
+        Path path;
+        OutputStream stream;
 
-        ExportFiles(Path target, String base, boolean split) {
+        ExportFile(Path target, String base) {
             this.target = target;
             this.base = base;
-            this.split = split;
         }
 
-        Path directory() {
-            return directory;
-        }
-
-        Output output(String service) throws IOException {
-            String name = split ? fileName(service) : "";
-            if (split && !outputs.containsKey(name) && outputs.size() >= MAX_FILES) name = "other";
-            var output = outputs.get(name);
-            if (output != null) return output;
-            Path path;
-            if (split) {
-                if (directory == null) directory = createDirectory();
-                path = directory.resolve(name + ".log");
-            } else path = createFile();
-            var stream = new BufferedOutputStream(Files.newOutputStream(path, split ? StandardOpenOption.CREATE_NEW : StandardOpenOption.WRITE), 64 * 1024);
-            output = new Output(path, stream);
-            outputs.put(name, output);
-            return output;
+        OutputStream output() throws IOException {
+            if (stream != null) return stream;
+            path = createFile();
+            stream = new BufferedOutputStream(Files.newOutputStream(path, StandardOpenOption.WRITE), 64 * 1024);
+            return stream;
         }
 
         private Path createFile() throws IOException {
@@ -210,22 +153,11 @@ public class ExportService {
             }
         }
 
-        private Path createDirectory() throws IOException {
-            for (int i = 1; ; i++) {
-                Path path = target.resolve(base + (i == 1 ? "" : "-" + i));
-                try {
-                    return Files.createDirectory(path);
-                } catch (FileAlreadyExistsException taken) {
-                    if (i >= 1000) throw taken;
-                }
-            }
-        }
-
         @Override
         public void close() {
-            for (var output : outputs.values()) {
+            if (stream != null) {
                 try {
-                    output.stream.close();
+                    stream.close();
                 } catch (IOException ignored) {
                     // The report names the file; a failed flush shows as a short file, never as a lost answer.
                 }
@@ -265,7 +197,7 @@ public class ExportService {
             this.normalizer = normalizer;
         }
 
-        void read(ExportFiles files) {
+        void read(ExportFile file) {
             var limits = definition.limits();
             int page = limits.maxEntries();
             Instant cursor = window.start();
@@ -284,7 +216,7 @@ public class ExportService {
                     for (var event : events) {
                         pageBytes += event.line().length();
                         if (skipped(event)) continue;
-                        write(files, event);
+                        write(file, event);
                         written++;
                         if (lines >= limits.maxExportLines() || bytes >= limits.maxExportBytes()) {
                             stopped = "Stopped at the export limit of this connection (" + (lines >= limits.maxExportLines()
@@ -315,8 +247,8 @@ public class ExportService {
                 if (lines == 0) throw failure;
                 stopped = "Stopped by an error: " + failure.error().text();
             } catch (IOException failure) {
-                if (lines == 0) throw Errors.invalid("Cannot write into " + files.target + ". Pass another directory.");
-                stopped = "Stopped: cannot write more into " + files.target + ".";
+                if (lines == 0) throw Errors.invalid("Cannot write into " + file.target + ". Pass another directory.");
+                stopped = "Stopped: cannot write more into " + file.target + ".";
             }
         }
 
@@ -332,14 +264,11 @@ public class ExportService {
             return true;
         }
 
-        private void write(ExportFiles files, LogEvent event) throws IOException {
-            var view = normalizer.view(event, definition.serviceLabels());
-            String text = writer.template == null ? event.line() : writer.template.render(event, view, normalizer, definition.timezone());
+        private void write(ExportFile file, LogEvent event) throws IOException {
+            String text = writer.template == null ? event.line() : writer.template.render(event,
+                    normalizer.view(event, definition.serviceLabels()), normalizer, definition.timezone());
             byte[] data = (text + "\n").getBytes(StandardCharsets.UTF_8);
-            var output = files.output(view.service());
-            output.stream.write(data);
-            output.lines++;
-            output.bytes += data.length;
+            file.output().write(data);
             if (lines == 0) first = event.nanos();
             last = event.nanos();
             lines++;

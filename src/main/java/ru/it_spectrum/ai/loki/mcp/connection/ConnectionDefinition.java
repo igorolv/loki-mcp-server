@@ -7,23 +7,22 @@ import java.time.ZoneId;
 import java.util.List;
 
 /**
- * One isolated Loki connection. The hint explains the stand's selectors; formats and layouts only render lines.
+ * One isolated Loki connection. The hint explains the stand's selectors; formats only render plain lines.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
-                                   List<LineFormat> formats, List<LineLayout> layouts) {
+                                   List<LineFormat> formats) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of("service_name", "service", "app", "container", "job");
     public static final int MAX_FORMATS = 32;
-    public static final int MAX_LAYOUTS = 32;
 
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits) {
-        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of(), List.of());
+        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of());
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), List.of());
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of());
     }
 
     public ConnectionDefinition {
@@ -38,14 +37,11 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || serviceLabels == null || serviceLabels.isEmpty()
                 || serviceLabels.stream().anyMatch(l -> l == null || !l.matches("[a-zA-Z_][a-zA-Z0-9_]*"))
                 || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(java.util.Objects::isNull)
-                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()
-                || layouts == null || layouts.size() > MAX_LAYOUTS || layouts.stream().anyMatch(java.util.Objects::isNull)
-                || layouts.stream().map(LineLayout::id).distinct().count() != layouts.size()) {
+                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
         formats = List.copyOf(formats);
-        layouts = List.copyOf(layouts);
     }
 
     public static boolean validName(String name) {

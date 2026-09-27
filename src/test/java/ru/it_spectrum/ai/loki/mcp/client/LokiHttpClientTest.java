@@ -195,18 +195,17 @@ class LokiHttpClientTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"401,UPSTREAM_UNAUTHORIZED,false", "403,UPSTREAM_FORBIDDEN,false",
-            "404,ENDPOINT_UNAVAILABLE,false", "408,UPSTREAM_TIMEOUT,true", "429,UPSTREAM_RATE_LIMITED,true",
-            "500,UPSTREAM_UNAVAILABLE,true", "503,UPSTREAM_UNAVAILABLE,true", "504,UPSTREAM_TIMEOUT,true",
-            "302,UPSTREAM_HTTP_ERROR,false", "204,UPSTREAM_HTTP_ERROR,false", "418,UPSTREAM_HTTP_ERROR,false"})
-    void mapsHttpErrorsWithoutExposingBodyOrFollowingRedirects(int status, ErrorCode code, boolean retryable) {
+    @CsvSource({"401,UPSTREAM_UNAUTHORIZED", "403,UPSTREAM_FORBIDDEN",
+            "404,ENDPOINT_UNAVAILABLE", "408,UPSTREAM_TIMEOUT", "429,UPSTREAM_RATE_LIMITED",
+            "500,UPSTREAM_UNAVAILABLE", "503,UPSTREAM_UNAVAILABLE", "504,UPSTREAM_TIMEOUT",
+            "302,UPSTREAM_HTTP_ERROR", "204,UPSTREAM_HTTP_ERROR", "418,UPSTREAM_HTTP_ERROR"})
+    void mapsHttpErrorsWithoutExposingBodyOrFollowingRedirects(int status, ErrorCode code) {
         handler = exchange -> {
             exchange.getResponseHeaders().set("Location", "/SECRET-redirect");
             respond(exchange, status, "SECRET upstream error including credentials", false);
         };
         var error = assertThrows(LokiOperationException.class, () -> range(plain(256, 3000)));
         assertSafe(error, code);
-        assertEquals(retryable, error.error().retryable());
         assertEquals(1, requests.size(), "No redirect or retry request expected");
     }
 

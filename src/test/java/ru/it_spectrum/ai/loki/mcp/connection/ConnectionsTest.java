@@ -27,8 +27,7 @@ class ConnectionsTest {
     @Test
     void loadsIsolatedConnectionsAndFormatsWithoutProbing() throws Exception {
         Files.writeString(directory.resolve("formats.json"), """
-                {"formats":[{"id":"plain","pattern":"(?<level>INFO|ERROR) (?<message>.*)"}],
-                 "layouts":[{"id":"short","template":"{time} {message}"}]}
+                {"formats":[{"id":"plain","pattern":"(?<level>INFO|ERROR) (?<message>.*)"}]}
                 """);
         var config = load("""
                 {"exportRoots":["exports"],"connections":{
@@ -41,7 +40,6 @@ class ConnectionsTest {
         var dev = config.connections().getFirst();
         assertEquals(List.of("app", "job"), dev.serviceLabels());
         assertEquals("plain", dev.formats().getFirst().id());
-        assertEquals("short", dev.layouts().getFirst().id());
         assertEquals(10, dev.limits().maxExportLines());
         assertEquals(20, dev.limits().maxExportBytes());
         assertEquals(List.of(directory.resolve("exports").toAbsolutePath().normalize()), config.exportRoots());
@@ -62,7 +60,6 @@ class ConnectionsTest {
         assertEquals(4, config.connections().size());
         var dev = config.connections().stream().filter(connection -> connection.name().equals("dev")).findFirst().orElseThrow();
         assertEquals(2, dev.formats().size());
-        assertEquals("spring", dev.layouts().getFirst().id());
     }
 
     @Test
@@ -98,6 +95,9 @@ class ConnectionsTest {
     @Test
     void rejectsBadFormatFilesAndUnsafeUrls() throws Exception {
         Files.writeString(directory.resolve("bad.json"), "{\"formats\":[{\"id\":\"bad\",\"pattern\":\"(\"}]}");
+        assertThrows(LokiOperationException.class, () -> load(
+                "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"formatFile\":\"bad.json\"}}}"));
+        Files.writeString(directory.resolve("bad.json"), "{\"layouts\":[{\"id\":\"short\",\"template\":\"{message}\"}]}");
         assertThrows(LokiOperationException.class, () -> load(
                 "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"formatFile\":\"bad.json\"}}}"));
         assertThrows(LokiOperationException.class, () -> load(

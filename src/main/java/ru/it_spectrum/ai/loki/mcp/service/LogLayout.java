@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 /**
  * A line template of exportLogs: text with {@code {name}} placeholders, the reverse of a line format. {@code time},
- * {@code level}, {@code service}, {@code logger}, {@code message}, {@code traceId} and {@code line} (the original line)
+ * {@code level}, {@code service}, {@code logger}, {@code message}, {@code traceId} and {@code line} (the returned line)
  * come from the normalized line; {@code stack} is a newline and the full stack trace, or nothing. Any other name is a
  * field of the line (a dotted JSON path or a group of a line format), then a stream label, then structured metadata.
  * {@code {a|b}} takes the first name that has a value; {@code {level:5}} pads on the left to 5 characters,
@@ -107,7 +107,7 @@ public final class LogLayout {
         boolean plain = view.format() == EventNormalizer.Format.PLAIN && !wrapsLine;
         if (needsFields || plain) {
             fields = new LinkedHashMap<>();
-            normalizer.parse(event.line(), fields, new LinkedHashMap<>());
+            normalizer.parse(event.line(), fields);
             if (plain && !fields.containsKey("message")) return event.line();
         }
         var text = new StringBuilder();
@@ -135,7 +135,7 @@ public final class LogLayout {
             case "level" -> view.level();
             case "service" -> view.service();
             case "logger" -> view.logger();
-            // The normalizer names an empty message for the summaries; a file keeps it empty, as it was logged.
+            // The normalizer names an empty message for display; a file keeps it empty, as it was logged.
             case "message" -> view.message() != null && view.message().startsWith(EventNormalizer.EMPTY_MESSAGE) ? "" : view.message();
             case "traceId" -> view.traceId();
             case "line" -> event.line();

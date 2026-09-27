@@ -31,10 +31,6 @@ public final class ConnectionsLoader {
     private ConnectionsLoader() {
     }
 
-    public static List<ConnectionDefinition> load(Path path, UnaryOperator<String> environment) {
-        return loadConfig(path, environment).connections();
-    }
-
     public static Config loadConfig(Path path, UnaryOperator<String> environment) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
@@ -44,14 +40,14 @@ public final class ConnectionsLoader {
                 throw Errors.configuration();
             }
             var definitions = new ArrayList<ConnectionDefinition>();
-            var loaded = new HashMap<Path, FormatsFile>();
+            var loaded = new HashMap<Path, List<LineFormat>>();
             for (var pair : config.connections().entrySet()) {
                 Entry entry = pair.getValue();
                 if (entry == null) throw Errors.configuration();
                 Auth a = entry.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
-                FormatsFile formats = entry.formatFile() == null ? FormatsFile.EMPTY
+                List<LineFormat> formats = entry.formatFile() == null ? List.of()
                         : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)), ConnectionsLoader::loadFormats);
                 Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : entry.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
@@ -65,7 +61,7 @@ public final class ConnectionsLoader {
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
                         ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
                         entry.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : entry.serviceLabels(),
-                        formats.formats(), formats.layouts()));
+                        formats));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -74,7 +70,7 @@ public final class ConnectionsLoader {
         }
     }
 
-    public static FormatsFile loadFormats(Path path) {
+    public static List<LineFormat> loadFormats(Path path) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
             if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
@@ -87,14 +83,7 @@ public final class ConnectionsLoader {
                     formats.add(new LineFormat(entry.id(), compile(entry.pattern())));
                 }
             }
-            var layouts = new ArrayList<LineLayout>();
-            if (file.layouts() != null) {
-                for (Layout entry : file.layouts()) {
-                    if (entry == null) throw Errors.configuration();
-                    layouts.add(new LineLayout(entry.id(), entry.template()));
-                }
-            }
-            return new FormatsFile(List.copyOf(formats), List.copyOf(layouts));
+            return List.copyOf(formats);
         } catch (Exception ignored) {
             throw Errors.configuration();
         }
@@ -147,10 +136,6 @@ public final class ConnectionsLoader {
         return result.toString();
     }
 
-    public record FormatsFile(List<LineFormat> formats, List<LineLayout> layouts) {
-        static final FormatsFile EMPTY = new FormatsFile(List.of(), List.of());
-    }
-
     public record Config(List<ConnectionDefinition> connections, List<Path> exportRoots) {
     }
 
@@ -161,10 +146,7 @@ public final class ConnectionsLoader {
                          Limits limits, List<String> serviceLabels, String formatFile) {
     }
 
-    private record FormatConfig(List<Format> formats, List<Layout> layouts) {
-    }
-
-    private record Layout(String id, String template) {
+    private record FormatConfig(List<Format> formats) {
     }
 
     private record Format(String id, String pattern) {

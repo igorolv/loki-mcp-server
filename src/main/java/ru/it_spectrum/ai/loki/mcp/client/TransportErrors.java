@@ -30,11 +30,7 @@ final class TransportErrors {
             case OPERATION_CANCELLED -> "Loki operation was cancelled.";
             default -> "Operation failed internally.";
         };
-        boolean retryable = switch (code) {
-            case UPSTREAM_RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, UPSTREAM_CONNECTION_ERROR -> true;
-            default -> false;
-        };
-        return new LokiOperationException(new ToolError(code, message, retryable));
+        return new LokiOperationException(new ToolError(code, message));
     }
 
     /**
@@ -62,7 +58,7 @@ final class TransportErrors {
         String detail = clean.toString().strip();
         if (clean.length() >= QUERY_ERROR_CHARS) detail += "…";
         String message = "Loki rejected the query" + (detail.isEmpty() ? "; check its syntax." : ": " + detail);
-        return new LokiOperationException(new ToolError(code, message, false));
+        return new LokiOperationException(new ToolError(code, message));
     }
 
     static LokiOperationException http(int status) {

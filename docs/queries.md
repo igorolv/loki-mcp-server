@@ -15,7 +15,7 @@ One backward Loki query_range request reads at most limit lines, capped by maxEn
 Shown all 2 matching lines.
 ~~~
 
-A message is cut at 400 code points; stack traces keep a few frames and show the number skipped. raw=true displays the original line with the query result's stream labels, cut at 4000 code points. It is a preview and can cut JSON. exportLogs writes complete original lines.
+A message is cut at 400 code points; stack traces keep a few frames and show the number skipped. raw=true displays the line returned by Loki with the query result's stream labels, cut at 4000 code points. It is a preview and can cut JSON. exportLogs writes complete returned lines.
 
 When Loki returns exactly limit lines, the header says “newest N lines (more may exist)”; this does not claim that another line exists. The footer gives an end value rounded up to the next millisecond. Loki treats end as exclusive, so the boundary is reread: duplicates are possible. If more than a page of lines share one timestamp, repeating the same end may return the same page; narrow the selector or filter. A response budget cut drops oldest displayed lines and says “Output limit reached”. An empty page suggests widening the window, using discoverLogs or simplifying the filter.
 
@@ -23,15 +23,15 @@ When Loki returns exactly limit lines, the header says “newest N lines (more m
 
 Without groupBy, the server sends sum(count_over_time(<query> [<window>])) as an instant query at end and returns one count. groupBy="<label>" uses sum by (<label>) and returns the 50 largest values. groupBy="time" sends a range query with clock aligned steps chosen from 1 second through 1 day, at least window/12. Each row is a bucket start. Edge buckets can extend beyond the requested window; the header names the aligned interval. Counts describe Loki matches, not processed lines. The tool does not mark spikes or infer a cause.
 
-## exportLogs(connection, query, start, end, format = raw, directory, splitByService = false)
+## exportLogs(connection, query, start, end, format = raw, directory)
 
-The only write operation. It reads the window forward in pages and writes matching original lines in full, oldest first, to a new local file under exportRoots. format="raw" preserves the original Loki line. A named layout from formatFile, or a template passed as format, renders fields; an unrecognised plain line is written unchanged unless the template includes {line}. splitByService writes one file per service in a new directory. Existing files and directories are never overwritten.
+The only write operation. It reads the window forward in pages and writes matching lines in full, oldest first, to one new local file under exportRoots. format="raw" preserves the line returned by Loki after the LogQL pipeline; a query with `| line_format` therefore writes the reformatted line. A template passed as format renders fields locally; an unrecognised plain line is written unchanged unless the template includes {line}. Existing files are never overwritten.
 
 A relative directory is resolved under the default export root. An absolute directory must be inside an allowed root after normalization and symbolic link checks. An empty result creates no file. maxExportLines and maxExportBytes stop a call and the response gives a start to continue in another file; lines of the last millisecond will repeat. A Loki or disk error after at least one line keeps the partial file and says where it stopped.
 
 Paging cannot pass through a nanosecond that contains more lines than Loki returns in one page. The report explicitly says that lines of that nanosecond may be missing; in this case it does not claim a complete export. The answer is the path, counts and status, never the file's contents.
 
-The format template syntax, named layouts and directory settings are in [connections.md](connections.md).
+The format template syntax and directory settings are in [connections.md](connections.md).
 
 ## Budget and errors
 
