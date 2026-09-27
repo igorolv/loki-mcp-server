@@ -40,7 +40,8 @@ public class DiscoveryService {
 
     public String discover(String connection, String start, String end, String label) {
         var definition = registry.require(connection);
-        var range = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
+        var range = QueryTime.range(start, end, clock.instant(), definition.timezone(),
+                definition.limits().maxDiscoveryIntervalSeconds());
         String requested = label == null || label.isBlank() ? null : label.strip();
         if (requested != null && !requested.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
             throw Errors.invalid("label must be a label name, e.g. \"app\".");

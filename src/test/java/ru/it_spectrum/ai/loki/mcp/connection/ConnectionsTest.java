@@ -42,6 +42,8 @@ class ConnectionsTest {
         assertEquals("plain", dev.formats().getFirst().id());
         assertEquals(10, dev.limits().maxExportLines());
         assertEquals(20, dev.limits().maxExportBytes());
+        assertEquals(604_800, dev.limits().maxCountIntervalSeconds());
+        assertEquals(604_800, dev.limits().maxDiscoveryIntervalSeconds());
         assertEquals(List.of(directory.resolve("exports").toAbsolutePath().normalize()), config.exportRoots());
         var secured = config.connections().get(1);
         assertEquals(ConnectionAuth.Type.BEARER, secured.auth().type());
@@ -60,6 +62,19 @@ class ConnectionsTest {
         assertEquals(4, config.connections().size());
         var dev = config.connections().stream().filter(connection -> connection.name().equals("dev")).findFirst().orElseThrow();
         assertEquals(2, dev.formats().size());
+        assertNotNull(dev.framePattern());
+    }
+
+    @Test
+    void loadsSeparateSurveyLimits() throws Exception {
+        var limits = load("""
+                {"connections":{"a":{"url":"http://localhost","limits":{
+                  "maxIntervalSeconds":60,"maxCountIntervalSeconds":172800,
+                  "maxDiscoveryIntervalSeconds":259200}}}}
+                """).connections().getFirst().limits();
+        assertEquals(60, limits.maxIntervalSeconds());
+        assertEquals(172800, limits.maxCountIntervalSeconds());
+        assertEquals(259200, limits.maxDiscoveryIntervalSeconds());
     }
 
     @Test
@@ -81,6 +96,7 @@ class ConnectionsTest {
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"scope\":\"SECRET\"}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"rulesFile\":\"SECRET\"}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxEntries\":0}}}}",
+            "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxCountIntervalSeconds\":0}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"limits\":{\"maxEntries\":1.5}}}}",
             "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"auth\":{\"type\":\"BEARER\",\"token\":\"${MISSING}\"}}}}",
             "{\"exportRoots\":[],\"connections\":{\"a\":{\"url\":\"http://localhost\"}}}",

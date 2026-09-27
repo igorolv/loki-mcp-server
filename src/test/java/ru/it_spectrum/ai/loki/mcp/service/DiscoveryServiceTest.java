@@ -63,4 +63,13 @@ class DiscoveryServiceTest {
         assertThrows(LokiOperationException.class, () -> service.discover("missing", null, null, null));
         verifyNoInteractions(client);
     }
+
+    @Test
+    void defaultDiscoveryWindowAllowsThreeDays() {
+        when(client.labels("one", now.minusSeconds(3 * 86_400), now))
+                .thenReturn(new LabelResponse(List.of("app")));
+        String text = service.discover("one", "now-3d", "now", null);
+        assertTrue(text.contains("app"), text);
+        verify(client).labels("one", now.minusSeconds(3 * 86_400), now);
+    }
 }

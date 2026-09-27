@@ -17,10 +17,10 @@ public class QueryTools {
     }
 
     @McpTool(name = "queryLogs",
-            description = "Read the newest log lines matching a LogQL query in a window. The response is chronological, "
+            description = "Read a bounded page of log lines matching a LogQL query in a window. The response is chronological, "
                     + "with a compact level, service and message view. Example: {app=\"backend\"} |= \"ERROR\". "
                     + "Use raw=true to preview the line returned by Loki with its stream labels; long lines are shortened. "
-                    + "To read older lines, repeat with the end value in the footer; use exportLogs for complete files.",
+                    + "Use order=\"oldest\" to read forward, repeat with the start or end value in the footer, and use exportLogs for complete files.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String queryLogs(
             @McpToolParam(description = "Connection name from listConnections") String connection,
@@ -28,14 +28,16 @@ public class QueryTools {
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "Maximum lines to show, default 50", required = false) Integer limit,
-            @McpToolParam(description = "Preview the line returned by Loki with stream labels, default false", required = false) Boolean raw) {
-        return service.logs(connection, query, start, end, limit, raw);
+            @McpToolParam(description = "Preview the line returned by Loki with stream labels, default false", required = false) Boolean raw,
+            @McpToolParam(description = "newest (default) or oldest; oldest reads forward", required = false) String order) {
+        return service.logs(connection, query, start, end, limit, raw, order);
     }
 
     @McpTool(name = "countLogs",
             description = "Count log lines matching a LogQL log query without returning those lines. "
                     + "Example: query={app=\"backend\"} |= \"ERROR\", groupBy=\"time\". "
-                    + "Omit groupBy for one total, use a label name for counts by value, or time for clock-aligned buckets. "
+                    + "Omit groupBy for one total, use a label for values, time for buckets, or app,time for both; step=\"1d\" sets the bucket width. "
+                    + "After a LogQL regexp stage with a named capture, groupBy can use that extracted label. "
                     + "Then narrow the query and read lines with queryLogs.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
     public String countLogs(
@@ -43,7 +45,8 @@ public class QueryTools {
             @McpToolParam(description = QUERY) String query,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = END, required = false) String end,
-            @McpToolParam(description = "Label name for counts by value, or time for buckets", required = false) String groupBy) {
-        return service.count(connection, query, start, end, groupBy);
+            @McpToolParam(description = "Label name, time, or <label>,time", required = false) String groupBy,
+            @McpToolParam(description = "Bucket width for time grouping, 1s through 1d; default automatic", required = false) String step) {
+        return service.count(connection, query, start, end, groupBy, step);
     }
 }

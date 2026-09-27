@@ -36,17 +36,17 @@ exportRoots is an optional list of up to 16 directories at the top level. Relati
 
 ## Format file
 
-formatFile is one optional path to a JSON object with plain-line parsing formats. A relative path resolves against the connections file. The file is loaded once per path and is limited to 1 MiB. An example is [java-formats.json](../examples/java-formats.json).
+formatFile is one optional path to a JSON object with plain-line parsing formats and an optional framePattern. A relative path resolves against the connections file. The file is loaded once per path and is limited to 1 MiB. An example is [java-formats.json](../examples/java-formats.json).
 
 ~~~json
 {
   "formats": [
-    {"id": "simple", "pattern": "^(?<level>INFO|ERROR) (?<message>.*)$"}
+{"id": "simple", "pattern": "^(?<level>INFO|ERROR) (?<message>.*)$"}
   ]
 }
 ~~~
 
-formats are Java regular expressions searched on the first line of a non JSON event. A named message group is required. Named level, logger, service or application groups become the corresponding line fields; other groups become fields available to export templates. The first matching format wins. IDs are lower case letters, digits and dashes, unique within the file; at most 32 formats. Invalid or oversized regular expressions stop startup.
+formats are Java regular expressions searched on the first line of a non JSON event. A named message group is required. Named level, logger, service or application groups become the corresponding line fields; other groups become fields available to export templates. The first matching format wins. IDs are lower case letters, digits and dashes, unique within the file; at most 32 formats. An optional top-level `framePattern`, such as `"^\\s+at\\s+.+$"`, matches a complete standalone line for compact queryLogs folding. It does not change raw previews or exports. Invalid or oversized regular expressions stop startup.
 
 ## Export template
 
@@ -63,7 +63,9 @@ All fields in a connection's limits object are optional:
 | maxHttpResponseBytes | 8388608 | One Loki response body |
 | maxResponseBytes | 65536 | One MCP response; minimum 1024 |
 | maxEntries | 1000 | Maximum query page |
-| maxIntervalSeconds | 86400 | Maximum time window |
+| maxIntervalSeconds | 86400 | Maximum queryLogs and exportLogs time window |
+| maxCountIntervalSeconds | 604800 | Maximum countLogs time window |
+| maxDiscoveryIntervalSeconds | 604800 | Maximum discoverLogs time window |
 | maxExportLines | 500000 | Export stop after this many lines |
 | maxExportBytes | 268435456 | Export stop after this many bytes |
 

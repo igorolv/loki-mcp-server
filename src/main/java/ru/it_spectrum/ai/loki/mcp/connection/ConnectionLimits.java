@@ -8,21 +8,31 @@ import ru.it_spectrum.ai.loki.mcp.service.Errors;
  */
 public record ConnectionLimits(int connectTimeoutMs, int requestTimeoutMs, int maxHttpResponseBytes,
                                int maxResponseBytes, int maxEntries, long maxIntervalSeconds,
-                               int maxExportLines, long maxExportBytes) {
+                               int maxExportLines, long maxExportBytes,
+                               long maxCountIntervalSeconds, long maxDiscoveryIntervalSeconds) {
     public static final int MIN_RESPONSE_BYTES = 1024;
     public static final ConnectionLimits DEFAULTS = new ConnectionLimits(
-            5_000, 30_000, 8 * 1024 * 1024, 64 * 1024, 1_000, 86_400);
+            5_000, 30_000, 8 * 1024 * 1024, 64 * 1024, 1_000, 86_400,
+            500_000, 256L * 1024 * 1024, 604_800, 604_800);
 
     public ConnectionLimits(int connectTimeoutMs, int requestTimeoutMs, int maxHttpResponseBytes,
                             int maxResponseBytes, int maxEntries, long maxIntervalSeconds) {
         this(connectTimeoutMs, requestTimeoutMs, maxHttpResponseBytes, maxResponseBytes, maxEntries, maxIntervalSeconds,
-                500_000, 256L * 1024 * 1024);
+                500_000, 256L * 1024 * 1024, maxIntervalSeconds, maxIntervalSeconds);
+    }
+
+    public ConnectionLimits(int connectTimeoutMs, int requestTimeoutMs, int maxHttpResponseBytes,
+                            int maxResponseBytes, int maxEntries, long maxIntervalSeconds,
+                            int maxExportLines, long maxExportBytes) {
+        this(connectTimeoutMs, requestTimeoutMs, maxHttpResponseBytes, maxResponseBytes, maxEntries, maxIntervalSeconds,
+                maxExportLines, maxExportBytes, maxIntervalSeconds, maxIntervalSeconds);
     }
 
     public ConnectionLimits {
         if (connectTimeoutMs <= 0 || requestTimeoutMs <= 0 || maxHttpResponseBytes <= 0
                 || maxResponseBytes < MIN_RESPONSE_BYTES || maxEntries <= 0 || maxIntervalSeconds <= 0
-                || maxExportLines <= 0 || maxExportBytes <= 0) {
+                || maxExportLines <= 0 || maxExportBytes <= 0
+                || maxCountIntervalSeconds <= 0 || maxDiscoveryIntervalSeconds <= 0) {
             throw Errors.configuration();
         }
     }

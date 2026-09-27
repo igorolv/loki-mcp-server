@@ -6,8 +6,8 @@ A local stdio MCP server for reading Grafana Loki with an agent. It exposes five
 |---|---|
 | listConnections | Show configured stands and their operator hints |
 | discoverLogs | List label names, or values of one label, in a time window |
-| queryLogs | Read a bounded page of a LogQL log query as compact text; raw=true previews returned lines and stream labels |
-| countLogs | Count matching lines on Loki, optionally by label or clock aligned time bucket |
+| queryLogs | Read newest or oldest bounded pages of a LogQL log query as compact text; raw=true previews returned lines and stream labels |
+| countLogs | Count matching lines on Loki, optionally by label, clock aligned time bucket or both |
 | exportLogs | Save matching lines to a local file, raw or rendered with a template |
 
 Every data tool requires an explicit connection. queryLogs, countLogs and exportLogs require a LogQL **log query**, such as {app="backend"} |= "ERROR". Use discoverLogs to find label names and values. The server builds only the count_over_time expression for countLogs; it does not infer filters or interpret causes. Tool responses are readable text without an output schema.
@@ -41,7 +41,7 @@ The server reads ~/.loki-mcp-server/connections.json, or the path in LOKI_MCP_CO
 }
 ~~~
 
-The [complete example](examples/connections.json) uses environment variables for nonlocal URLs. hint gives the model stand specific selectors and field advice. serviceLabels names the labels used to display a service in compact lines. Optional formatFile names one JSON file with patterns for parsing plain lines; see [java-formats.json](examples/java-formats.json). The connection file may set exportRoots and per connection limits. Authentication and tenant headers are configured per connection; URLs and credentials never appear in tool responses or diagnostics. The full format is in [docs/connections.md](docs/connections.md).
+The [complete example](examples/connections.json) uses environment variables for nonlocal URLs. hint gives the model stand specific selectors and field advice. serviceLabels names the labels used to display a service in compact lines. Optional formatFile names one JSON file with patterns for parsing plain lines and an optional framePattern; see [java-formats.json](examples/java-formats.json). The connection file may set exportRoots and per connection limits. Authentication and tenant headers are configured per connection; URLs and credentials never appear in tool responses or diagnostics. The full format is in [docs/connections.md](docs/connections.md).
 
 The server loads configuration strictly at startup without probing Loki. An unknown field, duplicate key, missing environment variable or invalid format file stops startup with a safe configuration error. Changes require a restart.
 
@@ -49,13 +49,13 @@ The server loads configuration strictly at startup without probing Loki. An unkn
 
 1. Call listConnections and choose a stand.
 2. Call discoverLogs(connection="dev") for label names, then discoverLogs(connection="dev", label="app") for values. Widen the window on a quiet stand.
-3. Use a LogQL log query with countLogs to check volume and queryLogs to read lines. For example, {app="backend"} |= "ERROR"; groupBy="time" gives counts by time bucket.
-4. Narrow the query when a page is crowded. A queryLogs footer gives an end value for an older page. Boundary lines can repeat, and a timestamp containing more lines than a page needs a narrower query.
+3. Use a LogQL log query with countLogs to check volume and queryLogs to read lines. For example, {app="backend"} |= "ERROR"; groupBy="time", step="1d" gives UTC-aligned 24-hour buckets, and groupBy="app,time" gives counts by app and time. A named `| regexp` capture can supply a groupBy label. Date markers distinguish buckets across midnight.
+4. Narrow the query when a page is crowded. queryLogs defaults to the newest page; order="oldest" starts at the beginning of the window. Its footer gives an end for older lines or a start for newer ones. Boundary lines can repeat, and a timestamp containing more lines than a page needs a narrower query.
 5. Call exportLogs when the user asks for a file. format="raw" writes the lines returned by Loki, including any `| line_format` transformation in the query; format="{time} {level} {service} {message}" renders locally. The response gives the path and counts, not the log contents.
 
-queryLogs prints the newest lines of the window in chronological order. Its default view shortens messages and stack traces to save model tokens. raw=true shows stream labels and up to 4000 code points of each line returned by Loki; it is a **preview**. For complete lines use exportLogs. Export reads forward in pages, never overwrites an existing file and stays under its configured roots. If more lines share one nanosecond than Loki will return in one page, export reports that some may be missing.
+queryLogs prints either end of the window in chronological order. Its default view shortens messages and stack traces to save model tokens. An optional framePattern in the connection's formatFile folds adjacent standalone frame lines in the compact view. raw=true shows every returned line with stream labels and up to 4000 code points; it is a **preview**. For complete lines use exportLogs. Export reads forward in pages, never overwrites an existing file and stays under its configured roots. If more lines share one nanosecond than Loki will return in one page, export reports that some may be missing.
 
-The default time window is now-1h to now. Accepted times include now-15m, RFC3339 with an offset, local time in the connection's timezone and epoch nanoseconds. Windows and responses are bounded by per connection limits. See [docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md).
+The default time window is now-1h to now. Accepted times include now-15m, RFC3339 with an offset, local time in the connection's timezone and epoch nanoseconds. countLogs and discoverLogs allow up to seven days by default; queryLogs and exportLogs allow one day. A large count can still reach the 30-second request timeout; narrow the window or query in that case. Windows and responses are bounded by per connection limits. See [docs/queries.md](docs/queries.md) and [docs/discovery.md](docs/discovery.md).
 
 ## MCP client configuration
 

@@ -5,24 +5,31 @@ import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import java.net.URI;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
- * One isolated Loki connection. The hint explains the stand's selectors; formats only render plain lines.
+ * One isolated Loki connection. The hint explains the stand's selectors; formats only affect local rendering.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
-                                   List<LineFormat> formats) {
+                                   List<LineFormat> formats, Pattern framePattern) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of("service_name", "service", "app", "container", "job");
     public static final int MAX_FORMATS = 32;
 
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits) {
-        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of());
+        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of(), null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of());
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), null);
+    }
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<LineFormat> formats) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, null);
     }
 
     public ConnectionDefinition {

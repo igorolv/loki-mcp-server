@@ -24,6 +24,6 @@ frontend
 
 queryLogs uses EventNormalizer to read level, service, logger, message, trace id and stack trace from query result labels, Loki structured metadata and the JSON line. Generic ECS, logstash and Serilog field names are recognised. Labels take precedence over line fields. serviceLabels in the connection profile controls which labels name a service for display.
 
-A connection's optional formatFile can define regular expressions for plain lines. The first matching format extracts named groups such as message, level, logger, service, thread and pid. Without a matching format, a plain line remains its own message. These formats affect local rendering only: they never change the LogQL query or interpret the cause of an event. [connections.md](connections.md) specifies the file.
+A connection's optional formatFile can define regular expressions for plain lines. The first matching format extracts named groups such as message, level, logger, service, thread and pid. Without a matching format, a plain line remains its own message. An optional framePattern folds adjacent standalone frame lines in compact queryLogs output; raw previews and exports retain them. These formats affect local rendering only: they never change the LogQL query or interpret the cause of an event. [connections.md](connections.md) specifies the file.
 
 The default queryLogs view shows HH:mm:ss.SSS LEVEL service  message and shortens long messages and stack traces. raw=true is a bounded preview of the line returned by Loki. exportLogs is the path to complete lines.

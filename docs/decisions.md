@@ -18,13 +18,13 @@ The user chose to follow Spring AI instead of replacing its behaviour: when a st
 
 ## Text contract
 
-Every tool response is readable text; no output schema, structuredContent, stream dictionaries, cache, entry IDs, field projections or cursors. queryLogs shows a bounded page of newest lines in chronological order. Its default view shortens messages and stack traces. raw=true is a preview of the line returned by Loki and result stream labels, capped at 4000 code points. Complete returned lines are available through exportLogs. A page returning exactly its limit says more **may** exist. Its end continuation rereads the boundary millisecond; duplicate lines are acceptable. If the same timestamp fills the page, the model must narrow the query.
+Every tool response is readable text; no output schema, structuredContent, stream dictionaries, cache, entry IDs, field projections or cursors. queryLogs shows a bounded page from either end of the window in chronological order, defaulting to newest. Its default view shortens messages and stack traces. raw=true is a preview of the line returned by Loki and result stream labels, capped at 4000 code points. Complete returned lines are available through exportLogs. A page returning exactly its limit says more **may** exist. Its end or start continuation rereads the boundary millisecond; duplicate lines are acceptable. If the same timestamp fills the page, the model must narrow the query.
 
 These earlier cancelled designs do not return without a new user decision: JSON responses, output schemas, cursors, event cache, stream IDs and projections.
 
 ## Connection profile
 
-connections.json is external, strict and loaded once without probes. The model sees name, description and hint, never the URL or credentials. serviceLabels supply display names, not query builders. One optional formatFile contains only plain-line parsing formats. It replaces the old rules catalogue, which also held system aliases, causes and restart-specific knowledge. A format file contains rendering knowledge only. Code defaults for JSON fields are generic ECS, logstash and Serilog.
+connections.json is external, strict and loaded once without probes. The model sees name, description and hint, never the URL or credentials. serviceLabels supply display names, not query builders. One optional formatFile contains plain-line parsing formats and an optional standalone frame pattern. It replaces the old rules catalogue, which also held system aliases, causes and restart-specific knowledge. A format file contains rendering knowledge only. Code defaults for JSON fields are generic ECS, logstash and Serilog.
 
 Every data operation names its connection. A failure of one connection does not mark the others unavailable. Loki 2.6.1 and 3.x use the shared read endpoints; a 404 is an endpoint failure, not a verdict on the stand.
 
@@ -40,6 +40,14 @@ The runtime only reads Loki; test ingestion is confined to integration container
 
 Unit and loopback tests cover transport, parsing, budgets, file safety and the five-tool contract. StdioSmokeTest launches the jar over JSON-RPC. Container compatibility tests use pinned Loki 2.6.1 and 3.6.0 images and write only to those containers. Live smoke is read only and needs an explicitly configured stand.
 
+## Investigation flow refinements (2026-09-27)
+
+After a DeepSeek 4.1 Flash investigation of a three-day dev window, the user chose four additions. countLogs and discoverLogs get separate seven-day default window limits (`maxCountIntervalSeconds` and `maxDiscoveryIntervalSeconds`); queryLogs and exportLogs retain `maxIntervalSeconds` at one day. The per-request timeout stays at 30 seconds by default. A large count can still time out, and serialized stdio calls can delay other requests; the model should narrow the window after a timeout.
+
+countLogs accepts an optional `step` from 1 second through 1 day for time grouping; without it, the existing automatic clock-aligned step remains. A 1d step is a fixed UTC-aligned 24-hour bucket, not a local calendar day. `groupBy="<label>,time"` counts each label value in time buckets, with explicit truncation when the result is too large. queryLogs accepts `order="newest"` (default) or `order="oldest"`; the latter uses forward Loki reads and a ready-made `start` to continue. Both directions may repeat boundary lines, and a crowded timestamp can stall pagination.
+
+A connection format file may declare a `framePattern` for standalone stack-frame lines. Compact queryLogs output folds adjacent matching lines with the same query-result labels into a counted line; raw previews and exports retain the returned lines. Query-result labels do not prove an original stream identity, so the folding is a display aid only. No project-specific frame syntax is embedded in generic code.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.
@@ -49,4 +57,4 @@ Unit and loopback tests cover transport, parsing, budgets, file safety and the f
 - A crowded single timestamp cannot be paged completely through Loki's simple time boundary; the tools report this limit.
 - Remove `immediateExecution(true)` once the MCP SDK brought by Spring AI contains the stdio fix for java-sdk #686 (the disabled concurrency test in jdbc-mcp-server is the reference check).
 - Spring AI repeats the error text on a second line when an exception has no cause; take the fix when Spring AI changes it.
-- Tool call timeouts: only single Loki requests are bounded (requestTimeoutMs); countLogs makes up to three and exportLogs many. A client such as opencode may give up first while the serialized call keeps running. A per-call deadline below the client timeout is under discussion.
+- Tool call timeouts: only single Loki requests are bounded (requestTimeoutMs); a broad countLogs request or multi-request exportLogs call can outlast a client's timeout while the serialized call keeps running. A per-call deadline below the client timeout is under discussion.

@@ -178,9 +178,9 @@ may repeat the argument value (an unparseable time) but never secrets.
 - Keep nanoseconds internally; print local time of the connection with milliseconds.
 - Distinguish streams, lines and processed lines; never print `totalLinesProcessed` as a
   match count.
-- The page header and footer name the window, `newest N lines (more may exist)` or `all N`,
-  and a ready-made `end` for older lines (rounded up to the millisecond). Continuation is a
-  repeated `queryLogs` with `end`; a duplicate boundary line is acceptable. A timestamp
+- The page header and footer name the window, `newest N lines (more may exist)`, `oldest N lines (more may exist)` or `all N`,
+  and a ready-made `end` for older lines or `start` for newer lines (rounded to the millisecond). Continuation is a
+  repeated `queryLogs` with that boundary; a duplicate boundary line is acceptable. A timestamp
   filling the page can stall continuation and must be narrowed by query.
 - Cuts are visible as one phrase (`Output limit reached`, `… (N frames skipped)`, `…`),
   without limitation enums. A full line returned by Loki is written by `exportLogs`.

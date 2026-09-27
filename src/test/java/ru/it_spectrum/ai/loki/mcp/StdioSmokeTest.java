@@ -169,11 +169,13 @@ class StdioSmokeTest {
                     .filter(t -> t.path("name").asText().equals("queryLogs")).findFirst().orElseThrow();
             assertEquals(List.of("connection", "query"), mapper.convertValue(tool.path("inputSchema").path("required"), List.class));
             assertFalse(tool.path("inputSchema").path("properties").has("service"), tool.toString());
+            assertTrue(tool.path("inputSchema").path("properties").has("order"), tool.toString());
             for (String name : List.of("countLogs", "exportLogs")) {
                 JsonNode schema = StreamSupport.stream(catalog.spliterator(), false)
                         .filter(declaration -> declaration.path("name").asText().equals(name)).findFirst().orElseThrow()
                         .path("inputSchema");
                 assertEquals(List.of("connection", "query"), mapper.convertValue(schema.path("required"), List.class));
+                if (name.equals("countLogs")) assertTrue(schema.path("properties").has("step"), schema.toString());
                 if (name.equals("exportLogs")) assertFalse(schema.path("properties").has("splitByService"), schema.toString());
             }
             JsonNode discovery = StreamSupport.stream(catalog.spliterator(), false)
@@ -261,6 +263,21 @@ class StdioSmokeTest {
                 }
                 assertNoSecrets(call.toString());
             }
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 60, "method", "tools/call",
+                    "params", Map.of("name", "queryLogs", "arguments", Map.of("connection", "test",
+                            "query", "{kind=\"test\"}", "start", "1700000000000000000",
+                            "end", "1700000001000000000", "order", "oldest")))));
+            var forward = response(stdout, stderr).path("result");
+            assertFalse(forward.path("isError").asBoolean(), text(forward));
+            assertTrue(text(forward).contains("Ошибка 🐈"), text(forward));
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 61, "method", "tools/call",
+                    "params", Map.of("name", "countLogs", "arguments", Map.of("connection", "test",
+                            "query", "{kind=\"test\"}", "start", "1699999999000000000",
+                            "end", "1700000001000000000", "groupBy", "kind,time", "step", "1s")))));
+            var grouped = response(stdout, stderr).path("result");
+            assertFalse(grouped.path("isError").asBoolean(), text(grouped));
+            assertTrue(text(grouped).contains("By kind and time (1s buckets, bucket start):"), text(grouped));
+            assertNoSecrets(text(forward) + text(grouped));
             for (int id = 70; id < 86; id++) {
                 send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "method", "tools/call",
                         "params", Map.of("name", "discoverLogs", "arguments", id % 2 == 0

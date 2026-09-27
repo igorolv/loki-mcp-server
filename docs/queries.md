@@ -2,11 +2,11 @@
 
 Every tool returns one readable text content, without an output schema or structuredContent. All data tools require an explicit connection from listConnections. queryLogs, countLogs and exportLogs require a LogQL **log query** starting with a stream selector. The same query can be passed to all three tools; metric expressions belong inside countLogs and are built by the server. The server never builds a query from log contents.
 
-start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds the window. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
+start defaults to now-1h and end to now. Accepted times: now, now-15m (units ns/ms/s/m/h/d), RFC3339 with an offset, local time in the connection timezone, or epoch nanoseconds. maxIntervalSeconds bounds queryLogs and exportLogs; maxCountIntervalSeconds and maxDiscoveryIntervalSeconds bound their respective tools. Time is kept in nanoseconds internally and printed in the connection timezone with milliseconds.
 
-## queryLogs(connection, query, start, end, limit = 50, raw = false)
+## queryLogs(connection, query, start, end, limit = 50, raw = false, order = newest)
 
-One backward Loki query_range request reads at most limit lines, capped by maxEntries. The page is rendered oldest to newest. The default view displays a local time, level, service, message and compact stack trace. The date is in the header and day changes inside a page have markers.
+One Loki query_range request reads at most limit lines, capped by maxEntries. order="newest" reads backward; order="oldest" reads forward. Both pages are rendered oldest to newest. The default view displays a local time, level, service, message and compact stack trace. The date is in the header and day changes inside a page have markers. When the connection format file has a framePattern, consecutive matching standalone lines with the same query-result labels are shown as `… N stack frame lines`; those labels do not prove original stream identity.
 
 ~~~text
 {app="backend"} |= "ERROR" — dev, 2026-09-13 10:00:00–11:00:00 (+03:00), all 2 lines:
@@ -15,13 +15,13 @@ One backward Loki query_range request reads at most limit lines, capped by maxEn
 Shown all 2 matching lines.
 ~~~
 
-A message is cut at 400 code points; stack traces keep a few frames and show the number skipped. raw=true displays the line returned by Loki with the query result's stream labels, cut at 4000 code points. It is a preview and can cut JSON. exportLogs writes complete returned lines.
+A message is cut at 400 code points; stack traces keep a few frames and show the number skipped. raw=true displays each line returned by Loki with the query result's stream labels, cut at 4000 code points. It bypasses frame folding, is a preview and can cut JSON. exportLogs writes complete returned lines.
 
-When Loki returns exactly limit lines, the header says “newest N lines (more may exist)”; this does not claim that another line exists. The footer gives an end value rounded up to the next millisecond. Loki treats end as exclusive, so the boundary is reread: duplicates are possible. If more than a page of lines share one timestamp, repeating the same end may return the same page; narrow the selector or filter. A response budget cut drops oldest displayed lines and says “Output limit reached”. An empty page suggests widening the window, using discoverLogs or simplifying the filter.
+When Loki returns exactly limit lines, the header says “newest N lines (more may exist)” or “oldest N lines (more may exist)”; this does not claim that another line exists. The footer gives an end for older lines or a start for newer lines, rounded to a millisecond that rereads the boundary. Duplicates are possible. If more than a page of lines share one timestamp, repeating the boundary may return the same page; narrow the selector or filter. A response budget cut drops oldest displayed lines in newest order, or newest displayed lines in oldest order, and says “Output limit reached”. An empty page suggests widening the window, using discoverLogs or simplifying the filter.
 
-## countLogs(connection, query, start, end, groupBy)
+## countLogs(connection, query, start, end, groupBy, step)
 
-Without groupBy, the server sends sum(count_over_time(<query> [<window>])) as an instant query at end and returns one count. groupBy="<label>" uses sum by (<label>) and returns the 50 largest values. groupBy="time" sends a range query with clock aligned steps chosen from 1 second through 1 day, at least window/12. Each row is a bucket start. Edge buckets can extend beyond the requested window; the header names the aligned interval. Counts describe Loki matches, not processed lines. The tool does not mark spikes or infer a cause.
+Without groupBy, the server sends sum(count_over_time(<query> [<window>])) as an instant query at end and returns one count. groupBy="<label>" uses sum by (<label>) and returns the 50 largest values. A LogQL `| regexp` stage with a named capture can supply the label, for example `| regexp "task=(?P<task>\\d+)"` with groupBy="task". groupBy="time" sends a range query with clock aligned steps; groupBy="<label>,time" gives one row per label value and time bucket. The optional step is an integer duration from 1s through 1d, such as step="1d"; without it, the step is chosen from 1 second through 1 day at least window/12. A 1d step is a fixed 24-hour bucket aligned to UTC, not a calendar day in the connection timezone. At most 200 time buckets are allowed. A combined result shows the 50 largest label values and at most 200 rows, with an explicit cut marker; the header total includes hidden values and rows. Each row is a bucket start; when rows cross midnight in the connection timezone, a `--- YYYY-MM-DD ---` marker precedes the first row of the new day. Edge buckets can extend beyond the requested window; the header names the aligned interval. Counts describe Loki matches, not processed lines. The tool does not mark spikes or infer a cause. A long count can exceed the per-request timeout; retry with a shorter window or narrower query.
 
 ## exportLogs(connection, query, start, end, format = raw, directory)
 
@@ -35,7 +35,7 @@ The format template syntax and directory settings are in [connections.md](connec
 
 ## Budget and errors
 
-The rendered text budget is maxResponseBytes minus 512 bytes reserved for the JSON-RPC envelope. queryLogs drops oldest displayed lines; discoverLogs drops values from the end of a sorted list. If even a minimal response cannot fit, the service returns Error RESPONSE_BUDGET_EXCEEDED.
+The rendered text budget is maxResponseBytes minus 512 bytes reserved for the JSON-RPC envelope. queryLogs drops lines from the opposite end of the requested order; time bucket output drops trailing rows; discoverLogs drops values from the end of a sorted list. If even a minimal response cannot fit, the service returns Error RESPONSE_BUDGET_EXCEEDED.
 
 Failures return Error <CODE>: <message> with isError=true. Spring AI builds the error result from the exception and currently repeats the text on a second line. Missing or mistyped arguments are rejected by the MCP SDK input validation as Tool (<name>) input validation failed: …; other invalid local arguments are INVALID_ARGUMENT. Loki HTTP 400 query text and a status:error query message are passed to the model, bounded to 400 characters, so it can correct its LogQL. Other upstream bodies and connection secrets are hidden. Transport codes and timeouts are in [http-client.md](http-client.md).
 

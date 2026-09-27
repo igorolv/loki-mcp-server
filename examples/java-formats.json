@@ -1,4 +1,5 @@
 {
+  "framePattern": "^\\s+at\\s+.+$",
   "formats": [
     {
       "id": "spring-boot-console",

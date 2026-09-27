@@ -40,28 +40,32 @@ public final class ConnectionsLoader {
                 throw Errors.configuration();
             }
             var definitions = new ArrayList<ConnectionDefinition>();
-            var loaded = new HashMap<Path, List<LineFormat>>();
+            var loaded = new HashMap<Path, LineFormats>();
             for (var pair : config.connections().entrySet()) {
                 Entry entry = pair.getValue();
                 if (entry == null) throw Errors.configuration();
                 Auth a = entry.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
-                List<LineFormat> formats = entry.formatFile() == null ? List.of()
-                        : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)), ConnectionsLoader::loadFormats);
-                Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null) : entry.limits();
+                LineFormats formats = entry.formatFile() == null ? new LineFormats(List.of(), null)
+                        : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)),
+                        ConnectionsLoader::loadFormatFile);
+                Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null,
+                        null, null) : entry.limits();
                 ConnectionLimits d = ConnectionLimits.DEFAULTS;
                 var limits = new ConnectionLimits(or(l.connectTimeoutMs(), d.connectTimeoutMs()),
                         or(l.requestTimeoutMs(), d.requestTimeoutMs()), or(l.maxHttpResponseBytes(), d.maxHttpResponseBytes()),
                         or(l.maxResponseBytes(), d.maxResponseBytes()), or(l.maxEntries(), d.maxEntries()),
                         l.maxIntervalSeconds() == null ? d.maxIntervalSeconds() : l.maxIntervalSeconds(),
                         or(l.maxExportLines(), d.maxExportLines()),
-                        l.maxExportBytes() == null ? d.maxExportBytes() : l.maxExportBytes());
+                        l.maxExportBytes() == null ? d.maxExportBytes() : l.maxExportBytes(),
+                        l.maxCountIntervalSeconds() == null ? d.maxCountIntervalSeconds() : l.maxCountIntervalSeconds(),
+                        l.maxDiscoveryIntervalSeconds() == null ? d.maxDiscoveryIntervalSeconds() : l.maxDiscoveryIntervalSeconds());
                 definitions.add(new ConnectionDefinition(pair.getKey(), entry.description(), entry.hint(),
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
                         ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
                         entry.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : entry.serviceLabels(),
-                        formats));
+                        formats.formats(), formats.framePattern()));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -71,6 +75,10 @@ public final class ConnectionsLoader {
     }
 
     public static List<LineFormat> loadFormats(Path path) {
+        return loadFormatFile(path).formats();
+    }
+
+    private static LineFormats loadFormatFile(Path path) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
             if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
@@ -83,7 +91,8 @@ public final class ConnectionsLoader {
                     formats.add(new LineFormat(entry.id(), compile(entry.pattern())));
                 }
             }
-            return List.copyOf(formats);
+            return new LineFormats(List.copyOf(formats),
+                    file.framePattern() == null ? null : compile(file.framePattern()));
         } catch (Exception ignored) {
             throw Errors.configuration();
         }
@@ -146,7 +155,10 @@ public final class ConnectionsLoader {
                          Limits limits, List<String> serviceLabels, String formatFile) {
     }
 
-    private record FormatConfig(List<Format> formats) {
+    private record LineFormats(List<LineFormat> formats, Pattern framePattern) {
+    }
+
+    private record FormatConfig(List<Format> formats, String framePattern) {
     }
 
     private record Format(String id, String pattern) {
@@ -157,6 +169,7 @@ public final class ConnectionsLoader {
 
     private record Limits(Integer connectTimeoutMs, Integer requestTimeoutMs, Integer maxHttpResponseBytes,
                           Integer maxResponseBytes, Integer maxEntries, Long maxIntervalSeconds,
-                          Integer maxExportLines, Long maxExportBytes) {
+                          Integer maxExportLines, Long maxExportBytes,
+                          Long maxCountIntervalSeconds, Long maxDiscoveryIntervalSeconds) {
     }
 }

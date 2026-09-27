@@ -13,6 +13,7 @@ import java.net.URI;
 import java.time.*;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -169,6 +170,145 @@ class QueryServiceTest {
         // A 6-hour window gets 30-minute buckets, a 15-minute window 2-minute ones.
         assertEquals(Duration.ofMinutes(30), QueryService.niceStep(Duration.ofHours(6), QueryService.TIME_BUCKETS));
         assertEquals(Duration.ofMinutes(2), QueryService.niceStep(Duration.ofMinutes(15), QueryService.TIME_BUCKETS));
+    }
+
+    @Test
+    void countByTimeMarksDayChangeWhenClockLabelsRepeat() {
+        range(new Matrix(List.of()));
+
+        String text = service.count("three", "{app=\"x\"}", "now-24h", "now", "time");
+
+        assertTrue(text.contains("\n--- 2026-09-13 ---\n  01:00"), text);
+        assertEquals(2, text.lines().filter(line -> line.startsWith("  15:00")).count(), text);
+        assertEquals(1, text.lines().filter(line -> line.equals("--- 2026-09-13 ---")).count(), text);
+    }
+
+    @Test
+    void defaultCountWindowAllowsThreeDaysButPageStillHasOneDayLimit() {
+        var defaults = new ConnectionRegistry(List.of(new ConnectionDefinition("default", null,
+                URI.create("http://localhost:6"), ConnectionAuth.NONE, null, ZoneOffset.UTC,
+                ConnectionLimits.DEFAULTS)));
+        var counting = new QueryService(defaults, client, Clock.fixed(now, ZoneOffset.UTC));
+        when(client.queryInstant(eq("default"), anyString(), any()))
+                .thenReturn(new QueryResponse(new Vector(List.of(new VectorSample(Map.of(),
+                        new MetricSample(BigDecimal.ONE, "7"))))));
+
+        assertTrue(counting.count("default", "{app=\"x\"}", "now-3d", "now", null).startsWith("7 lines match"));
+        verify(client).queryInstant("default", "sum(count_over_time({app=\"x\"} [259200s]))", now);
+        assertThrows(LokiOperationException.class,
+                () -> counting.logs("default", "{app=\"x\"}", "now-3d", "now", null, null));
+    }
+
+    @Test
+    void explicitStepGroupsByLabelAndTime() {
+        Instant first = Instant.parse("2026-09-13T00:00:00Z");
+        Instant last = Instant.parse("2026-09-14T00:00:00Z");
+        range(new Matrix(List.of(
+                new MetricSeries(Map.of("app", "backend"), List.of(
+                        new MetricSample(BigDecimal.valueOf(first.getEpochSecond()), "3"),
+                        new MetricSample(BigDecimal.valueOf(last.getEpochSecond()), "5"))),
+                new MetricSeries(Map.of("app", "frontend"), List.of(
+                        new MetricSample(BigDecimal.valueOf(first.getEpochSecond()), "2"))))));
+
+        String text = service.count("three", "{app=~\".+\"}", "now-24h", "now", "app,time", "1d");
+
+        assertTrue(text.startsWith("10 lines match"), text);
+        assertTrue(text.contains("By app and time (86400s buckets, bucket start):"), text);
+        assertTrue(text.contains("  03:00  backend       3"), text);
+        assertTrue(text.contains("--- 2026-09-13 ---"), text);
+        verify(client).queryRange(eq("three"), eq("sum by (app) (count_over_time({app=~\".+\"} [86400s]))"),
+                any(), any(), eq(1000), eq(LokiHttpClient.Direction.FORWARD), eq(new BigDecimal("86400.000")));
+        assertThrows(LokiOperationException.class,
+                () -> service.count("three", "{app=\"x\"}", "now-24h", "now", "app", "1h"));
+        assertThrows(LokiOperationException.class,
+                () -> service.count("three", "{app=\"x\"}", "now-24h", "now", "time", "1s"));
+        assertThrows(LokiOperationException.class,
+                () -> service.count("three", "{app=\"x\"}", "now-24h", "now", "time",
+                        "999999999999999999999s"));
+    }
+
+    @Test
+    void oldestOrderUsesForwardQueryAndStartContinuation() {
+        String a = QueryTime.nanos(now.minusSeconds(2));
+        String b = QueryTime.nanos(now.minusSeconds(1));
+        range(new Streams(List.of(new LogStream(Map.of("app", "x"),
+                List.of(entry(a, "first"), entry(b, "second"))))));
+
+        String text = service.logs("one", "{app=\"x\"}", "now-1h", "now", 2, false, "oldest");
+
+        assertTrue(text.contains("oldest 2 lines (more may exist):"), text);
+        assertTrue(text.contains("Newest shown 2026-09-13T11:59:59.123+00:00. "
+                + "Newer: repeat with start=\"2026-09-13T11:59:59.123+00:00\""), text);
+        verify(client).queryRange("one", "{app=\"x\"}", now.minusSeconds(3600), now, 2,
+                LokiHttpClient.Direction.FORWARD, null);
+        assertThrows(LokiOperationException.class,
+                () -> service.logs("one", "{app=\"x\"}", null, null, null, null, "ascending"));
+    }
+
+    @Test
+    void oldestOrderKeepsEarliestLinesWhenResponseBudgetCutsPage() {
+        var entries = new java.util.ArrayList<LogEntry>();
+        for (int i = 0; i < 40; i++) {
+            entries.add(entry(QueryTime.nanos(now.minusSeconds(40 - i)),
+                    "line " + i + " " + "x".repeat(80)));
+        }
+        range(new Streams(List.of(new LogStream(Map.of("app", "x"), entries))));
+
+        String text = service.logs("tight", "{app=\"x\"}", "now-1h", "now", 40, false, "oldest");
+
+        assertTrue(LogText.bytes(text) <= 2048 - LogText.ENVELOPE_BYTES, text);
+        assertTrue(text.contains("line 0 "), text);
+        assertFalse(text.contains("line 39 "), text);
+        assertTrue(text.contains("Output limit reached: showing "), text);
+        assertTrue(text.contains(" oldest of 40 fetched lines. Newest shown "), text);
+        assertTrue(text.contains("Newer: repeat with start=\""), text);
+    }
+
+    @Test
+    void combinedBucketsReportHiddenRowsAndValues() {
+        Instant first = Instant.parse("2026-09-12T18:00:00Z");
+        var series = new java.util.ArrayList<MetricSeries>();
+        for (int value = 0; value < 60; value++) {
+            var samples = new java.util.ArrayList<MetricSample>();
+            for (int bucket = 0; bucket < 5; bucket++) {
+                samples.add(new MetricSample(BigDecimal.valueOf(first.plusSeconds(bucket * 21_600L)
+                        .getEpochSecond()), "1"));
+            }
+            series.add(new MetricSeries(Map.of("app", String.format("app-%02d", value)), samples));
+        }
+        range(new Matrix(series));
+
+        String text = service.count("three", "{app=~\".+\"}", "now-24h", "now", "app,time", "6h");
+
+        assertTrue(text.startsWith("300 lines match"), text);
+        assertTrue(text.contains("top 50 values"), text);
+        assertTrue(text.contains("Output limit reached: showing 200 of 250 rows; +10 more values; "
+                + "total includes hidden counts."), text);
+    }
+
+    @Test
+    void configuredFramePatternFoldsOnlyAdjacentResultLabelsInCompactView() {
+        var frames = new ConnectionDefinition("frames", null, null, URI.create("http://localhost:7"),
+                ConnectionAuth.NONE, null, ZoneOffset.UTC, ConnectionLimits.DEFAULTS,
+                ConnectionDefinition.DEFAULT_SERVICE_LABELS, List.of(), Pattern.compile("^\\s+at\\s+.+$"));
+        var reading = new QueryService(new ConnectionRegistry(List.of(frames)), client, Clock.fixed(now, ZoneOffset.UTC));
+        range(new Streams(List.of(
+                new LogStream(Map.of("app", "a"), List.of(
+                        entry(QueryTime.nanos(now.minusSeconds(4)), "Exception"),
+                        entry(QueryTime.nanos(now.minusSeconds(3)), "\tat first"),
+                        entry(QueryTime.nanos(now.minusSeconds(2)), "\tat second"))),
+                new LogStream(Map.of("app", "b"), List.of(
+                        entry(QueryTime.nanos(now.minusSeconds(1)), "\tat other"))))));
+
+        String compact = reading.logs("frames", "{app=~\".+\"}", "now-1h", "now", 10, false);
+        String raw = reading.logs("frames", "{app=~\".+\"}", "now-1h", "now", 10, true);
+
+        assertTrue(compact.contains("… 2 stack frame lines"), compact);
+        assertFalse(compact.contains("at first"), compact);
+        assertTrue(compact.contains("at other"), compact);
+        assertTrue(compact.endsWith("Shown all 4 matching lines."), compact);
+        assertTrue(raw.contains("at first") && raw.contains("at second"), raw);
+        assertFalse(raw.contains("stack frame lines"), raw);
     }
 
     @Test
