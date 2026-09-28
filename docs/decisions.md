@@ -92,6 +92,10 @@ The user chose to separate Loki-side counts from log-page reading. `CountService
 
 The user chose one eager `LogEvent` → `NormalizedLogEvent` → writer path for both raw and template export. `ExportService` normalizes each line it writes once; its raw writer reads only `source().line()`, preserving the complete line returned by Loki, while a template uses the parsed fields. No lazy parsing or mutable cache is introduced into the internal record. The extra parsing work in large raw exports is an accepted tradeoff for the simpler path; revisit it if representative exports approach the duration limit. `QueryService` also normalizes once before selecting compact or raw rendering. The MCP contract and output text do not change.
 
+## Shared log-page reader (2026-09-29)
+
+`QueryService` and `ExportService` now use one `LogEventReader` to request a bounded Loki page, convert its streams to `LogEvent` and return events in chronological order. The reader preserves the requested direction when trimming an oversized response and the caller's metric-expression error text. `QueryService` still owns one-page lookahead, display and response budgeting; `ExportService` owns forward pagination, boundary duplicates, duration and file limits. The MCP contract and output text do not change.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.

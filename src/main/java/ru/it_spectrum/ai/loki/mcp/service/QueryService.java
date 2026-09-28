@@ -3,7 +3,6 @@ package ru.it_spectrum.ai.loki.mcp.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
-import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
@@ -17,7 +16,6 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -36,7 +34,7 @@ import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.window;
 public class QueryService {
     public static final int DEFAULT_LIMIT = 50;
     private final ConnectionRegistry registry;
-    private final LokiHttpClient client;
+    private final LogEventReader reader;
     private final Clock clock;
 
     @Autowired
@@ -46,7 +44,7 @@ public class QueryService {
 
     public QueryService(ConnectionRegistry registry, LokiHttpClient client, Clock clock) {
         this.registry = registry;
-        this.client = client;
+        this.reader = new LogEventReader(client);
         this.clock = clock;
     }
 
@@ -70,8 +68,10 @@ public class QueryService {
             throw Errors.invalid("limit must be between 1 and " + definition.limits().maxEntries() + " for this connection.");
         }
         boolean canLookAhead = usedLimit < definition.limits().maxEntries();
-        var fetched = fetch(connection, query, range, usedLimit + (canLookAhead ? 1 : 0),
-                oldestFirst ? LokiHttpClient.Direction.FORWARD : LokiHttpClient.Direction.BACKWARD);
+        var fetched = reader.readPage(connection, query, range.start(), range.end(),
+                usedLimit + (canLookAhead ? 1 : 0),
+                oldestFirst ? LokiHttpClient.Direction.FORWARD : LokiHttpClient.Direction.BACKWARD, null,
+                "This is a metric expression; queryLogs reads log lines. Use countLogs to count them.");
         boolean hasMore = fetched.size() > usedLimit;
         var events = hasMore ? new ArrayList<>(oldestFirst
                 ? fetched.subList(0, usedLimit) : fetched.subList(1, fetched.size())) : fetched;
@@ -177,22 +177,5 @@ public class QueryService {
     }
 
     private record PageRow(String text, Instant first, Instant last, int lines) {
-    }
-
-    List<LogEvent> fetch(String connection, String query, QueryTime.Range range, int limit, LokiHttpClient.Direction direction) {
-        var response = client.queryRange(connection, query, range.start(), range.end(), limit, direction, null);
-        if (!(response.data() instanceof LokiResponses.Streams streams)) {
-            throw Errors.invalid("This is a metric expression; queryLogs reads log lines. Use countLogs to count them.");
-        }
-        var events = new ArrayList<LogEvent>();
-        for (var stream : streams.streams()) {
-            for (var entry : stream.entries()) {
-                events.add(new LogEvent(entry.timestampNanos(), stream.labels(), entry.line(), entry.structuredMetadata()));
-            }
-        }
-        events.sort(Comparator.comparingLong(LogEvent::nanos));
-        if (events.size() <= limit) return events;
-        return new ArrayList<>(direction == LokiHttpClient.Direction.BACKWARD
-                ? events.subList(events.size() - limit, events.size()) : events.subList(0, limit));
     }
 }

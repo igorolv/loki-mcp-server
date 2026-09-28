@@ -5,7 +5,6 @@ import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
-import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
@@ -46,7 +45,7 @@ public class ExportService {
     static final String RAW = "raw";
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private final ConnectionRegistry registry;
-    private final LokiHttpClient client;
+    private final LogEventReader reader;
     private final ExportRoots roots;
     private final Clock clock;
     private final LongSupplier nanoTime;
@@ -63,7 +62,7 @@ public class ExportService {
     ExportService(ConnectionRegistry registry, LokiHttpClient client, ExportRoots roots, Clock clock,
                   LongSupplier nanoTime) {
         this.registry = registry;
-        this.client = client;
+        this.reader = new LogEventReader(client);
         this.roots = roots;
         this.clock = clock;
         this.nanoTime = nanoTime;
@@ -224,7 +223,9 @@ public class ExportService {
                     }
                     List<LogEvent> events;
                     try {
-                        events = fetch(cursor, page, timeoutMs);
+                        events = reader.readPage(definition.name(), query, cursor, window.end(), page,
+                                LokiHttpClient.Direction.FORWARD, timeoutMs,
+                                "This is a metric expression; exportLogs writes log lines. Pass a log query.");
                     } catch (LokiOperationException tooLarge) {
                         if (tooLarge.error().code() != ErrorCode.UPSTREAM_RESPONSE_TOO_LARGE || page == 1) throw tooLarge;
                         page = Math.max(1, page / 4);
@@ -317,19 +318,6 @@ public class ExportService {
                 boundaryKeys.clear();
             }
             boundaryKeys.merge(key(event), 1, Integer::sum);
-        }
-
-        private List<LogEvent> fetch(Instant from, int limit, int timeoutMs) {
-            var response = client.queryRange(definition.name(), query, from, window.end(), limit,
-                    LokiHttpClient.Direction.FORWARD, null, timeoutMs);
-            if (!(response.data() instanceof LokiResponses.Streams streams))
-                throw Errors.invalid("This is a metric expression; exportLogs writes log lines. Pass a log query.");
-            var events = new ArrayList<LogEvent>();
-            for (var stream : streams.streams())
-                for (var entry : stream.entries())
-                    events.add(new LogEvent(entry.timestampNanos(), stream.labels(), entry.line(), entry.structuredMetadata()));
-            events.sort(Comparator.comparingLong(LogEvent::nanos)); // Stable: identical timestamps keep upstream order.
-            return events.size() <= limit ? events : new ArrayList<>(events.subList(0, limit));
         }
     }
 }
