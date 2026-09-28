@@ -2,6 +2,7 @@ package ru.it_spectrum.ai.loki.mcp.service;
 
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;

@@ -1,6 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -136,7 +137,7 @@ public final class LogLayout {
             case "service" -> view.service();
             case "logger" -> view.logger();
             // The normalizer names an empty message for display; a file keeps it empty, as it was logged.
-            case "message" -> view.message() != null && view.message().startsWith(EventNormalizer.EMPTY_MESSAGE) ? "" : view.message();
+            case "message" -> view.messageForExport();
             case "traceId" -> view.traceId();
             case "line" -> event.line();
             case "stack" -> view.stackTrace() == null || view.stackTrace().isBlank() ? null : "\n" + view.stackTrace().stripTrailing();

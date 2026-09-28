@@ -1,6 +1,5 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.parser;
 
-import ru.it_spectrum.ai.loki.mcp.connection.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -13,7 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static ru.it_spectrum.ai.loki.mcp.service.EventParseLimits.*;
+import static ru.it_spectrum.ai.loki.mcp.parser.EventParseLimits.*;
 
 /**
  * Picks level, service, logger, message, trace id and stack trace out of labels, structured metadata and a JSON line,
@@ -148,5 +147,8 @@ public final class EventNormalizer {
 
     public record View(Format format, String level, String service, String logger, String message, String traceId,
                        String stackTrace) {
+        public String messageForExport() {
+            return message != null && message.startsWith(EMPTY_MESSAGE) ? "" : message;
+        }
     }
 }

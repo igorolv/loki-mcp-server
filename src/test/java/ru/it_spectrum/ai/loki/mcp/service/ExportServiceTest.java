@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.connection.*;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
 
 import java.io.IOException;
 import java.net.URI;

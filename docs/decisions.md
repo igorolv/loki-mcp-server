@@ -68,6 +68,10 @@ The series path has a one-day default maximum window, separate from the seven-da
 
 The user reversed the original default restriction to exportRoots after an OpenCode request to save files in a directory outside the default root required a second copy step. Without exportRoots in connections.json, exportLogs now accepts an absolute directory selected by the caller; the process's filesystem permissions determine whether it can write there. Omitting directory still uses <data dir>/exports, and a relative directory resolves under that default. Configured exportRoots remain an optional restriction and make their first root the default. Path and permission failures return tool errors; existing files are still never overwritten. The former restriction was chosen on 2026-09-25 so that log text could not steer a model to write elsewhere. It does not provide that boundary in the new default mode, as explicitly chosen by the user.
 
+## Parser package (2026-09-28)
+
+The user chose to move EventNormalizer and its dedicated LineFormat and EventParseLimits types into `ru.it_spectrum.ai.loki.mcp.parser`. The move keeps the current JSON and plain-line behavior and the public text contract. QueryService and ExportService still call the normalizer; LogText and LogLayout remain output renderers in `service`. The next design question is how to configure multiple JSON and plain-text profiles, including explicit, deterministic selection when profiles overlap. No new configuration format has been selected yet.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.

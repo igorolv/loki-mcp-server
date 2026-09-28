@@ -1,4 +1,4 @@
-package ru.it_spectrum.ai.loki.mcp.connection;
+package ru.it_spectrum.ai.loki.mcp.parser;
 
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 

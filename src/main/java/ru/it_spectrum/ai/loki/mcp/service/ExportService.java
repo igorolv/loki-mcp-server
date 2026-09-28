@@ -9,6 +9,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;

@@ -8,6 +8,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

@@ -1,9 +1,9 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.parser;
 
 import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionsLoader;
-import ru.it_spectrum.ai.loki.mcp.connection.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
 
 import java.nio.file.Path;
 import java.util.List;

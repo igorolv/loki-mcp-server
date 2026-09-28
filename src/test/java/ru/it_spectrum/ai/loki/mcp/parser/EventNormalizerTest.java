@@ -1,4 +1,4 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.parser;
 
 import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.JSON;
-import static ru.it_spectrum.ai.loki.mcp.service.EventNormalizer.Format.PLAIN;
+import static ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer.Format.JSON;
+import static ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer.Format.PLAIN;
 
 class EventNormalizerTest {
     private final EventNormalizer normalizer = new EventNormalizer(List.of());

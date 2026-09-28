@@ -149,7 +149,7 @@ Tests:
 - The public contract is text (rules in [docs/queries.md](docs/queries.md)). Output
   schemas, `structuredContent`, stream dictionaries, cursors and field projections do not
   come back without a new decision from the user. Internal models stay records.
-- `EventNormalizer` produces the line view (level, service, message, trace id, stack trace)
+- `parser/EventNormalizer` produces the line view (level, service, message, trace id, stack trace)
   from labels, structured metadata and the JSON line, or a plain line split by the
   connection's `formatFile`. It reads scalar fields for inline export templates. Labels are never
   overridden by the line, and no line layout lives in the code.

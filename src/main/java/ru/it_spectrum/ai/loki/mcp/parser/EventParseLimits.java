@@ -1,4 +1,4 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.parser;
 
 /**
  * Bounds for parsing fields from one log line.

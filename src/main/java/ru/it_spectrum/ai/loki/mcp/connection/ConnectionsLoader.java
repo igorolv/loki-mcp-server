@@ -1,5 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
+import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
