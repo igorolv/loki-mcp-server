@@ -299,7 +299,7 @@ public class ExportService {
         }
 
         private void write(ExportFile file, LogEvent event) throws IOException {
-            String text = writer.template == null ? event.line() : writer.template.render(event,
+            String text = writer.template == null ? event.line() : writer.template.render(
                     normalizer.normalize(event, definition.serviceLabels()), definition.timezone());
             byte[] data = (text + "\n").getBytes(StandardCharsets.UTF_8);
             file.output().write(data);

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
-import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -22,7 +22,7 @@ class LogTextTest {
     }
 
     private String line(LogEvent event, boolean raw) {
-        return LogText.line(event, normalizer.normalize(event, ConnectionDefinition.DEFAULT_SERVICE_LABELS), zone, raw);
+        return LogText.line(normalizer.normalize(event, ConnectionDefinition.DEFAULT_SERVICE_LABELS), zone, raw);
     }
 
     @Test
@@ -31,20 +31,21 @@ class LogTextTest {
         assertEquals("10:12:03.123 ERROR backend  Connection refused [trace=4f2a1b3c4d5e6f70…]", line(event, false));
         assertEquals("10:12:03.123 {app=\"backend\", level=\"error\"}  " + event.line(), line(event, true));
         var plain = new LogEvent(event.timestampNanos(), Map.of(), "just text", Map.of());
-        assertEquals("10:12:03.123 -     -  just text", LogText.line(plain,
-                normalizer.normalize(plain, List.of("app")), zone, false));
+        assertEquals("10:12:03.123 -     -  just text",
+                LogText.line(normalizer.normalize(plain, List.of("app")), zone, false));
     }
 
     @Test
     void displayNamesAnEmptyParsedMessageWithoutChangingItsValue() {
-        var parsed = new NormalizedLogLine(NormalizedLogLine.Format.PLAIN, "ERROR", "backend", "a.Logger",
+        var source = event("unused");
+        var parsed = new NormalizedLogEvent(source, NormalizedLogEvent.Format.PLAIN, "ERROR", "backend", "a.Logger",
                 "", null, null, Map.of("message", ""));
         assertEquals("", parsed.message());
         assertEquals("10:12:03.123 ERROR backend  (empty message, logger a.Logger)",
-                LogText.line(event("unused"), parsed, zone, false));
-        var literal = new NormalizedLogLine(NormalizedLogLine.Format.JSON, "INFO", "backend", null,
+                LogText.line(parsed, zone, false));
+        var literal = new NormalizedLogEvent(source, NormalizedLogEvent.Format.JSON, "INFO", "backend", null,
                 "(empty message is literal text", null, null, Map.of());
-        assertTrue(LogText.line(event("unused"), literal, zone, false).endsWith("(empty message is literal text"));
+        assertTrue(LogText.line(literal, zone, false).endsWith("(empty message is literal text"));
     }
 
     @Test
@@ -76,8 +77,9 @@ class LogTextTest {
 
     @Test
     void foldedFramesKeepTheCompactLinePrefix() {
+        var source = event("unused");
         assertEquals("10:12:03.123 -     backend  … 3 stack frame lines",
-                LogText.frameSummary(event("unused"), "backend", 3, zone));
+                LogText.frameSummary(normalizer.normalize(source, ConnectionDefinition.DEFAULT_SERVICE_LABELS), 3, zone));
     }
 
     @Test

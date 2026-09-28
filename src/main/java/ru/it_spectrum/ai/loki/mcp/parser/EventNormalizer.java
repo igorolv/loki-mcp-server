@@ -1,7 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.parser;
 
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
-import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent.Format;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -66,7 +66,7 @@ public final class EventNormalizer {
         return null;
     }
 
-    public NormalizedLogLine normalize(LogEvent event, List<String> serviceLabels) {
+    public NormalizedLogEvent normalize(LogEvent event, List<String> serviceLabels) {
         var values = new LinkedHashMap<String, String>();
         Format format = parse(event.line(), values);
         JsonFormat jsonFormat = format == Format.JSON ? jsonFormat(values) : null;
@@ -109,7 +109,7 @@ public final class EventNormalizer {
             else if (found != null)
                 message = "";
         }
-        return new NormalizedLogLine(format, level == null ? null : level.toUpperCase(Locale.ROOT), service,
+        return new NormalizedLogEvent(event, format, level == null ? null : level.toUpperCase(Locale.ROOT), service,
                 logger, message, trace, stack, values);
     }
 

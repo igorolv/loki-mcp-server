@@ -16,7 +16,7 @@ class JsonFormatTest {
             ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json")),
             ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")));
 
-    private NormalizedLogLine view(Map<String, String> labels, String line) {
+    private NormalizedLogEvent view(Map<String, String> labels, String line) {
         return normalizer.normalize(new LogEvent("1", labels, line, Map.of()), List.of("app"));
     }
 
@@ -59,10 +59,10 @@ class JsonFormatTest {
         var unknown = view(Map.of(), "{\"format\":\"other\",\"message\":\"generic line\",\"level\":\"warn\"}");
         assertEquals("WARN", unknown.level());
         assertEquals("generic line", unknown.message());
-        assertEquals(NormalizedLogLine.Format.JSON, unknown.format());
+        assertEquals(NormalizedLogEvent.Format.JSON, unknown.format());
 
         var plain = view(Map.of(), "2026-09-28T00:00:00Z  INFO 1 --- [main] a.Plain : plain line");
-        assertEquals(NormalizedLogLine.Format.PLAIN, plain.format());
+        assertEquals(NormalizedLogEvent.Format.PLAIN, plain.format());
         assertEquals("plain line", plain.message());
     }
 

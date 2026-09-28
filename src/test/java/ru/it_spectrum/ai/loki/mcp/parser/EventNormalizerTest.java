@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format.JSON;
-import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format.PLAIN;
+import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent.Format.JSON;
+import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent.Format.PLAIN;
 
 class EventNormalizerTest {
     private final EventNormalizer normalizer = new EventNormalizer(List.of());
@@ -28,8 +28,18 @@ class EventNormalizerTest {
         assertEquals("ERROR", normalizer.normalize(error, List.of("app")).level());
     }
 
-    private NormalizedLogLine view(Map<String, String> labels, String line) {
+    private NormalizedLogEvent view(Map<String, String> labels, String line) {
         return normalizer.normalize(event(labels, line, Map.of()), ConnectionDefinition.DEFAULT_SERVICE_LABELS);
+    }
+
+    @Test
+    void normalizedEventRetainsItsSource() {
+        var source = event(Map.of("app", "backend"), "{\"message\":\"ready\"}", Map.of("traceId", "trace-1"));
+        var normalized = normalizer.normalize(source, List.of("app"));
+
+        assertSame(source, normalized.source());
+        assertEquals("ready", normalized.message());
+        assertEquals("trace-1", normalized.traceId());
     }
 
     @Test

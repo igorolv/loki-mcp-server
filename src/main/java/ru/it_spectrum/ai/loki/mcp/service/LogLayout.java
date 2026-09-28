@@ -3,7 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.service;
 import ru.it_spectrum.ai.loki.mcp.error.Errors;
 import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
-import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 /**
  * A line template of exportLogs: text with {@code {name}} placeholders, the reverse of a line format. {@code time},
  * {@code level}, {@code service}, {@code logger}, {@code message}, {@code traceId} and {@code line} (the returned line)
- * come from the normalized line; {@code stack} is a newline and the full stack trace, or nothing. Any other name is a
+ * come from the normalized event; {@code stack} is a newline and the full stack trace, or nothing. Any other name is a
  * field of the line (a dotted JSON path or a group of a line format), then a stream label, then structured metadata.
  * {@code {a|b}} takes the first name that has a value; {@code {level:5}} pads on the left to 5 characters,
  * {@code {logger:-40}} on the right; {@code {time:HH:mm:ss.SSS}} takes a date-time pattern. {@code {{} and {@code }}}
@@ -100,9 +100,10 @@ public final class LogLayout {
     /**
      * One event as text, without the trailing newline.
      */
-    public String render(LogEvent event, NormalizedLogLine view, ZoneId zone) {
-        Map<String, String> fields = view.fields();
-        boolean plain = view.format() == NormalizedLogLine.Format.PLAIN && !wrapsLine;
+    public String render(NormalizedLogEvent normalized, ZoneId zone) {
+        LogEvent event = normalized.source();
+        Map<String, String> fields = normalized.fields();
+        boolean plain = normalized.format() == NormalizedLogEvent.Format.PLAIN && !wrapsLine;
         if (plain && !fields.containsKey("message")) return event.line();
         var text = new StringBuilder();
         for (var part : parts) {
@@ -112,7 +113,7 @@ public final class LogLayout {
             }
             String value = "";
             for (String name : part.names) {
-                String found = value(name, part, event, view, fields, zone);
+                String found = value(name, part, normalized, fields, zone);
                 if (found != null && !found.isEmpty()) {
                     value = found;
                     break;
@@ -123,17 +124,18 @@ public final class LogLayout {
         return text.toString();
     }
 
-    private static String value(String name, Part part, LogEvent event, NormalizedLogLine view,
+    private static String value(String name, Part part, NormalizedLogEvent normalized,
                                 Map<String, String> fields, ZoneId zone) {
+        LogEvent event = normalized.source();
         return switch (name) {
             case "time" -> (part.time == null ? DEFAULT_TIME : part.time).format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone));
-            case "level" -> view.level();
-            case "service" -> view.service();
-            case "logger" -> view.logger();
-            case "message" -> view.message();
-            case "traceId" -> view.traceId();
+            case "level" -> normalized.level();
+            case "service" -> normalized.service();
+            case "logger" -> normalized.logger();
+            case "message" -> normalized.message();
+            case "traceId" -> normalized.traceId();
             case "line" -> event.line();
-            case "stack" -> view.stackTrace() == null || view.stackTrace().isBlank() ? null : "\n" + view.stackTrace().stripTrailing();
+            case "stack" -> normalized.stackTrace() == null || normalized.stackTrace().isBlank() ? null : "\n" + normalized.stackTrace().stripTrailing();
             default -> {
                 String found = fields.get(name);
                 if (found == null) found = event.labels().get(name);

@@ -76,13 +76,17 @@ The user chose to move EventNormalizer and its dedicated LineFormat and EventPar
 
 After inspecting asva2 and asva2-configs, the user chose to try recognizing JSON formats from the Loki event itself. Spring Boot console ECS JSON is configured separately from the file line pattern, and the Docker Promtail pipeline collects console output. Runtime profiles, Config Server, environment overrides and custom appenders make a path to a Spring Boot configuration file insufficient to identify the actual Loki line. The optional formatFile now holds ordered jsonFormats alongside the existing plain formats. A JSON profile selects by required scalar paths and exact field values, then supplies preferred field paths; the first match wins. When none matches, the existing generic JSON extraction applies. Loki labels and structured metadata retain their precedence. The example file covers Spring Boot ECS, GELF and Logstash. Per-event selection allows these formats and plain lines to coexist in one result. The profiles only alter local rendering, not queries or interpretation.
 
-## Normalized line model (2026-09-28)
+## Normalized line model (2026-09-28, superseded 2026-09-29)
 
-The normalizer's result is a top-level `NormalizedLogLine` record in the parser package. It was formerly the nested `EventNormalizer.View`, although query and export rendering both consume it. `EventNormalizer.normalize` produces the normalized fields and the parsed scalar field map once; `LogLayout` uses that map without parsing the line again. An empty parsed message remains empty in the record; `LogText` adds the compact view's explanatory phrase. `LogEvent` remains the raw Loki entry with timestamp, labels, structured metadata and original line. This is an internal model change with no text contract change.
+The normalizer's result was a top-level `NormalizedLogLine` record in the parser package. It was formerly the nested `EventNormalizer.View`, although query and export rendering both consumed it. `EventNormalizer.normalize` produced the normalized fields and the parsed scalar field map once; `LogLayout` used that map without parsing the line again. An empty parsed message remained empty in the record; `LogText` added the compact view's explanatory phrase. `LogEvent` remained the raw Loki entry with timestamp, labels, structured metadata and original line. This was an internal model change with no text contract change.
 
 ## Internal service boundaries (2026-09-29)
 
 The user chose to separate Loki-side counts from log-page reading. `CountService` renders totals and grouped time buckets; `QueryService` renders log pages, and both use the same log-query validation. `QueryTools` still exposes the same `queryLogs` and `countLogs` calls. Shared response assembly, windows and byte budgets now live in `ResponseText`; `LogText` remains responsible for compact log-line rendering. Controlled error types live in `error`, so the parser, connection and client packages no longer depend on `service`. A folded stack-frame summary is rendered directly rather than represented as a synthetic `NormalizedLogLine`. The format selector within `EventNormalizer` is package-private. These are internal boundaries; the MCP tools and their text output are unchanged.
+
+## Normalized event owns its source (2026-09-29)
+
+`EventNormalizer.normalize` now returns a `NormalizedLogEvent` containing a reference to the source `LogEvent` and the parsed fields. Query and export renderers accept this single object, so a renderer call cannot accidentally pair normalized fields with a separate raw line, timestamp, labels or structured metadata. Raw export still writes `LogEvent.line` without normalization. This replaces `NormalizedLogLine` and changes no MCP tool arguments or text output.
 
 ## Open items
 

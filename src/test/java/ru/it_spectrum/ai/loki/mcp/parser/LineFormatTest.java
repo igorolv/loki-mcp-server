@@ -32,7 +32,7 @@ class LineFormatTest {
     @Test
     void theFormatSplitsLevelLoggerThreadAndMessage() {
         var view = normalizer.normalize(event(BOOT3), List.of("instance"));
-        assertEquals(NormalizedLogLine.Format.PLAIN, view.format());
+        assertEquals(NormalizedLogEvent.Format.PLAIN, view.format());
         assertEquals("WARN", view.level());
         assertEquals("ConfigServletWebServerApplicationContext", view.logger());
         assertEquals("Exception encountered during context initialization - cancelling refresh attempt", view.message());

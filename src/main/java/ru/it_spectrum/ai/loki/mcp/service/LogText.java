@@ -1,7 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
-import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -28,28 +28,32 @@ public final class LogText {
      * One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines.
      * Raw preview: {@code HH:mm:ss.SSS {stream labels}  returned line}, shortened at {@link #RAW_CHARS} code points.
      */
-    public static String line(LogEvent event, NormalizedLogLine view, ZoneId zone, boolean raw) {
-        var text = new StringBuilder(TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone)));
+    public static String line(NormalizedLogEvent normalized, ZoneId zone, boolean raw) {
+        LogEvent source = normalized.source();
+        var text = new StringBuilder(TIME.format(QueryTime.fromNanos(source.timestampNanos()).atZone(zone)));
         if (raw)
-            return text.append(' ').append(labels(event.labels())).append("  ").append(truncate(event.line(), RAW_CHARS)).toString();
-        text.append(' ').append(String.format("%-5s", view.level() == null ? "-" : view.level()));
-        text.append(' ').append(view.service() == null ? "-" : view.service()).append("  ");
-        String message = view.message();
-        if (message.isEmpty() && view.format() == NormalizedLogLine.Format.PLAIN
-                && view.fields().containsKey("message")) {
-            message = view.logger() == null ? "(empty message)" : "(empty message, logger " + view.logger() + ")";
+            return text.append(' ').append(labels(source.labels())).append("  ")
+                    .append(truncate(source.line(), RAW_CHARS)).toString();
+        text.append(' ').append(String.format("%-5s", normalized.level() == null ? "-" : normalized.level()));
+        text.append(' ').append(normalized.service() == null ? "-" : normalized.service()).append("  ");
+        String message = normalized.message();
+        if (message.isEmpty() && normalized.format() == NormalizedLogEvent.Format.PLAIN
+                && normalized.fields().containsKey("message")) {
+            message = normalized.logger() == null ? "(empty message)"
+                    : "(empty message, logger " + normalized.logger() + ")";
         }
         text.append(truncate(message.replace('\n', ' ').replace("\r", ""), MESSAGE_CHARS));
-        if (view.traceId() != null) text.append(" [trace=").append(truncate(view.traceId(), 16)).append(']');
-        if (view.stackTrace() != null && !view.stackTrace().isBlank()) {
-            for (String frame : compactStackTrace(view.stackTrace())) text.append("\n    ").append(frame);
+        if (normalized.traceId() != null) text.append(" [trace=").append(truncate(normalized.traceId(), 16)).append(']');
+        if (normalized.stackTrace() != null && !normalized.stackTrace().isBlank()) {
+            for (String frame : compactStackTrace(normalized.stackTrace())) text.append("\n    ").append(frame);
         }
         return text.toString();
     }
 
-    public static String frameSummary(LogEvent event, String service, int count, ZoneId zone) {
-        return TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone))
-                + " " + String.format("%-5s", "-") + " " + (service == null ? "-" : service)
+    public static String frameSummary(NormalizedLogEvent normalized, int count, ZoneId zone) {
+        return TIME.format(QueryTime.fromNanos(normalized.source().timestampNanos()).atZone(zone))
+                + " " + String.format("%-5s", "-") + " "
+                + (normalized.service() == null ? "-" : normalized.service())
                 + "  … " + count + " stack frame lines";
     }
 
