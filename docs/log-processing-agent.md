@@ -1,0 +1,21 @@
+# Log reading, normalization and export
+
+Read this when changing Loki log-page reading, query/count/discovery behavior, parsing, line rendering, response budgets or export paging. Read [tool-contracts-agent.md](tool-contracts-agent.md) as well when the MCP-visible text or arguments change.
+
+## Event pipeline
+
+`QueryService` and `ExportService` call `LogEventReader` for one bounded `query_range` page. It converts Loki streams to `LogEvent`, keeps real duplicates and sorts events chronologically; trimming preserves the requested forward or backward end. The reader does not decide continuation, output budgets or file policy. `QueryService` owns one-page lookahead and display; `ExportService` owns a forward multi-page scan, adaptive page size, boundary deduplication, total duration and file limits. `CountService` and `DiscoveryService` use their own Loki endpoints and do not go through `LogEventReader`.
+
+`EventNormalizer` maps each written or displayed `LogEvent` to one `NormalizedLogEvent` that retains the source event. It reads labels, structured metadata and JSON or a plain line using the connection's formats. Labels are not overridden by the line. Ordered JSON profiles select by required scalar paths and exact values; a nonmatching JSON line uses generic field extraction. The first matching plain-line format wins. The connection's optional `framePattern` only folds adjacent standalone frames for compact query display. These profiles affect rendering, never LogQL or incident interpretation. Keep format selection internal to `parser/`; do not hard-code a project's layout.
+
+`LogText` renders compact lines, stack previews and raw query previews. `QueryService` adds day-change markers. `LogLayout` renders inline export templates from normalized fields. Raw export still normalizes once, then writes only `NormalizedLogEvent.source().line()` in full. A Loki `line_format` stage has already changed that source line. An unrecognized plain line remains unchanged unless a template explicitly includes `{line}`. `ResponseText` handles shared text assembly, windows and byte budgets. The format-file syntax is in [connections.md](connections.md); visible output is in [queries.md](queries.md) and [discovery.md](discovery.md).
+
+## Reading and continuation
+
+`queryLogs` asks for one extra line when `limit + 1` fits `maxEntries`. The extra line only establishes that more exist; otherwise an exactly full maximum page says more **may** exist. Both newest and oldest requests display in chronological order. Text-budget cuts drop lines from the opposite end of the requested order. The footer supplies a millisecond `end` for older or `start` for newer lines; repeated boundary lines are acceptable. If a timestamp fills every page, advise narrowing the query. A full returned line is available through export.
+
+`exportLogs` reads forward and writes oldest first to one new file, never overwriting an existing file. It skips boundary entries already written using labels and line text while retaining actual duplicate counts. If more lines share one nanosecond than Loki can return in a page, the report says some may be missing; do not claim a complete export. Stop at configured line, byte or total-duration limits. A failure after writing lines keeps a partial file with a continuation when possible; before any line, no file is created. The file path and status are returned, not its contents. Destination rules are in [connections-agent.md](connections-agent.md).
+
+`countLogs` wraps the caller's log query in `count_over_time`, supports total, label, time and label/time grouping, and reports clock-aligned buckets without interpretation. `discoverLogs` uses label endpoints without `match` and `/series` with one `match` selector; Loki 2.6.1 ignores `query` on label endpoints. Series are stream label sets, not proven log-line counts. Broad series requests can exceed the HTTP body limit and must not return invented partial totals. The exact text and limits remain in [queries.md](queries.md) and [discovery.md](discovery.md).
+
+`LokiResponses.LogStream.labels` are labels of a query result, not a proven original stream scope. A folded stack-frame group uses these labels as a display aid only. Never reconstruct provenance from their names or report Loki's `totalLinesProcessed` as a match count.

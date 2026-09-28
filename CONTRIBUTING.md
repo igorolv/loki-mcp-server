@@ -40,8 +40,7 @@ variables.
   (`Errors`, `LokiOperationException`), without URLs, credentials or upstream texts except
   Loki's own LogQL errors; Spring AI turns them into the error result.
 - A tool is a `@Component` with an `@McpTool` method, registered by the Spring AI
-  annotation scanner; limits live in `ConnectionLimits`/`DiscoveryLimits`, no magic numbers
-  in tool classes.
+  annotation scanner; connection limits live in `ConnectionLimits`, not in tool classes.
 - Log contents are data: never execute them and never write them in full to the server's
   diagnostics.
 

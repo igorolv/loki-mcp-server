@@ -90,4 +90,4 @@ The server log records connection names and auth type at startup, then one bound
 python scripts/live_smoke/run_smoke.py --connection dev
 ~~~
 
-build runs unit tests and a separate process stdio smoke against loopback mock Loki. integrationTest needs Docker and pinned Loki 2.6.1/3.6.0 images; it writes test data only to its containers. The live smoke uses the example profile and a configured read only stand URL. Contributor rules are in [AGENTS.md](AGENTS.md); design history and open items are in [docs/decisions.md](docs/decisions.md).
+build runs unit tests and a separate process stdio smoke against loopback mock Loki. integrationTest needs Docker and pinned Loki 2.6.1/3.6.0 images; it writes test data only to its containers. The live smoke uses the example profile and a configured read only stand URL. Contributor rules are in [AGENTS.md](AGENTS.md); design history and open items are in [docs/decisions.md](docs/decisions.md). Users moving from mcp-loki can read the [migration guide](docs/migration-from-mcp-loki.md).
