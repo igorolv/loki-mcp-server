@@ -12,6 +12,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
 import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -127,10 +128,10 @@ public class ExportService {
         return fit(header, lines, dropped -> footer.toString(), definition.limits().maxResponseBytes() - ENVELOPE_BYTES);
     }
 
-    /**
-     * {@code template} is null for raw lines.
-     */
     private record LineWriter(String name, LogLayout template) {
+        String render(NormalizedLogEvent event, ZoneId zone) {
+            return template == null ? event.source().line() : template.render(event, zone);
+        }
     }
 
     /**
@@ -299,8 +300,8 @@ public class ExportService {
         }
 
         private void write(ExportFile file, LogEvent event) throws IOException {
-            String text = writer.template == null ? event.line() : writer.template.render(
-                    normalizer.normalize(event, definition.serviceLabels()), definition.timezone());
+            var normalized = normalizer.normalize(event, definition.serviceLabels());
+            String text = writer.render(normalized, definition.timezone());
             byte[] data = (text + "\n").getBytes(StandardCharsets.UTF_8);
             file.output().write(data);
             if (lines == 0) first = event.nanos();

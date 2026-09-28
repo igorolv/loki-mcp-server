@@ -111,13 +111,10 @@ public class QueryService {
                     end++;
                 }
             }
-            String rendered;
-            if (end - i > 1) {
-                var normalized = normalizer.normalize(event, definition.serviceLabels());
-                rendered = frameSummary(normalized, end - i, definition.timezone());
-            } else {
-                rendered = line(normalizer.normalize(event, definition.serviceLabels()), definition.timezone(), raw);
-            }
+            var normalized = normalizer.normalize(event, definition.serviceLabels());
+            String rendered = end - i > 1
+                    ? frameSummary(normalized, end - i, definition.timezone())
+                    : line(normalized, definition.timezone(), raw);
             Instant last = QueryTime.fromNanos(events.get(end - 1).timestampNanos());
             rows.add(new PageRow(rendered, first, last, end - i));
             i = end;

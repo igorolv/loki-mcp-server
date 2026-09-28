@@ -86,7 +86,11 @@ The user chose to separate Loki-side counts from log-page reading. `CountService
 
 ## Normalized event owns its source (2026-09-29)
 
-`EventNormalizer.normalize` now returns a `NormalizedLogEvent` containing a reference to the source `LogEvent` and the parsed fields. Query and export renderers accept this single object, so a renderer call cannot accidentally pair normalized fields with a separate raw line, timestamp, labels or structured metadata. Raw export still writes `LogEvent.line` without normalization. This replaces `NormalizedLogLine` and changes no MCP tool arguments or text output.
+`EventNormalizer.normalize` now returns a `NormalizedLogEvent` containing a reference to the source `LogEvent` and the parsed fields. Query and export renderers accept this single object, so a renderer call cannot accidentally pair normalized fields with a separate raw line, timestamp, labels or structured metadata. At this stage, raw export still wrote `LogEvent.line` without normalization. This replaced `NormalizedLogLine` and changed no MCP tool arguments or text output.
+
+## Unified export normalization (2026-09-29)
+
+The user chose one eager `LogEvent` → `NormalizedLogEvent` → writer path for both raw and template export. `ExportService` normalizes each line it writes once; its raw writer reads only `source().line()`, preserving the complete line returned by Loki, while a template uses the parsed fields. No lazy parsing or mutable cache is introduced into the internal record. The extra parsing work in large raw exports is an accepted tradeoff for the simpler path; revisit it if representative exports approach the duration limit. `QueryService` also normalizes once before selecting compact or raw rendering. The MCP contract and output text do not change.
 
 ## Open items
 

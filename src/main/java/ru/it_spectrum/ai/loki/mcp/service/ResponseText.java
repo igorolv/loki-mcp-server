@@ -9,8 +9,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 import java.util.function.Function;
 
 /**
@@ -21,7 +19,7 @@ public final class ResponseText {
      * Reserved for the JSON-RPC envelope, escaping and the request id around the text payload.
      */
     public static final int ENVELOPE_BYTES = 512;
-    public static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private ResponseText() {
     }
@@ -30,12 +28,6 @@ public final class ResponseText {
         if (text.codePointCount(0, text.length()) <= maxChars) return text;
         int end = text.offsetByCodePoints(0, maxChars);
         return text.substring(0, end) + "…";
-    }
-
-    public static String labels(Map<String, String> labels) {
-        var parts = new ArrayList<String>();
-        for (var label : new TreeMap<>(labels).entrySet()) parts.add(label.getKey() + "=\"" + label.getValue() + "\"");
-        return "{" + String.join(", ", parts) + "}";
     }
 
     public static String window(QueryTime.Range range, ZoneId zone) {

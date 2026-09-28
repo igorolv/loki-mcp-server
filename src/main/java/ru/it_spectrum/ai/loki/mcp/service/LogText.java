@@ -3,13 +3,13 @@ package ru.it_spectrum.ai.loki.mcp.service;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogEvent;
 
-import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
-import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.labels;
 import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.truncate;
 
 /**
@@ -22,6 +22,12 @@ public final class LogText {
     public static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private LogText() {
+    }
+
+    private static String labels(Map<String, String> labels) {
+        var parts = new ArrayList<String>();
+        for (var label : new TreeMap<>(labels).entrySet()) parts.add(label.getKey() + "=\"" + label.getValue() + "\"");
+        return "{" + String.join(", ", parts) + "}";
     }
 
     /**
@@ -80,21 +86,6 @@ public final class LogText {
             } else skipped++;
         }
         if (skipped > 0) result.add("... (" + skipped + " frames skipped)");
-        return result;
-    }
-
-    /**
-     * Inserts a date marker where consecutive chronological events cross midnight.
-     */
-    public static List<String> withDateMarkers(List<LogEvent> events, List<String> lines, ZoneId zone) {
-        var result = new ArrayList<String>(lines.size());
-        LocalDate previous = null;
-        for (int i = 0; i < lines.size(); i++) {
-            LocalDate day = QueryTime.fromNanos(events.get(i).timestampNanos()).atZone(zone).toLocalDate();
-            if (previous != null && !day.equals(previous)) result.add("--- " + day + " ---");
-            previous = day;
-            result.add(lines.get(i));
-        }
         return result;
     }
 }

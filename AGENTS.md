@@ -154,10 +154,13 @@ Tests:
   structured metadata and the JSON line, optionally using a matching JSON profile,
   or a plain line split by the connection's `formatFile`. The result includes scalar fields for inline export templates. Labels are never
   overridden by the line, and no line layout lives in the code.
-- `LogText` formats compact lines, stack trace previews and day-change markers;
-  `ResponseText` owns shared text assembly, windows and byte budgets. Controlled errors live in `error`.
+- `LogText` formats compact lines, stack trace previews and raw-preview labels; `QueryService`
+  inserts page day-change markers. `ResponseText` owns shared text assembly, windows and byte budgets.
+  Controlled errors live in `error`.
   `raw=true` is a 4000-code-point preview of the returned line and may cut JSON; complete lines go
   to `exportLogs`.
+- `exportLogs` normalizes each written event once for both raw and template output. Raw output
+  takes the complete original line from `NormalizedLogEvent.source()`; templates use parsed fields.
 - Limits and timeouts live in `ConnectionLimits`; tools contain no magic numbers.
   `client/LokiResponses.LogStream.labels` are the labels of the query result, not a proven
   original stream scope.

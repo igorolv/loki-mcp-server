@@ -115,6 +115,18 @@ class ExportServiceTest {
     }
 
     @Test
+    void rawExportPreservesJsonAndMalformedLinesAfterNormalization() throws IOException {
+        String json = "{\"message\":\"Ошибка 🐈\",\"log\":{\"level\":\"ERROR\"}}";
+        String malformed = "{\"message\":\"unfinished";
+        loki(Map.of(BACKEND, List.of(entry(ns(1, 0), json), entry(ns(2, 0), malformed))));
+
+        service(100, 1000, ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json")))
+                .export("dev", "{app=\"backend\"}", null, null, "raw", null);
+
+        assertEquals(List.of(json, malformed), read(root.resolve("dev_20260924-140000_20260924-150000.log")));
+    }
+
+    @Test
     void inlineTemplateRewritesJsonAndPlainLinesInFull() throws IOException {
         var formats = ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json"));
         String stack = "java.lang.IllegalStateException: boom\\n\\tat a.B.c(B.java:1)\\n\\tat a.B.d(B.java:2)";

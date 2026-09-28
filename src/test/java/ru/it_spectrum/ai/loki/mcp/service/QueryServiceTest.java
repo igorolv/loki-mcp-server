@@ -167,6 +167,20 @@ class QueryServiceTest {
     }
 
     @Test
+    void pageMarksAChangeOfLocalDay() {
+        range(new Streams(List.of(new LogStream(Map.of("app", "backend"), List.of(
+                entry(QueryTime.nanos(Instant.parse("2026-09-12T20:59:59Z")), "before midnight"),
+                entry(QueryTime.nanos(Instant.parse("2026-09-12T21:00:01Z")), "after midnight"))))));
+
+        String text = service.logs("three", "{app=\"backend\"}", "now-24h", "now", 10, false);
+
+        int before = text.indexOf("before midnight");
+        int marker = text.indexOf("--- 2026-09-13 ---");
+        int after = text.indexOf("after midnight");
+        assertTrue(before >= 0 && before < marker && marker < after, text);
+    }
+
+    @Test
     void rawPrintsOriginalLinesAndBudgetDropsOldestLines() {
         String json = "{\"message\":\"m\",\"extra\":\"" + "x".repeat(600) + "\"}";
         range(new Streams(List.of(new LogStream(Map.of("app", "x"), List.of(entry(QueryTime.nanos(now), json))))));

@@ -81,12 +81,4 @@ class LogTextTest {
         assertEquals("10:12:03.123 -     backend  … 3 stack frame lines",
                 LogText.frameSummary(normalizer.normalize(source, ConnectionDefinition.DEFAULT_SERVICE_LABELS), 3, zone));
     }
-
-    @Test
-    void dateMarkersAppearOnlyWhenTheDayChanges() {
-        var a = new LogEvent(QueryTime.nanos(Instant.parse("2026-09-13T20:59:59Z")), Map.of(), "a", Map.of());
-        var b = new LogEvent(QueryTime.nanos(Instant.parse("2026-09-13T21:00:01Z")), Map.of(), "b", Map.of());
-        assertEquals(List.of("A", "--- 2026-09-14 ---", "B"), LogText.withDateMarkers(List.of(a, b), List.of("A", "B"), zone));
-        assertEquals(List.of("A", "B"), LogText.withDateMarkers(List.of(a, a), List.of("A", "B"), zone));
-    }
 }
