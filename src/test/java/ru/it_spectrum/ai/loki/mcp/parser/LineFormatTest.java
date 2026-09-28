@@ -31,38 +31,40 @@ class LineFormatTest {
 
     @Test
     void theFormatSplitsLevelLoggerThreadAndMessage() {
-        var view = normalizer.view(event(BOOT3), List.of("instance"));
-        assertEquals(EventNormalizer.Format.PLAIN, view.format());
+        var view = normalizer.normalize(event(BOOT3), List.of("instance"));
+        assertEquals(NormalizedLogLine.Format.PLAIN, view.format());
         assertEquals("WARN", view.level());
         assertEquals("ConfigServletWebServerApplicationContext", view.logger());
         assertEquals("Exception encountered during context initialization - cancelling refresh attempt", view.message());
+        assertEquals("main", view.fields().get("thread"));
         assertEquals("app-main", view.service());
-        var boot34 = normalizer.view(event(BOOT34), List.of("instance"));
+        var boot34 = normalizer.normalize(event(BOOT34), List.of("instance"));
         assertEquals("o.s.c.c.s.e.NativeEnvironmentRepository", boot34.logger());
         assertTrue(boot34.message().startsWith("Adding property source: "), boot34.message());
-        var boot2 = normalizer.view(event(BOOT2), List.of("instance"));
+        var boot2 = normalizer.normalize(event(BOOT2), List.of("instance"));
         assertEquals("ERROR", boot2.level());
         assertEquals("Order 17 failed", boot2.message());
         // The application name serves as the service when no label names one.
-        assertEquals("config-server", normalizer.view(new LogEvent("1", Map.of(), BOOT34, Map.of()), List.of("instance")).service());
+        assertEquals("config-server", normalizer.normalize(new LogEvent("1", Map.of(), BOOT34, Map.of()),
+                List.of("instance")).service());
         // Without formats the line is the message, as before.
-        assertEquals(BOOT3, new EventNormalizer(List.of()).view(event(BOOT3), List.of("instance")).message());
+        assertEquals(BOOT3, new EventNormalizer(List.of()).normalize(event(BOOT3), List.of("instance")).message());
     }
 
     @Test
     void aStackTraceStaysAfterTheMessageAndOtherLinesKeepTheirRest() {
-        var view = normalizer.view(event("2026-09-24T15:26:09.765+03:00 ERROR 1 --- [           main] o.s.boot.SpringApplication               : "
+        var view = normalizer.normalize(event("2026-09-24T15:26:09.765+03:00 ERROR 1 --- [           main] o.s.boot.SpringApplication               : "
                 + "Application run failed\norg.springframework.beans.factory.BeanCreationException: Error creating bean\n\tat o.s.A.b(A.java:1)"), List.of("instance"));
         assertEquals("Application run failed", view.message());
         assertTrue(view.stackTrace().startsWith("org.springframework.beans.factory.BeanCreationException"), view.stackTrace());
-        var report = normalizer.view(event("2026-09-24T15:26:09.736+03:00  INFO 1 --- [           main] .s.b.a.l.ConditionEvaluationReportLogger : "
+        var report = normalizer.normalize(event("2026-09-24T15:26:09.736+03:00  INFO 1 --- [           main] .s.b.a.l.ConditionEvaluationReportLogger : "
                 + "\n\nError starting ApplicationContext."), List.of("instance"));
         // An empty message on the first line: the report below it is the message.
         assertEquals("Error starting ApplicationContext.", report.message());
         assertEquals("INFO", report.level());
         // A shipper that sends every line apart leaves nothing after the colon.
         var empty = event("2026-09-24T15:26:11.242+03:00 ERROR 1 --- [           main] o.s.b.d.LoggingFailureAnalysisReporter   : ");
-        assertEquals("(empty message, logger o.s.b.d.LoggingFailureAnalysisReporter)", normalizer.view(empty, List.of("instance")).message());
+        assertEquals("", normalizer.normalize(empty, List.of("instance")).message());
     }
 
     @Test

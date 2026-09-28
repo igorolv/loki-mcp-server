@@ -5,6 +5,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -22,7 +23,7 @@ class LogTextTest {
     }
 
     private String line(LogEvent event, boolean raw) {
-        return LogText.line(event, normalizer.view(event, ConnectionDefinition.DEFAULT_SERVICE_LABELS), zone, raw);
+        return LogText.line(event, normalizer.normalize(event, ConnectionDefinition.DEFAULT_SERVICE_LABELS), zone, raw);
     }
 
     @Test
@@ -31,7 +32,20 @@ class LogTextTest {
         assertEquals("10:12:03.123 ERROR backend  Connection refused [trace=4f2a1b3c4d5e6f70…]", line(event, false));
         assertEquals("10:12:03.123 {app=\"backend\", level=\"error\"}  " + event.line(), line(event, true));
         var plain = new LogEvent(event.timestampNanos(), Map.of(), "just text", Map.of());
-        assertEquals("10:12:03.123 -     -  just text", LogText.line(plain, normalizer.view(plain, List.of("app")), zone, false));
+        assertEquals("10:12:03.123 -     -  just text", LogText.line(plain,
+                normalizer.normalize(plain, List.of("app")), zone, false));
+    }
+
+    @Test
+    void displayNamesAnEmptyParsedMessageWithoutChangingItsValue() {
+        var parsed = new NormalizedLogLine(NormalizedLogLine.Format.PLAIN, "ERROR", "backend", "a.Logger",
+                "", null, null, Map.of("message", ""));
+        assertEquals("", parsed.message());
+        assertEquals("10:12:03.123 ERROR backend  (empty message, logger a.Logger)",
+                LogText.line(event("unused"), parsed, zone, false));
+        var literal = new NormalizedLogLine(NormalizedLogLine.Format.JSON, "INFO", "backend", null,
+                "(empty message is literal text", null, null, Map.of());
+        assertTrue(LogText.line(event("unused"), literal, zone, false).endsWith("(empty message is literal text"));
     }
 
     @Test

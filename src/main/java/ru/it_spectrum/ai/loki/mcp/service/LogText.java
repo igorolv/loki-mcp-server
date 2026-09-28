@@ -2,7 +2,7 @@ package ru.it_spectrum.ai.loki.mcp.service;
 
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
-import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -36,13 +36,18 @@ public final class LogText {
      * One event: {@code HH:mm:ss.SSS LEVEL service  message}, then indented compact stack trace lines.
      * Raw preview: {@code HH:mm:ss.SSS {stream labels}  returned line}, shortened at {@link #RAW_CHARS} code points.
      */
-    public static String line(LogEvent event, EventNormalizer.View view, ZoneId zone, boolean raw) {
+    public static String line(LogEvent event, NormalizedLogLine view, ZoneId zone, boolean raw) {
         var text = new StringBuilder(TIME.format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone)));
         if (raw)
             return text.append(' ').append(labels(event.labels())).append("  ").append(truncate(event.line(), RAW_CHARS)).toString();
         text.append(' ').append(String.format("%-5s", view.level() == null ? "-" : view.level()));
         text.append(' ').append(view.service() == null ? "-" : view.service()).append("  ");
-        text.append(truncate(view.message().replace('\n', ' ').replace("\r", ""), MESSAGE_CHARS));
+        String message = view.message();
+        if (message.isEmpty() && view.format() == NormalizedLogLine.Format.PLAIN
+                && view.fields().containsKey("message")) {
+            message = view.logger() == null ? "(empty message)" : "(empty message, logger " + view.logger() + ")";
+        }
+        text.append(truncate(message.replace('\n', ' ').replace("\r", ""), MESSAGE_CHARS));
         if (view.traceId() != null) text.append(" [trace=").append(truncate(view.traceId(), 16)).append(']');
         if (view.stackTrace() != null && !view.stackTrace().isBlank()) {
             for (String frame : compactStackTrace(view.stackTrace())) text.append("\n    ").append(frame);

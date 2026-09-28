@@ -1,6 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.parser;
 
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -27,7 +28,6 @@ public final class EventNormalizer {
     static final List<String> MESSAGE_FIELDS = List.of("message", "msg", "@message", "event", "@m");
     static final List<String> TRACE_KEYS = List.of("traceId", "trace.id", "trace_id", "traceID", "trace");
     static final List<String> STACK_FIELDS = List.of("error.stack_trace", "stack_trace", "stacktrace", "stackTrace", "exception", "throwable");
-    static final String EMPTY_MESSAGE = "(empty message";
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
@@ -66,7 +66,7 @@ public final class EventNormalizer {
         return null;
     }
 
-    public View view(LogEvent event, List<String> serviceLabels) {
+    public NormalizedLogLine normalize(LogEvent event, List<String> serviceLabels) {
         var values = new LinkedHashMap<String, String>();
         Format format = parse(event.line(), values);
         JsonFormat jsonFormat = format == Format.JSON ? jsonFormat(values) : null;
@@ -99,7 +99,7 @@ public final class EventNormalizer {
                 stack = line.substring(newline + 1);
             } else message = line;
             // A line format replaces the first line with the message it found there; the rest of the line stays. An
-            // empty message is the rest of the line (a report that starts on the next line), else it says so: a
+            // empty message is the rest of the line (a report that starts on the next line); a
             // shipper that sends every line apart leaves the report in the next entries.
             String found = values.get("message");
             if (found != null && !found.isBlank())
@@ -107,9 +107,10 @@ public final class EventNormalizer {
             else if (found != null && newline >= 0 && !line.substring(newline).isBlank())
                 message = stack == null ? line.substring(newline + 1).strip() : message;
             else if (found != null)
-                message = logger == null ? EMPTY_MESSAGE + ")" : EMPTY_MESSAGE + ", logger " + logger + ")";
+                message = "";
         }
-        return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, logger, message, trace, stack);
+        return new NormalizedLogLine(format, level == null ? null : level.toUpperCase(Locale.ROOT), service,
+                logger, message, trace, stack, values);
     }
 
     private JsonFormat jsonFormat(Map<String, String> values) {
@@ -160,15 +161,6 @@ public final class EventNormalizer {
                 else if (value != null && !value.isBlank()) values.put(name, value.strip());
             }
             return;
-        }
-    }
-
-    public enum Format {JSON, PLAIN}
-
-    public record View(Format format, String level, String service, String logger, String message, String traceId,
-                       String stackTrace) {
-        public String messageForExport() {
-            return message != null && message.startsWith(EMPTY_MESSAGE) ? "" : message;
         }
     }
 }

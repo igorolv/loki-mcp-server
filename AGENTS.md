@@ -149,9 +149,9 @@ Tests:
 - The public contract is text (rules in [docs/queries.md](docs/queries.md)). Output
   schemas, `structuredContent`, stream dictionaries, cursors and field projections do not
   come back without a new decision from the user. Internal models stay records.
-- `parser/EventNormalizer` produces the line view (level, service, message, trace id, stack trace)
+- `parser/EventNormalizer` produces a `NormalizedLogLine` (level, service, message, trace id, stack trace)
   from labels, structured metadata and the JSON line, optionally using a matching JSON profile,
-  or a plain line split by the connection's `formatFile`. It reads scalar fields for inline export templates. Labels are never
+  or a plain line split by the connection's `formatFile`. The result includes scalar fields for inline export templates. Labels are never
   overridden by the line, and no line layout lives in the code.
 - `LogText` formats compact lines, stack trace previews, day-change markers and page budgets.
   `raw=true` is a 4000-code-point preview of the returned line and may cut JSON; complete lines go

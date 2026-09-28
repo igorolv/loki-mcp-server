@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer.Format.JSON;
-import static ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer.Format.PLAIN;
+import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format.JSON;
+import static ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine.Format.PLAIN;
 
 class EventNormalizerTest {
     private final EventNormalizer normalizer = new EventNormalizer(List.of());
@@ -23,13 +23,13 @@ class EventNormalizerTest {
     void detectedLevelUnknownIsNoLevel() {
         var normalizer = new EventNormalizer(List.of());
         var unknown = new LogEvent("1", Map.of("app", "x"), "plain line without level", Map.of("detected_level", "unknown"));
-        assertNull(normalizer.view(unknown, List.of("app")).level());
+        assertNull(normalizer.normalize(unknown, List.of("app")).level());
         var error = new LogEvent("1", Map.of("app", "x"), "plain line", Map.of("detected_level", "error"));
-        assertEquals("ERROR", normalizer.view(error, List.of("app")).level());
+        assertEquals("ERROR", normalizer.normalize(error, List.of("app")).level());
     }
 
-    private EventNormalizer.View view(Map<String, String> labels, String line) {
-        return normalizer.view(event(labels, line, Map.of()), ConnectionDefinition.DEFAULT_SERVICE_LABELS);
+    private NormalizedLogLine view(Map<String, String> labels, String line) {
+        return normalizer.normalize(event(labels, line, Map.of()), ConnectionDefinition.DEFAULT_SERVICE_LABELS);
     }
 
     @Test
@@ -45,6 +45,7 @@ class EventNormalizerTest {
         assertEquals("Ошибка 🐈", view.message());
         assertEquals("abc123", view.traceId());
         assertTrue(view.stackTrace().startsWith("java.io.IOException"));
+        assertEquals("3", view.fields().get("count"));
     }
 
     @Test
@@ -54,9 +55,9 @@ class EventNormalizerTest {
         assertEquals("WARN", view.level());
         assertEquals("from-label", view.service());
         assertEquals("hello", view.message());
-        var custom = normalizer.view(event(Map.of("container", "c1", "app", "a1"), "{\"message\":\"m\"}", Map.of()), List.of("container"));
+        var custom = normalizer.normalize(event(Map.of("container", "c1", "app", "a1"), "{\"message\":\"m\"}", Map.of()), List.of("container"));
         assertEquals("c1", custom.service());
-        var metadata = normalizer.view(event(Map.of(), "plain", Map.of("detected_level", "info", "traceId", "t-1")), List.of("app"));
+        var metadata = normalizer.normalize(event(Map.of(), "plain", Map.of("detected_level", "info", "traceId", "t-1")), List.of("app"));
         assertEquals("INFO", metadata.level());
         assertEquals("t-1", metadata.traceId());
     }

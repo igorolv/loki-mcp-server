@@ -76,6 +76,10 @@ The user chose to move EventNormalizer and its dedicated LineFormat and EventPar
 
 After inspecting asva2 and asva2-configs, the user chose to try recognizing JSON formats from the Loki event itself. Spring Boot console ECS JSON is configured separately from the file line pattern, and the Docker Promtail pipeline collects console output. Runtime profiles, Config Server, environment overrides and custom appenders make a path to a Spring Boot configuration file insufficient to identify the actual Loki line. The optional formatFile now holds ordered jsonFormats alongside the existing plain formats. A JSON profile selects by required scalar paths and exact field values, then supplies preferred field paths; the first match wins. When none matches, the existing generic JSON extraction applies. Loki labels and structured metadata retain their precedence. The example file covers Spring Boot ECS, GELF and Logstash. Per-event selection allows these formats and plain lines to coexist in one result. The profiles only alter local rendering, not queries or interpretation.
 
+## Normalized line model (2026-09-28)
+
+The normalizer's result is a top-level `NormalizedLogLine` record in the parser package. It was formerly the nested `EventNormalizer.View`, although query and export rendering both consume it. `EventNormalizer.normalize` produces the normalized fields and the parsed scalar field map once; `LogLayout` uses that map without parsing the line again. An empty parsed message remains empty in the record; `LogText` adds the compact view's explanatory phrase. `LogEvent` remains the raw Loki entry with timestamp, labels, structured metadata and original line. This is an internal model change with no text contract change.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.

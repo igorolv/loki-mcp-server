@@ -16,8 +16,8 @@ class JsonFormatTest {
             ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json")),
             ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")));
 
-    private EventNormalizer.View view(Map<String, String> labels, String line) {
-        return normalizer.view(new LogEvent("1", labels, line, Map.of()), List.of("app"));
+    private NormalizedLogLine view(Map<String, String> labels, String line) {
+        return normalizer.normalize(new LogEvent("1", labels, line, Map.of()), List.of("app"));
     }
 
     @Test
@@ -59,10 +59,10 @@ class JsonFormatTest {
         var unknown = view(Map.of(), "{\"format\":\"other\",\"message\":\"generic line\",\"level\":\"warn\"}");
         assertEquals("WARN", unknown.level());
         assertEquals("generic line", unknown.message());
-        assertEquals(EventNormalizer.Format.JSON, unknown.format());
+        assertEquals(NormalizedLogLine.Format.JSON, unknown.format());
 
         var plain = view(Map.of(), "2026-09-28T00:00:00Z  INFO 1 --- [main] a.Plain : plain line");
-        assertEquals(EventNormalizer.Format.PLAIN, plain.format());
+        assertEquals(NormalizedLogLine.Format.PLAIN, plain.format());
         assertEquals("plain line", plain.message());
     }
 
@@ -74,6 +74,6 @@ class JsonFormatTest {
                 Map.of("message", List.of("two")));
         var selected = new EventNormalizer(List.of(), List.of(first, second));
         var line = new LogEvent("1", Map.of(), "{\"format\":\"x\",\"one\":\"first\",\"two\":\"second\"}", Map.of());
-        assertEquals("first", selected.view(line, List.of("app")).message());
+        assertEquals("first", selected.normalize(line, List.of("app")).message());
     }
 }

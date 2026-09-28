@@ -1,12 +1,11 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
-import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -27,15 +26,11 @@ public final class LogLayout {
     public static final int MAX_TEMPLATE_CHARS = 500;
     private static final Pattern PLACEHOLDER = Pattern.compile("([A-Za-z0-9_.@-]+(?:\\|[A-Za-z0-9_.@-]+)*)(?::(.+))?");
     private static final Pattern WIDTH = Pattern.compile("-?\\d{1,3}");
-    private static final List<String> VIEW_NAMES = List.of("level", "service", "logger", "message", "traceId", "line");
     private final List<Part> parts;
-    private final boolean needsFields;
     private final boolean wrapsLine;
 
     private LogLayout(List<Part> parts) {
         this.parts = List.copyOf(parts);
-        this.needsFields = parts.stream().anyMatch(p -> p.names != null && p.names.stream().anyMatch(n -> !VIEW_NAMES.contains(n)
-                && !n.equals("time") && !n.equals("stack")));
         this.wrapsLine = parts.stream().anyMatch(p -> p.names != null && p.names.contains("line"));
     }
 
@@ -103,14 +98,10 @@ public final class LogLayout {
     /**
      * One event as text, without the trailing newline.
      */
-    public String render(LogEvent event, EventNormalizer.View view, EventNormalizer normalizer, ZoneId zone) {
-        Map<String, String> fields = null;
-        boolean plain = view.format() == EventNormalizer.Format.PLAIN && !wrapsLine;
-        if (needsFields || plain) {
-            fields = new LinkedHashMap<>();
-            normalizer.parse(event.line(), fields);
-            if (plain && !fields.containsKey("message")) return event.line();
-        }
+    public String render(LogEvent event, NormalizedLogLine view, ZoneId zone) {
+        Map<String, String> fields = view.fields();
+        boolean plain = view.format() == NormalizedLogLine.Format.PLAIN && !wrapsLine;
+        if (plain && !fields.containsKey("message")) return event.line();
         var text = new StringBuilder();
         for (var part : parts) {
             if (part.names == null) {
@@ -130,19 +121,19 @@ public final class LogLayout {
         return text.toString();
     }
 
-    private static String value(String name, Part part, LogEvent event, EventNormalizer.View view, Map<String, String> fields, ZoneId zone) {
+    private static String value(String name, Part part, LogEvent event, NormalizedLogLine view,
+                                Map<String, String> fields, ZoneId zone) {
         return switch (name) {
             case "time" -> (part.time == null ? DEFAULT_TIME : part.time).format(QueryTime.fromNanos(event.timestampNanos()).atZone(zone));
             case "level" -> view.level();
             case "service" -> view.service();
             case "logger" -> view.logger();
-            // The normalizer names an empty message for display; a file keeps it empty, as it was logged.
-            case "message" -> view.messageForExport();
+            case "message" -> view.message();
             case "traceId" -> view.traceId();
             case "line" -> event.line();
             case "stack" -> view.stackTrace() == null || view.stackTrace().isBlank() ? null : "\n" + view.stackTrace().stripTrailing();
             default -> {
-                String found = fields == null ? null : fields.get(name);
+                String found = fields.get(name);
                 if (found == null) found = event.labels().get(name);
                 yield found == null ? event.structuredMetadata().get(name) : found;
             }

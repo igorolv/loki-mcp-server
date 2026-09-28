@@ -9,6 +9,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
+import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -136,12 +137,12 @@ public class QueryService {
             }
             String rendered;
             if (end - i > 1) {
-                var view = normalizer.view(event, definition.serviceLabels());
-                var summary = new EventNormalizer.View(EventNormalizer.Format.PLAIN, null, view.service(), null,
-                        "… " + (end - i) + " stack frame lines", null, null);
+                var view = normalizer.normalize(event, definition.serviceLabels());
+                var summary = new NormalizedLogLine(NormalizedLogLine.Format.PLAIN, null, view.service(), null,
+                        "… " + (end - i) + " stack frame lines", null, null, Map.of());
                 rendered = line(event, summary, definition.timezone(), false);
             } else {
-                rendered = line(event, normalizer.view(event, definition.serviceLabels()), definition.timezone(), raw);
+                rendered = line(event, normalizer.normalize(event, definition.serviceLabels()), definition.timezone(), raw);
             }
             Instant last = QueryTime.fromNanos(events.get(end - 1).timestampNanos());
             rows.add(new PageRow(rendered, first, last, end - i));
