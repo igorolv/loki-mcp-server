@@ -11,7 +11,6 @@ import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.stream.Collectors;
 
 @Configuration(proxyBeanMethods = false)
@@ -38,11 +37,12 @@ public class ConnectionsConfig {
     }
 
     /**
-     * The exportRoots of the connections file, else {@code exports} in the data directory.
+     * The configured export roots, or unrestricted destinations with a default under the data directory.
      */
     @Bean
     ExportRoots exportRoots(ConnectionsLoader.Config config, @Value("${loki-mcp.data-dir}") String dataDir) {
-        return new ExportRoots(config.exportRoots().isEmpty()
-                ? List.of(Path.of(dataDir).toAbsolutePath().resolve("exports")) : config.exportRoots());
+        Path fallback = Path.of(dataDir).toAbsolutePath().resolve("exports");
+        Path defaultDirectory = config.exportRoots().isEmpty() ? fallback : config.exportRoots().getFirst();
+        return new ExportRoots(defaultDirectory, config.exportRoots());
     }
 }

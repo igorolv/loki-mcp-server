@@ -37,8 +37,9 @@ LLM is needed.
   logs go to stderr and a rolling file.
 - The runtime reads real Loki instances. Do not add push, delete, management tools or a
   full `/config` dump. Test ingestion is allowed only into test containers. The only write
-  is `exportLogs` on the local disk: inside the configured `exportRoots` (checked after
-  normalization and symbolic links), never overwriting a file.
+  is `exportLogs` on the local disk. By default it may write to a directory named by the
+  caller; configured `exportRoots` restrict destinations after normalization and symbolic
+  link checks. It never overwrites a file.
 - Every data operation takes an explicit `connection`. Never pick a default stand.
   Connections and their errors must be isolated from each other.
 - Connection settings live in an external `connections.json`, without real credentials or

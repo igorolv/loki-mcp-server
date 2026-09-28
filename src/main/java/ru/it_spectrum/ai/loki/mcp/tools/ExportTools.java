@@ -9,7 +9,7 @@ import static ru.it_spectrum.ai.loki.mcp.tools.QueryTools.QUERY;
 import static ru.it_spectrum.ai.loki.mcp.tools.QueryTools.START;
 
 /**
- * The only tool that writes, and only into export directories.
+ * The only tool that writes, to a new file in the requested local directory.
  */
 @Component
 public class ExportTools {
@@ -24,6 +24,7 @@ public class ExportTools {
                     + "Pass the same LogQL query as queryLogs, e.g. {app=\"backend\"} |= \"ERROR\". "
                     + "format=\"raw\" keeps the lines returned by Loki, including any LogQL line_format stage; "
                     + "a template like \"{time} {level:5} [{thread}] {logger} : {message}{stack}\" rewrites them locally. "
+                    + "Pass a user-specified directory directly; omit it for the default export directory. "
                     + "The answer gives the file path, the line count, and a start value to continue with when a limit stopped it.",
             annotations = @McpTool.McpAnnotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = true))
     public String exportLogs(
@@ -33,8 +34,10 @@ public class ExportTools {
             @McpToolParam(description = "Window end. Default \"now\". Same formats as start.", required = false) String end,
             @McpToolParam(description = "\"raw\" (default), or a template with {time}, {level}, {service}, "
                     + "{logger}, {message}, {stack} and line fields like {thread}", required = false) String format,
-            @McpToolParam(description = "Directory to write into: leave it out for the default export directory, or a subdirectory "
-                    + "name like \"incident-42\"; the user's configuration lists the allowed directories", required = false) String directory) {
+            @McpToolParam(description = "Local directory for the new file, e.g. C:\\tmp\\logs or incident-42. "
+                    + "Omit it for the default export directory; a relative path is resolved under that directory. "
+                    + "Configured exportRoots, if present, restrict destinations.", required = false)
+            String directory) {
         return this.service.export(connection, query, start, end, format, directory);
     }
 }

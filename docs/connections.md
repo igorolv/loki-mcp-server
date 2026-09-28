@@ -4,7 +4,6 @@ The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP
 
 ~~~json
 {
-  "exportRoots": ["exports"],
   "connections": {
     "dev": {
       "description": "Development stand",
@@ -32,7 +31,9 @@ tenant, when set, is sent as X-Scope-OrgID. ${VARIABLE} substitution is supporte
 
 ## Export roots
 
-exportRoots is an optional list of up to 16 directories at the top level. Relative paths resolve against the connections file. If omitted, the only root is <data dir>/exports, where the data dir defaults to ~/.loki-mcp-server and LOKI_MCP_DATA_DIR can change it. Directories are created on first export. An export destination must stay within a root after normalization and symbolic link resolution; existing files are never overwritten.
+Without exportRoots, exportLogs accepts any absolute directory that the server process can write into. Omitting the tool's directory argument writes under <data dir>/exports, where the data dir defaults to ~/.loki-mcp-server and LOKI_MCP_DATA_DIR can change it. A relative directory argument resolves under that default directory. Directories are created on first export; a path or permission failure is returned as a tool error. Existing files are never overwritten.
+
+exportRoots is an optional list of up to 16 directories at the top level. When present, it restricts export destinations to those roots after normalization and symbolic link resolution; the first root is also the default directory. Relative root paths in connections.json resolve against the connections file. An empty exportRoots list is invalid.
 
 ## Format file
 

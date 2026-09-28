@@ -50,11 +50,17 @@ class ExportServiceTest {
 
     private ExportService service(int maxEntries, int maxExportLines, List<LineFormat> formats,
                                   int maxExportDurationMs, LongSupplier nanoTime) {
+        return service(maxEntries, maxExportLines, formats, maxExportDurationMs, nanoTime,
+                new ExportRoots(root, List.of(root)));
+    }
+
+    private ExportService service(int maxEntries, int maxExportLines, List<LineFormat> formats,
+                                  int maxExportDurationMs, LongSupplier nanoTime, ExportRoots paths) {
         var limits = new ConnectionLimits(100, 100, 1_000_000, 4096, maxEntries, 86400, maxExportLines,
                 1_000_000, 86400, 604800, 604800, maxExportDurationMs);
         var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"), ConnectionAuth.NONE, null,
                 ZoneId.of("Europe/Moscow"), limits, List.of("app"), formats);
-        return new ExportService(new ConnectionRegistry(List.of(definition)), client, new ExportRoots(List.of(root)),
+        return new ExportService(new ConnectionRegistry(List.of(definition)), client, paths,
                 Clock.fixed(NOW, ZoneOffset.UTC), nanoTime);
     }
 
@@ -234,6 +240,23 @@ class ExportServiceTest {
         assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, null, "../escape"));
         var format = assertThrows(LokiOperationException.class, () -> service.export("dev", "{app=\"backend\"}", null, null, "spring", null));
         assertTrue(format.error().message().startsWith("format must be raw or a template"), format.error().message());
+    }
+
+    @Test
+    void unrestrictedExportWritesIntoRequestedAbsoluteDirectory() throws IOException {
+        loki(Map.of(BACKEND, List.of(entry(ns(1, 0), "requested line"))));
+        Path defaultDirectory = root.resolve("default");
+        Path requested = root.resolve("requested");
+        var paths = new ExportRoots(defaultDirectory, List.of());
+        var service = service(100, 1000, List.of(), ConnectionLimits.DEFAULT_EXPORT_DURATION_MS,
+                System::nanoTime, paths);
+
+        String report = service.export("dev", "{app=\"backend\"}", null, null, null, requested.toString());
+
+        Path file = requested.resolve("dev_20260924-140000_20260924-150000.log");
+        assertEquals(List.of("requested line"), read(file));
+        assertTrue(report.contains("File: " + file), report);
+        assertFalse(Files.exists(defaultDirectory));
     }
 
     @Test

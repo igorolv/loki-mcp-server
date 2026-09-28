@@ -177,7 +177,7 @@ class StdioSmokeTest {
                 names.add(declaration.path("name").asText());
                 assertFalse(declaration.has("outputSchema"), declaration.toString());
                 assertTrue(declaration.path("description").asText().length() > 80, declaration.toString());
-                // exportLogs writes files into the export directories; every other tool only reads.
+                // exportLogs writes local files; every other tool only reads.
                 assertEquals(!declaration.path("name").asText().equals("exportLogs"), declaration.path("annotations").path("readOnlyHint").asBoolean());
                 assertFalse(declaration.path("annotations").path("destructiveHint").asBoolean());
                 assertEquals(!declaration.path("name").asText().equals("listConnections"),
@@ -393,6 +393,19 @@ class StdioSmokeTest {
             }
             assertFalse(report.contains("Ошибка"), report);
             assertNoSecrets(exported.toString());
+            Path requested = temporaryDirectory.resolve("requested-exports").toAbsolutePath();
+            send(input, mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 91, "method", "tools/call",
+                    "params", Map.of("name", "exportLogs", "arguments", Map.of("connection", "test",
+                            "query", "{kind=\"test\"}", "start", "now-1s", "directory", requested.toString())))));
+            var requestedExport = response(stdout, stderr);
+            String requestedReport = text(requestedExport.path("result"));
+            assertFalse(requestedExport.path("result").path("isError").asBoolean(), requestedReport);
+            try (var files = Files.list(requested)) {
+                var file = files.findFirst().orElseThrow();
+                assertEquals(List.of("Ошибка 🐈"), Files.readAllLines(file, StandardCharsets.UTF_8));
+                assertTrue(requestedReport.contains("File: " + file), requestedReport);
+            }
+            assertNoSecrets(requestedExport.toString());
         } finally {
             upstream.stop(0);
             process.destroy();
