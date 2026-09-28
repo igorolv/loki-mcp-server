@@ -1,5 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.junit.jupiter.api.Test;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.client.LokiResponses.LabelResponse;
@@ -8,7 +10,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 
 import java.net.URI;
 import java.time.Clock;
@@ -55,7 +57,7 @@ class DiscoveryServiceTest {
         when(client.labelValues("tight", "pod", now.minusSeconds(1), now))
                 .thenReturn(new LabelResponse(values));
         String text = service.discover("tight", "now-1s", "now", "pod", null);
-        assertTrue(LogText.bytes(text) <= 1024 - LogText.ENVELOPE_BYTES);
+        assertTrue(ResponseText.bytes(text) <= 1024 - ResponseText.ENVELOPE_BYTES);
         assertTrue(text.contains("more; only the first values are shown"));
     }
 
@@ -107,7 +109,7 @@ class DiscoveryServiceTest {
         when(client.series("tight", "{app=\"api\"}", now.minusSeconds(1), now))
                 .thenReturn(new SeriesResponse(sets));
         String text = service.discover("tight", "now-1s", "now", null, "{app=\"api\"}");
-        assertTrue(LogText.bytes(text) <= 1024 - LogText.ENVELOPE_BYTES, text);
+        assertTrue(ResponseText.bytes(text) <= 1024 - ResponseText.ENVELOPE_BYTES, text);
         assertTrue(text.contains("81 label sets returned by Loki"), text);
         assertTrue(text.contains("Output limit reached: showing"), text);
         assertTrue(text.contains("Narrow match or the time window"), text);

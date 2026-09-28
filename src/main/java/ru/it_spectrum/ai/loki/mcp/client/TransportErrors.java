@@ -1,10 +1,10 @@
 package ru.it_spectrum.ai.loki.mcp.client;
 
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.model.ToolError;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ToolError;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_BAD_REQUEST;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_BAD_REQUEST;
 
 final class TransportErrors {
     private static final int QUERY_ERROR_CHARS = 400;

@@ -142,8 +142,8 @@ Tests:
   `String` result. A tool description is an instruction for a weak model: when to call,
   example arguments, what to do with the result; no disclaimers or guarantees; at most 4–5
   sentences. Read-only/idempotent annotations must match the behaviour.
-- Services return finished text: `QueryService` (logs and count), `DiscoveryService`,
-  `ConnectionsService`, `ExportService`. The HTTP client owns the transport and the Loki DTOs
+- Services return finished text: `QueryService` (log pages), `CountService` (counts),
+  `DiscoveryService`, `ConnectionsService`, `ExportService`. The HTTP client owns the transport and the Loki DTOs
   (`client/LokiResponses`); services do not depend on tool classes. Queries come from the
   caller; no Java-side selector inference or incident interpretation.
 - The public contract is text (rules in [docs/queries.md](docs/queries.md)). Output
@@ -153,7 +153,8 @@ Tests:
   from labels, structured metadata and the JSON line, optionally using a matching JSON profile,
   or a plain line split by the connection's `formatFile`. The result includes scalar fields for inline export templates. Labels are never
   overridden by the line, and no line layout lives in the code.
-- `LogText` formats compact lines, stack trace previews, day-change markers and page budgets.
+- `LogText` formats compact lines, stack trace previews and day-change markers;
+  `ResponseText` owns shared text assembly, windows and byte budgets. Controlled errors live in `error`.
   `raw=true` is a 4000-code-point preview of the returned line and may cut JSON; complete lines go
   to `exportLogs`.
 - Limits and timeouts live in `ConnectionLimits`; tools contain no magic numbers.

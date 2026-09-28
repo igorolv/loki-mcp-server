@@ -1,6 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 /**
  * Central transport/query defaults. Consumers enforce these as they are implemented.

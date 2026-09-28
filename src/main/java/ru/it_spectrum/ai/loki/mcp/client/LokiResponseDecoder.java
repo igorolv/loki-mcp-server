@@ -1,6 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.client;
 
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -13,8 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_INVALID_RESPONSE;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_QUERY_ERROR;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_INVALID_RESPONSE;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_QUERY_ERROR;
 
 /**
  * Strict about known data shapes; unknown object fields remain forward compatible.

@@ -1,6 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 public record ConnectionAuth(Type type, String username, String password, String token) {
     public static final ConnectionAuth NONE = new ConnectionAuth(Type.NONE, null, null, null);

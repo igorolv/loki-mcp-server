@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_RESPONSE_TOO_LARGE;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_RESPONSE_TOO_LARGE;
 
 /**
  * Cancels upstream before copying a chunk that would exceed the byte budget.

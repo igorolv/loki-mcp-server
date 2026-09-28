@@ -1,4 +1,4 @@
-package ru.it_spectrum.ai.loki.mcp.model;
+package ru.it_spectrum.ai.loki.mcp.error;
 
 /**
  * Safe error payload. Only Loki query errors (400 / status=error) carry upstream text; it is the model's own query being rejected.

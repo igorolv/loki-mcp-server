@@ -1,6 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 import java.io.IOException;
 import java.nio.file.Files;

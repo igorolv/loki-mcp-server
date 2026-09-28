@@ -4,9 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

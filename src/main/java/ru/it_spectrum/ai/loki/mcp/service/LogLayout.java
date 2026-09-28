@@ -1,5 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.NormalizedLogLine;
 

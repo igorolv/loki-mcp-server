@@ -1,6 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.parser;
 
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 import java.util.regex.Pattern;
 

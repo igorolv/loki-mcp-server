@@ -3,7 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.client;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -12,8 +12,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_INVALID_RESPONSE;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.UPSTREAM_QUERY_ERROR;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_INVALID_RESPONSE;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.UPSTREAM_QUERY_ERROR;
 
 class LokiResponseDecoderTest {
     private final LokiResponseDecoder decoder = new LokiResponseDecoder();

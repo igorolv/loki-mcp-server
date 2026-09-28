@@ -1,10 +1,12 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.connection.*;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
 
 import java.io.IOException;
@@ -22,7 +24,7 @@ import java.util.function.LongSupplier;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.*;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.OPERATION_TIMEOUT;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.OPERATION_TIMEOUT;
 
 class ExportServiceTest {
     private static final Instant NOW = Instant.parse("2026-09-24T12:00:00Z");

@@ -1,7 +1,5 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.error;
 
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 
 public final class Errors {
     private Errors() {

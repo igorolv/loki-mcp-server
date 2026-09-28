@@ -3,6 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.tools;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
+import ru.it_spectrum.ai.loki.mcp.service.CountService;
 import ru.it_spectrum.ai.loki.mcp.service.QueryService;
 
 @Component
@@ -10,10 +11,12 @@ public class QueryTools {
     static final String QUERY = "LogQL log query, e.g. {app=\"backend\"} |= \"ERROR\". Take label names and values from discoverLogs.";
     static final String START = "Window start, default now-1h. Examples: now-15m, now-2d, 2026-09-13T10:00:00+03:00.";
     static final String END = "Window end, default now. Use the end in a queryLogs footer to read older lines.";
-    private final QueryService service;
+    private final QueryService queries;
+    private final CountService counts;
 
-    public QueryTools(QueryService service) {
-        this.service = service;
+    public QueryTools(QueryService queries, CountService counts) {
+        this.queries = queries;
+        this.counts = counts;
     }
 
     @McpTool(name = "queryLogs",
@@ -30,7 +33,7 @@ public class QueryTools {
             @McpToolParam(description = "Maximum lines to show, default 50", required = false) Integer limit,
             @McpToolParam(description = "Preview the line returned by Loki with stream labels, default false", required = false) Boolean raw,
             @McpToolParam(description = "newest (default) or oldest; oldest reads forward", required = false) String order) {
-        return service.logs(connection, query, start, end, limit, raw, order);
+        return queries.logs(connection, query, start, end, limit, raw, order);
     }
 
     @McpTool(name = "countLogs",
@@ -47,6 +50,6 @@ public class QueryTools {
             @McpToolParam(description = END, required = false) String end,
             @McpToolParam(description = "Label name, time, or <label>,time", required = false) String groupBy,
             @McpToolParam(description = "Bucket width for time grouping, 1s through 1d; default automatic", required = false) String step) {
-        return service.count(connection, query, start, end, groupBy, step);
+        return counts.count(connection, query, start, end, groupBy, step);
     }
 }

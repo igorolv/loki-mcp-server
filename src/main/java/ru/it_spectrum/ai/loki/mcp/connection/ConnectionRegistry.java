@@ -1,7 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

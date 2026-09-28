@@ -1,5 +1,7 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
@@ -7,7 +9,7 @@ import ru.it_spectrum.ai.loki.mcp.client.LokiResponses;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
 import ru.it_spectrum.ai.loki.mcp.connection.ExportRoots;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 import ru.it_spectrum.ai.loki.mcp.parser.EventNormalizer;
 
@@ -30,7 +32,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.*;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.*;
 
 /**
  * Writes every line of a window to a file on the local disk, oldest first, in full: the line returned by Loki
@@ -80,7 +82,7 @@ public class ExportService {
 
     public String export(String connection, String query, String start, String end, String format, String directory) {
         var definition = registry.require(connection);
-        QueryService.requireLogQuery(query);
+        LogQueries.requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
         var writer = writer(format);
         Path target = roots.resolve(directory);

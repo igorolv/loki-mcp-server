@@ -1,5 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,7 +31,7 @@ class QueryTimeTest {
             "now-999999999999999999999d", "2026-03-29T02:30:00", "2026-10-25T02:30:00", "9999-01-01T00:00:00Z"})
     void rejectsInvalidAndAmbiguousTimeWithFormatHint(String value) {
         var failure = assertThrows(LokiOperationException.class, () -> QueryTime.parse(value, now, zone));
-        assertEquals(ru.it_spectrum.ai.loki.mcp.model.ErrorCode.INVALID_ARGUMENT, failure.error().code());
+        assertEquals(ru.it_spectrum.ai.loki.mcp.error.ErrorCode.INVALID_ARGUMENT, failure.error().code());
         assertTrue(failure.getMessage().contains("now-15m") || failure.getMessage().contains("DST"), failure.getMessage());
     }
 

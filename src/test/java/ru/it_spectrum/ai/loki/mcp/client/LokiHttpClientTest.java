@@ -14,9 +14,9 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
-import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -39,7 +39,7 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.QueryResponse;
 import static ru.it_spectrum.ai.loki.mcp.client.LokiResponses.Streams;
-import static ru.it_spectrum.ai.loki.mcp.model.ErrorCode.*;
+import static ru.it_spectrum.ai.loki.mcp.error.ErrorCode.*;
 
 @Timeout(15)
 class LokiHttpClientTest {

@@ -3,6 +3,7 @@ package ru.it_spectrum.ai.loki.mcp.tools;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.mcp.annotation.spring.SyncMcpAnnotationProviders;
+import ru.it_spectrum.ai.loki.mcp.service.CountService;
 import ru.it_spectrum.ai.loki.mcp.service.ConnectionsService;
 import ru.it_spectrum.ai.loki.mcp.service.DiscoveryService;
 import ru.it_spectrum.ai.loki.mcp.service.ExportService;
@@ -17,7 +18,8 @@ import static org.mockito.Mockito.mock;
 
 class ToolDefinitionsTest {
     private final List<SyncToolSpecification> specs = SyncMcpAnnotationProviders.toolSpecifications(List.of(
-            new QueryTools(mock(QueryService.class)), new ConnectionTools(mock(ConnectionsService.class)),
+            new QueryTools(mock(QueryService.class), mock(CountService.class)),
+            new ConnectionTools(mock(ConnectionsService.class)),
             new DiscoveryTools(mock(DiscoveryService.class)), new ExportTools(mock(ExportService.class))));
 
     @Test

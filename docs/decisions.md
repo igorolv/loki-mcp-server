@@ -80,6 +80,10 @@ After inspecting asva2 and asva2-configs, the user chose to try recognizing JSON
 
 The normalizer's result is a top-level `NormalizedLogLine` record in the parser package. It was formerly the nested `EventNormalizer.View`, although query and export rendering both consume it. `EventNormalizer.normalize` produces the normalized fields and the parsed scalar field map once; `LogLayout` uses that map without parsing the line again. An empty parsed message remains empty in the record; `LogText` adds the compact view's explanatory phrase. `LogEvent` remains the raw Loki entry with timestamp, labels, structured metadata and original line. This is an internal model change with no text contract change.
 
+## Internal service boundaries (2026-09-29)
+
+The user chose to separate Loki-side counts from log-page reading. `CountService` renders totals and grouped time buckets; `QueryService` renders log pages, and both use the same log-query validation. `QueryTools` still exposes the same `queryLogs` and `countLogs` calls. Shared response assembly, windows and byte budgets now live in `ResponseText`; `LogText` remains responsible for compact log-line rendering. Controlled error types live in `error`, so the parser, connection and client packages no longer depend on `service`. A folded stack-frame summary is rendered directly rather than represented as a synthetic `NormalizedLogLine`. The format selector within `EventNormalizer` is package-private. These are internal boundaries; the MCP tools and their text output are unchanged.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.

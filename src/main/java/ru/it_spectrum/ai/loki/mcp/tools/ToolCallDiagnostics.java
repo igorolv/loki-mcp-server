@@ -8,9 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.stereotype.Component;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 import ru.it_spectrum.ai.loki.mcp.service.Diagnostics;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;

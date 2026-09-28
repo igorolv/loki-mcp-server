@@ -1,4 +1,4 @@
-package ru.it_spectrum.ai.loki.mcp.model;
+package ru.it_spectrum.ai.loki.mcp.error;
 
 public enum ErrorCode {
     CONFIGURATION_ERROR, CONNECTION_REQUIRED, INVALID_CONNECTION, UNKNOWN_CONNECTION, INTERNAL_ERROR,

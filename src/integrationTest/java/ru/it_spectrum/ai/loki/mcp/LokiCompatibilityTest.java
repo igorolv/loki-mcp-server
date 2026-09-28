@@ -11,6 +11,7 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import ru.it_spectrum.ai.loki.mcp.service.*;
 
 import java.net.URI;
@@ -81,6 +82,7 @@ class LokiCompatibilityTest {
                         .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
                 assertEquals(204, pushed.statusCode(), pushed.body());
                 var service = new QueryService(registry, client);
+                var counts = new CountService(registry, client);
                 String start = base.toString(), end = base.plusSeconds(3).toString(), selector = "{fixture=\"s04\"}";
                 String time = LogText.TIME.format(base.plusNanos(123456789).atZone(ZoneOffset.UTC));
                 var logs = service.logs("fixture", selector, start, end, 10, null);
@@ -99,15 +101,15 @@ class LokiCompatibilityTest {
                 assertTrue(raw.contains(time + " {fixture=\"s04\", level=\"info\", "), raw);
                 assertTrue(raw.contains("shard=\"a\"}  " + ecs + "\n"), raw);
                 assertTrue(service.logs("fixture", selector + " |= `absent`", start, end, null, null).contains("no matching lines."));
-                assertEquals("3 lines match " + selector + " in " + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC) + " (fixture).",
-                        service.count("fixture", selector, start, end, null));
-                var byShard = service.count("fixture", selector, start, end, "shard");
+                assertEquals("3 lines match " + selector + " in " + ResponseText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC) + " (fixture).",
+                        counts.count("fixture", selector, start, end, null));
+                var byShard = counts.count("fixture", selector, start, end, "shard");
                 assertTrue(byShard.endsWith("By shard:\n  a       2\n  b       1"), byShard);
-                var byTime = service.count("fixture", selector, start, end, "time");
+                var byTime = counts.count("fixture", selector, start, end, "time");
                 assertTrue(byTime.startsWith("3 lines match"), byTime);
                 assertTrue(byTime.contains("By time (1s buckets, bucket start):"), byTime);
                 assertEquals(3, byTime.lines().filter(l -> l.matches("  \\d\\d:\\d\\d:\\d\\d +\\d+.*")).count(), byTime);
-                assertTrue(service.count("fixture", "{fixture=\"absent\"}", start, end, "time").startsWith("0 lines match"));
+                assertTrue(counts.count("fixture", "{fixture=\"absent\"}", start, end, "time").startsWith("0 lines match"));
                 var bad = assertThrows(LokiOperationException.class, () -> service.logs("fixture", selector + " |= ", start, end, null, null));
                 assertTrue(bad.error().message().startsWith("Loki rejected the query: "), bad.error().message());
                 var discovery = new DiscoveryService(registry, client);
@@ -115,7 +117,7 @@ class LokiCompatibilityTest {
                 assertTrue(overview.startsWith("Labels — fixture"), overview);
                 assertTrue(overview.contains("\nfixture\n") && overview.contains("\nshard\n"), overview);
                 assertEquals("Values of shard — fixture, "
-                        + LogText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
+                        + ResponseText.window(new QueryTime.Range(base, base.plusSeconds(3)), ZoneOffset.UTC)
                         + ": 2.\na\nb", discovery.discover("fixture", start, end, "shard", null));
                 var series = client.series("fixture", selector, base, base.plusSeconds(3));
                 assertEquals(2, series.labelSets().size());

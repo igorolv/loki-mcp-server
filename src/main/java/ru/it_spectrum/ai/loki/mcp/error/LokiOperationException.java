@@ -1,6 +1,5 @@
-package ru.it_spectrum.ai.loki.mcp.service;
+package ru.it_spectrum.ai.loki.mcp.error;
 
-import ru.it_spectrum.ai.loki.mcp.model.ToolError;
 
 /**
  * Contains only a controlled message; original exceptions may contain credentials. The message is the text shown to the

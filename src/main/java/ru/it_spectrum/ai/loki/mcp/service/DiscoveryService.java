@@ -1,12 +1,14 @@
 package ru.it_spectrum.ai.loki.mcp.service;
 
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.LokiOperationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.it_spectrum.ai.loki.mcp.client.LokiHttpClient;
 import ru.it_spectrum.ai.loki.mcp.client.LokiResponses.SeriesResponse;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
-import ru.it_spectrum.ai.loki.mcp.model.ErrorCode;
+import ru.it_spectrum.ai.loki.mcp.error.ErrorCode;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -14,11 +16,11 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.ENVELOPE_BYTES;
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.assemble;
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.bytes;
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.truncate;
-import static ru.it_spectrum.ai.loki.mcp.service.LogText.window;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.ENVELOPE_BYTES;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.assemble;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.bytes;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.truncate;
+import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.window;
 
 /**
  * Lists label names, values or stream label sets for a time window, without sampling log lines.

@@ -2,7 +2,7 @@ package ru.it_spectrum.ai.loki.mcp.connection;
 
 import ru.it_spectrum.ai.loki.mcp.parser.JsonFormat;
 import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
-import ru.it_spectrum.ai.loki.mcp.service.Errors;
+import ru.it_spectrum.ai.loki.mcp.error.Errors;
 
 import java.net.URI;
 import java.time.ZoneId;

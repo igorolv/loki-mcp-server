@@ -129,7 +129,7 @@ public final class EventNormalizer {
      * Fills dotted field paths with scalar values. Returns PLAIN when the line is not a JSON object;
      * the named groups of the first matching line format are its values then.
      */
-    public Format parse(String line, Map<String, String> values) {
+    Format parse(String line, Map<String, String> values) {
         if (line.isEmpty() || line.charAt(0) != '{') {
             plain(line, values);
             return Format.PLAIN;
