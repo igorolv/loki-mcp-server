@@ -16,7 +16,7 @@
         "instance",
         "container"
       ],
-      "formatFile": "java-formats.json"
+      "formatFile": "log-formats.json"
     },
     "tst": {
       "description": "asva2 TST stand: docker-compose on the infra host, Loki 3.5, 7-day retention",
@@ -28,7 +28,7 @@
         "service",
         "container"
       ],
-      "formatFile": "java-formats.json"
+      "formatFile": "log-formats.json"
     },
     "secured": {
       "description": "Loki behind authentication, configured through environment variables",

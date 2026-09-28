@@ -1,5 +1,6 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
+import ru.it_spectrum.ai.loki.mcp.parser.JsonFormat;
 import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 import tools.jackson.core.StreamReadFeature;
@@ -41,14 +42,14 @@ public final class ConnectionsLoader {
                 throw Errors.configuration();
             }
             var definitions = new ArrayList<ConnectionDefinition>();
-            var loaded = new HashMap<Path, LineFormats>();
+            var loaded = new HashMap<Path, ParserFormats>();
             for (var pair : config.connections().entrySet()) {
                 Entry entry = pair.getValue();
                 if (entry == null) throw Errors.configuration();
                 Auth a = entry.auth();
                 ConnectionAuth auth = a == null ? ConnectionAuth.NONE : new ConnectionAuth(a.type(),
                         resolve(a.username(), environment), resolve(a.password(), environment), resolve(a.token(), environment));
-                LineFormats formats = entry.formatFile() == null ? new LineFormats(List.of(), null)
+                ParserFormats formats = entry.formatFile() == null ? new ParserFormats(List.of(), List.of(), null)
                         : loaded.computeIfAbsent(resolvePath(path, resolve(entry.formatFile(), environment)),
                         ConnectionsLoader::loadFormatFile);
                 Limits l = entry.limits() == null ? new Limits(null, null, null, null, null, null, null, null,
@@ -69,7 +70,7 @@ public final class ConnectionsLoader {
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
                         ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
                         entry.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : entry.serviceLabels(),
-                        formats.formats(), formats.framePattern()));
+                        formats.formats(), formats.jsonFormats(), formats.framePattern()));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -82,7 +83,11 @@ public final class ConnectionsLoader {
         return loadFormatFile(path).formats();
     }
 
-    private static LineFormats loadFormatFile(Path path) {
+    public static List<JsonFormat> loadJsonFormats(Path path) {
+        return loadFormatFile(path).jsonFormats();
+    }
+
+    private static ParserFormats loadFormatFile(Path path) {
         try (var input = Files.newInputStream(path)) {
             byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
             if (bytes.length > MAX_FILE_BYTES) throw Errors.configuration();
@@ -95,7 +100,21 @@ public final class ConnectionsLoader {
                     formats.add(new LineFormat(entry.id(), compile(entry.pattern())));
                 }
             }
-            return new LineFormats(List.copyOf(formats),
+            var jsonFormats = new ArrayList<JsonFormat>();
+            if (file.jsonFormats() != null) {
+                for (JsonFormatEntry entry : file.jsonFormats()) {
+                    if (entry == null) throw Errors.configuration();
+                    jsonFormats.add(new JsonFormat(entry.id(),
+                            entry.requiredFields() == null ? List.of() : entry.requiredFields(),
+                            entry.fieldEquals() == null ? Map.of() : entry.fieldEquals(),
+                            entry.fields() == null ? Map.of() : entry.fields()));
+                }
+            }
+            if (jsonFormats.size() > ConnectionDefinition.MAX_JSON_FORMATS
+                    || jsonFormats.stream().map(JsonFormat::id).distinct().count() != jsonFormats.size()) {
+                throw Errors.configuration();
+            }
+            return new ParserFormats(List.copyOf(formats), List.copyOf(jsonFormats),
                     file.framePattern() == null ? null : compile(file.framePattern()));
         } catch (Exception ignored) {
             throw Errors.configuration();
@@ -159,13 +178,17 @@ public final class ConnectionsLoader {
                          Limits limits, List<String> serviceLabels, String formatFile) {
     }
 
-    private record LineFormats(List<LineFormat> formats, Pattern framePattern) {
+    private record ParserFormats(List<LineFormat> formats, List<JsonFormat> jsonFormats, Pattern framePattern) {
     }
 
-    private record FormatConfig(List<Format> formats, String framePattern) {
+    private record FormatConfig(List<Format> formats, List<JsonFormatEntry> jsonFormats, String framePattern) {
     }
 
     private record Format(String id, String pattern) {
+    }
+
+    private record JsonFormatEntry(String id, List<String> requiredFields, Map<String, String> fieldEquals,
+                                   Map<String, List<String>> fields) {
     }
 
     private record Auth(ConnectionAuth.Type type, String username, String password, String token) {

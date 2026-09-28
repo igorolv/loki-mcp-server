@@ -8,10 +8,12 @@ import ru.it_spectrum.ai.loki.mcp.connection.ConnectionAuth;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionDefinition;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionLimits;
 import ru.it_spectrum.ai.loki.mcp.connection.ConnectionRegistry;
+import ru.it_spectrum.ai.loki.mcp.connection.ConnectionsLoader;
 import ru.it_spectrum.ai.loki.mcp.model.LogEvent;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.file.Path;
 import java.time.*;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +46,22 @@ class QueryServiceTest {
     private void range(QueryData data) {
         doReturn(new QueryResponse(data))
                 .when(client).queryRange(anyString(), anyString(), any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void compactPageUsesTheSelectedJsonProfile() {
+        var definition = new ConnectionDefinition("json", null, null, URI.create("http://localhost:6"),
+                ConnectionAuth.NONE, null, ZoneId.of("UTC"), ConnectionLimits.DEFAULTS, List.of("app"),
+                List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null);
+        var query = new QueryService(new ConnectionRegistry(List.of(definition)), client,
+                Clock.fixed(now, ZoneOffset.UTC));
+        String gelf = "{\"version\":\"1.1\",\"short_message\":\"gelf line\",\"level\":6,\"_level_name\":\"INFO\"}";
+        range(new Streams(List.of(new LogStream(Map.of("app", "backend"),
+                List.of(entry(QueryTime.nanos(now.minusSeconds(1)), gelf))))));
+        String page = query.logs("json", "{app=\"backend\"}", "now-1m", "now", 10, null);
+        assertTrue(page.contains("INFO"), page);
+        assertTrue(page.contains("gelf line"), page);
+        assertFalse(page.contains("short_message"), page);
     }
 
     /**

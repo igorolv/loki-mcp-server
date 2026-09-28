@@ -114,7 +114,7 @@ class ExportServiceTest {
 
     @Test
     void inlineTemplateRewritesJsonAndPlainLinesInFull() throws IOException {
-        var formats = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
+        var formats = ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json"));
         String stack = "java.lang.IllegalStateException: boom\\n\\tat a.B.c(B.java:1)\\n\\tat a.B.d(B.java:2)";
         loki(Map.of(BACKEND, List.of(entry(ns(1, 123_000_000), "{\"@timestamp\":\"x\",\"log\":{\"level\":\"ERROR\",\"logger\":\"a.B\"},"
                 + "\"process\":{\"pid\":7,\"thread\":{\"name\":\"main\"}},\"message\":\"failed\",\"error\":{\"stack_trace\":\"" + stack + "\"}}"),
@@ -137,6 +137,21 @@ class ExportServiceTest {
                 "2026-09-24T14:00:02.000+03:00 ERROR 1 --- [backend] [main] o.s.b.d.LoggingFailureAnalysisReporter : ",
                 "\tat a.B.c(B.java:1)",
                 "10.0.0.1 - - \"GET /index.html HTTP/1.1\" 200"), lines);
+    }
+
+    @Test
+    void templateUsesTheJsonProfileSelectedForEachLine() throws IOException {
+        loki(Map.of(BACKEND, List.of(
+                entry(ns(1, 0), "{\"version\":\"1.1\",\"short_message\":\"gelf line\",\"level\":6,\"_level_name\":\"INFO\"}"),
+                entry(ns(2, 0), "{\"message\":\"generic line\",\"level\":\"WARN\"}"))));
+        var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
+                ConnectionAuth.NONE, null, ZoneId.of("Europe/Moscow"), ConnectionLimits.DEFAULTS,
+                List.of("app"), List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null);
+        var exporter = new ExportService(new ConnectionRegistry(List.of(definition)), client,
+                new ExportRoots(root, List.of(root)), Clock.fixed(NOW, ZoneOffset.UTC), System::nanoTime);
+        exporter.export("dev", "{app=\"backend\"}", null, null, "{level} {message}", null);
+        assertEquals(List.of("INFO gelf line", "WARN generic line"),
+                read(root.resolve("dev_20260924-140000_20260924-150000.log")));
     }
 
     @Test

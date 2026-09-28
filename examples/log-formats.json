@@ -1,0 +1,49 @@
+{
+  "framePattern": "^\\s+at\\s+.+$",
+  "jsonFormats": [
+    {
+      "id": "spring-boot-ecs",
+      "requiredFields": ["ecs.version", "log.level"],
+      "fields": {
+        "level": ["log.level"],
+        "service": ["service.name"],
+        "logger": ["log.logger"],
+        "message": ["message"],
+        "traceId": ["trace.id", "traceId"],
+        "stack": ["error.stack_trace"]
+      }
+    },
+    {
+      "id": "spring-boot-gelf",
+      "requiredFields": ["version", "short_message"],
+      "fieldEquals": {"version": "1.1"},
+      "fields": {
+        "level": ["_level_name"],
+        "logger": ["_log_logger"],
+        "message": ["short_message"],
+        "traceId": ["_traceId", "_trace.id"]
+      }
+    },
+    {
+      "id": "spring-boot-logstash",
+      "requiredFields": ["@version", "logger_name", "level"],
+      "fields": {
+        "level": ["level"],
+        "logger": ["logger_name"],
+        "message": ["message"],
+        "traceId": ["traceId", "trace.id"],
+        "stack": ["stack_trace"]
+      }
+    }
+  ],
+  "formats": [
+    {
+      "id": "spring-boot-console",
+      "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<pid>\\d+)\\s+---\\s+(?:\\[(?<application>[^\\]]*)\\]\\s+)?\\[\\s*(?<thread>[^\\]]*?)\\s*\\]\\s+(?<logger>\\S+)\\s*:\\s?(?<message>.*)$"
+    },
+    {
+      "id": "logback-classic",
+      "pattern": "^(?<time>\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?)\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\\s+(?<logger>\\S+)\\s+-\\s?(?<message>.*)$"
+    }
+  ]
+}

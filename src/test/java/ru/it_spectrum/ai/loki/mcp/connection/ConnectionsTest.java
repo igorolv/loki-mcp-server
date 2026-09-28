@@ -11,6 +11,7 @@ import ru.it_spectrum.ai.loki.mcp.service.LokiOperationException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -73,6 +74,7 @@ class ConnectionsTest {
         assertEquals(4, config.connections().size());
         var dev = config.connections().stream().filter(connection -> connection.name().equals("dev")).findFirst().orElseThrow();
         assertEquals(2, dev.formats().size());
+        assertEquals(3, dev.jsonFormats().size());
         assertNotNull(dev.framePattern());
     }
 
@@ -144,5 +146,28 @@ class ConnectionsTest {
                 "{\"connections\":{\"a\":{\"url\":\"http://user:SECRET@localhost\"}}}"));
         assertThrows(LokiOperationException.class, () -> load(
                 "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"formatFile\":\"SECRET-missing.json\"}}}"));
+    }
+
+    @Test
+    void loadsJsonProfilesAndRejectsAmbiguousOrInvalidDefinitions() throws Exception {
+        String connection = "{\"connections\":{\"a\":{\"url\":\"http://localhost\",\"formatFile\":\"formats.json\"}}}";
+        Files.writeString(directory.resolve("formats.json"), """
+                {"jsonFormats":[{"id":"custom","requiredFields":["format"],
+                  "fieldEquals":{"format":"x"},"fields":{"message":["payload.text"]}}]}
+                """);
+        var format = load(connection).connections().getFirst().jsonFormats().getFirst();
+        assertEquals("custom", format.id());
+        assertTrue(format.matches(Map.of("format", "x")));
+        assertFalse(format.matches(Map.of("format", "y")));
+
+        for (String invalid : List.of(
+                "{\"jsonFormats\":[{\"id\":\"no-match\",\"fields\":{\"message\":[\"message\"]}}]}",
+                "{\"jsonFormats\":[{\"id\":\"bad-role\",\"requiredFields\":[\"format\"],\"fields\":{\"cause\":[\"x\"]}}]}",
+                "{\"jsonFormats\":[{\"id\":\"same\",\"requiredFields\":[\"x\"]},{\"id\":\"same\",\"requiredFields\":[\"y\"]}]}",
+                "{\"jsonFormats\":[{\"id\":\"bad-type\",\"requiredFields\":\"format\"}]}")) {
+            Files.writeString(directory.resolve("formats.json"), invalid);
+            var error = assertThrows(LokiOperationException.class, () -> load(connection));
+            assertEquals(ErrorCode.CONFIGURATION_ERROR, error.error().code());
+        }
     }
 }

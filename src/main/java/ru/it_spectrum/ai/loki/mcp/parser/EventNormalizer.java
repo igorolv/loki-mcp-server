@@ -16,8 +16,8 @@ import static ru.it_spectrum.ai.loki.mcp.parser.EventParseLimits.*;
 
 /**
  * Picks level, service, logger, message, trace id and stack trace out of labels, structured metadata and a JSON line,
- * or a plain-text line that one of the connection's line formats splits into fields. Only the line is parsed; nothing
- * is guessed when a value is absent, and no layout is known to the code.
+ * optionally using a matching JSON profile, or a plain-text line split by a connection format. Only the line is
+ * parsed; nothing is guessed when a value is absent, and no layout is known to the code.
  */
 public final class EventNormalizer {
     static final List<String> LEVEL_LABELS = List.of("level", "detected_level", "severity", "lvl");
@@ -33,8 +33,15 @@ public final class EventNormalizer {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private static final Pattern PLAIN_LEVEL = Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\b");
     private final List<LineFormat> formats;
+    private final List<JsonFormat> jsonFormats;
+
     public EventNormalizer(List<LineFormat> formats) {
+        this(formats, List.of());
+    }
+
+    public EventNormalizer(List<LineFormat> formats, List<JsonFormat> jsonFormats) {
         this.formats = List.copyOf(formats);
+        this.jsonFormats = List.copyOf(jsonFormats);
     }
 
     private static void visit(JsonNode node, String path, int depth, Map<String, String> values, int[] remaining) {
@@ -62,26 +69,27 @@ public final class EventNormalizer {
     public View view(LogEvent event, List<String> serviceLabels) {
         var values = new LinkedHashMap<String, String>();
         Format format = parse(event.line(), values);
+        JsonFormat jsonFormat = format == Format.JSON ? jsonFormat(values) : null;
         String level = first(event.labels(), LEVEL_LABELS);
         // Loki 3.x stamps detected_level="unknown" when it finds nothing; that is the absence of a level, not a level.
         if (level == null) level = first(event.structuredMetadata(), LEVEL_LABELS);
         if (level != null && level.equalsIgnoreCase("unknown")) level = null;
-        if (level == null) level = first(values, LEVEL_FIELDS);
+        if (level == null) level = field(jsonFormat, values, "level", LEVEL_FIELDS);
         if (level == null && format == Format.PLAIN) {
             var matcher = PLAIN_LEVEL.matcher(event.line().substring(0, Math.min(event.line().length(), 120)));
             if (matcher.find()) level = matcher.group(1);
         }
         String service = first(event.labels(), serviceLabels);
-        if (service == null) service = first(values, SERVICE_FIELDS);
-        String logger = first(values, LOGGER_FIELDS);
+        if (service == null) service = field(jsonFormat, values, "service", SERVICE_FIELDS);
+        String logger = field(jsonFormat, values, "logger", LOGGER_FIELDS);
         String trace = first(event.structuredMetadata(), TRACE_KEYS);
-        if (trace == null) trace = first(values, TRACE_KEYS);
+        if (trace == null) trace = field(jsonFormat, values, "traceId", TRACE_KEYS);
         if (trace == null) trace = first(event.labels(), TRACE_KEYS);
         String message, stack = null;
         if (format == Format.JSON) {
-            message = first(values, MESSAGE_FIELDS);
+            message = field(jsonFormat, values, "message", MESSAGE_FIELDS);
             if (message == null) message = event.line();
-            stack = first(values, STACK_FIELDS);
+            stack = field(jsonFormat, values, "stack", STACK_FIELDS);
         } else {
             String line = event.line();
             int newline = line.indexOf('\n');
@@ -102,6 +110,18 @@ public final class EventNormalizer {
                 message = logger == null ? EMPTY_MESSAGE + ")" : EMPTY_MESSAGE + ", logger " + logger + ")";
         }
         return new View(format, level == null ? null : level.toUpperCase(Locale.ROOT), service, logger, message, trace, stack);
+    }
+
+    private JsonFormat jsonFormat(Map<String, String> values) {
+        for (JsonFormat format : jsonFormats) {
+            if (format.matches(values)) return format;
+        }
+        return null;
+    }
+
+    private static String field(JsonFormat format, Map<String, String> values, String name, List<String> defaults) {
+        String preferred = format == null ? null : format.field(values, name);
+        return preferred == null ? first(values, defaults) : preferred;
     }
 
     /**

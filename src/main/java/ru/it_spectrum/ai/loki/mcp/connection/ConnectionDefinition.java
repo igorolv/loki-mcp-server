@@ -1,11 +1,13 @@
 package ru.it_spectrum.ai.loki.mcp.connection;
 
+import ru.it_spectrum.ai.loki.mcp.parser.JsonFormat;
 import ru.it_spectrum.ai.loki.mcp.parser.LineFormat;
 import ru.it_spectrum.ai.loki.mcp.service.Errors;
 
 import java.net.URI;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -13,24 +15,33 @@ import java.util.regex.Pattern;
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
-                                   List<LineFormat> formats, Pattern framePattern) {
+                                   List<LineFormat> formats, List<JsonFormat> jsonFormats, Pattern framePattern) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of("service_name", "service", "app", "container", "job");
     public static final int MAX_FORMATS = 32;
+    public static final int MAX_JSON_FORMATS = 32;
 
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits) {
-        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of(), null);
+        this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of(),
+                List.of(), null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), null);
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), List.of(), null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
                                 List<LineFormat> formats) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, null);
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, List.of(), null);
+    }
+
+    public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
+                                String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
+                                List<LineFormat> formats, Pattern framePattern) {
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, List.of(),
+                framePattern);
     }
 
     public ConnectionDefinition {
@@ -44,12 +55,16 @@ public record ConnectionDefinition(String name, String description, String hint,
                 || (tenant != null && (tenant.isBlank() || tenant.chars().anyMatch(Character::isISOControl)))
                 || serviceLabels == null || serviceLabels.isEmpty()
                 || serviceLabels.stream().anyMatch(l -> l == null || !l.matches("[a-zA-Z_][a-zA-Z0-9_]*"))
-                || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(java.util.Objects::isNull)
-                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()) {
+                || formats == null || formats.size() > MAX_FORMATS || formats.stream().anyMatch(Objects::isNull)
+                || formats.stream().map(LineFormat::id).distinct().count() != formats.size()
+                || jsonFormats == null || jsonFormats.size() > MAX_JSON_FORMATS
+                || jsonFormats.stream().anyMatch(Objects::isNull)
+                || jsonFormats.stream().map(JsonFormat::id).distinct().count() != jsonFormats.size()) {
             throw Errors.configuration();
         }
         serviceLabels = List.copyOf(serviceLabels);
         formats = List.copyOf(formats);
+        jsonFormats = List.copyOf(jsonFormats);
     }
 
     public static boolean validName(String name) {

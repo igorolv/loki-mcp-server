@@ -1,4 +1,4 @@
-# Connections and local line formats
+# Connections and local log formats
 
 The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP_CONNECTIONS_FILE. It is read once at startup, strictly and without network probes. The file, URLs, credentials, tenant and parser exception text are never returned to the model or written to diagnostics.
 
@@ -11,7 +11,7 @@ The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP
       "url": "${LOKI_DEV_URL}",
       "timezone": "Europe/Moscow",
       "serviceLabels": ["app", "container"],
-      "formatFile": "java-formats.json"
+      "formatFile": "log-formats.json"
     }
   }
 }
@@ -37,15 +37,25 @@ exportRoots is an optional list of up to 16 directories at the top level. When p
 
 ## Format file
 
-formatFile is one optional path to a JSON object with plain-line parsing formats and an optional framePattern. A relative path resolves against the connections file. The file is loaded once per path and is limited to 1 MiB. An example is [java-formats.json](../examples/java-formats.json).
+formatFile is one optional path to a JSON object with JSON profiles, plain-line parsing formats and an optional framePattern. A relative path resolves against the connections file. The file is loaded once per path and is limited to 1 MiB. An example is [log-formats.json](../examples/log-formats.json).
 
 ~~~json
 {
+  "jsonFormats": [
+    {
+      "id": "gelf",
+      "requiredFields": ["version", "short_message"],
+      "fieldEquals": {"version": "1.1"},
+      "fields": {"level": ["_level_name"], "message": ["short_message"]}
+    }
+  ],
   "formats": [
-{"id": "simple", "pattern": "^(?<level>INFO|ERROR) (?<message>.*)$"}
+    {"id": "simple", "pattern": "^(?<level>INFO|ERROR) (?<message>.*)$"}
   ]
 }
 ~~~
+
+jsonFormats are checked for each JSON object in file order; the first matching profile wins. A profile needs at least one requiredFields path or fieldEquals entry. All requiredFields must contain a nonblank scalar value; fieldEquals values must match exactly. Paths are flattened JSON member paths such as ecs.version or log.level. fields maps level, service, logger, message, traceId and stack to ordered candidate paths. The selected profile's first nonblank value for a field takes precedence over the generic JSON names; absent values still use the generic names. Loki labels still take precedence for level and service, and structured metadata for level and traceId. A JSON object matching no profile uses the generic ECS, Logstash and Serilog field names. IDs are unique within jsonFormats; at most 32 JSON profiles, 16 required paths, 16 equality checks and 16 candidate paths per field. JSON parsing is bounded, so fields beyond its limit may not be available for matching. Profile IDs do not appear in tool output.
 
 formats are Java regular expressions searched on the first line of a non JSON event. A named message group is required. Named level, logger, service or application groups become the corresponding line fields; other groups become fields available to export templates. The first matching format wins. IDs are lower case letters, digits and dashes, unique within the file; at most 32 formats. An optional top-level `framePattern`, such as `"^\\s+at\\s+.+$"`, matches a complete standalone line for compact queryLogs folding. It does not change raw previews or exports. Invalid or oversized regular expressions stop startup.
 

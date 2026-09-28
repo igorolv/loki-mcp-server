@@ -86,7 +86,7 @@ public class ExportService {
         Path target = roots.resolve(directory);
         ZoneId zone = definition.timezone();
         String base = connection + "_" + STAMP.format(window.start().atZone(zone)) + "_" + STAMP.format(window.end().atZone(zone));
-        var normalizer = new EventNormalizer(definition.formats());
+        var normalizer = new EventNormalizer(definition.formats(), definition.jsonFormats());
         var run = new Run(definition, query, window, writer, normalizer);
         try (var file = new ExportFile(target, base)) {
             run.read(file);

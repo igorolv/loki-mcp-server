@@ -13,10 +13,10 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Plain Spring Boot console lines split by the format of examples/java-formats.json; the code knows no layout.
+ * Plain Spring Boot console lines split by the format of examples/log-formats.json; the code knows no layout.
  */
 class LineFormatTest {
-    private static final List<LineFormat> JAVA = ConnectionsLoader.loadFormats(Path.of("examples/java-formats.json"));
+    private static final List<LineFormat> JAVA = ConnectionsLoader.loadFormats(Path.of("examples/log-formats.json"));
     // Spring Boot 3 (no application name), 3.4+ (application name before the thread) and 2 (a space instead of T).
     private static final String BOOT3 = "2026-09-24T15:10:16.432+03:00  WARN 1 --- [           main] ConfigServletWebServerApplicationContext : "
             + "Exception encountered during context initialization - cancelling refresh attempt";

@@ -41,7 +41,7 @@ The server reads ~/.loki-mcp-server/connections.json, or the path in LOKI_MCP_CO
 }
 ~~~
 
-The [complete example](examples/connections.json) uses environment variables for nonlocal URLs. hint gives the model stand specific selectors and field advice. serviceLabels names the labels used to display a service in compact lines. Optional formatFile names one JSON file with patterns for parsing plain lines and an optional framePattern; see [java-formats.json](examples/java-formats.json). The connection file may set exportRoots to restrict export destinations, and per connection limits. Authentication and tenant headers are configured per connection; URLs and credentials never appear in tool responses or diagnostics. The full format is in [docs/connections.md](docs/connections.md).
+The [complete example](examples/connections.json) uses environment variables for nonlocal URLs. hint gives the model stand specific selectors and field advice. serviceLabels names the labels used to display a service in compact lines. Optional formatFile names one JSON file with JSON profiles, plain-line patterns and an optional framePattern; see [log-formats.json](examples/log-formats.json). The connection file may set exportRoots to restrict export destinations, and per connection limits. Authentication and tenant headers are configured per connection; URLs and credentials never appear in tool responses or diagnostics. The full format is in [docs/connections.md](docs/connections.md).
 
 The server loads configuration strictly at startup without probing Loki. An unknown field, duplicate key, missing environment variable or invalid format file stops startup with a safe configuration error. Changes require a restart.
 

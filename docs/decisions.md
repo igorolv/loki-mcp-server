@@ -24,7 +24,7 @@ These earlier cancelled designs do not return without a new user decision: JSON 
 
 ## Connection profile
 
-connections.json is external, strict and loaded once without probes. The model sees name, description and hint, never the URL or credentials. serviceLabels supply display names, not query builders. One optional formatFile contains plain-line parsing formats and an optional standalone frame pattern. It replaces the old rules catalogue, which also held system aliases, causes and restart-specific knowledge. A format file contains rendering knowledge only. Code defaults for JSON fields are generic ECS, logstash and Serilog.
+connections.json is external, strict and loaded once without probes. The model sees name, description and hint, never the URL or credentials. serviceLabels supply display names, not query builders. One optional formatFile contains JSON parsing profiles, plain-line parsing formats and an optional standalone frame pattern. It replaces the old rules catalogue, which also held system aliases, causes and restart-specific knowledge. A format file contains rendering knowledge only. Code defaults for JSON fields are generic ECS, logstash and Serilog.
 
 Every data operation names its connection. A failure of one connection does not mark the others unavailable. Loki 2.6.1 and 3.x use the shared read endpoints; a 404 is an endpoint failure, not a verdict on the stand.
 
@@ -70,7 +70,11 @@ The user reversed the original default restriction to exportRoots after an OpenC
 
 ## Parser package (2026-09-28)
 
-The user chose to move EventNormalizer and its dedicated LineFormat and EventParseLimits types into `ru.it_spectrum.ai.loki.mcp.parser`. The move keeps the current JSON and plain-line behavior and the public text contract. QueryService and ExportService still call the normalizer; LogText and LogLayout remain output renderers in `service`. The next design question is how to configure multiple JSON and plain-text profiles, including explicit, deterministic selection when profiles overlap. No new configuration format has been selected yet.
+The user chose to move EventNormalizer and its dedicated LineFormat and EventParseLimits types into `ru.it_spectrum.ai.loki.mcp.parser`. The move kept the JSON and plain-line behavior and the public text contract. QueryService and ExportService still call the normalizer; LogText and LogLayout remain output renderers in `service`. The next design question was how to configure multiple JSON and plain-text profiles, including explicit, deterministic selection when profiles overlap.
+
+## JSON format profiles (2026-09-28)
+
+After inspecting asva2 and asva2-configs, the user chose to try recognizing JSON formats from the Loki event itself. Spring Boot console ECS JSON is configured separately from the file line pattern, and the Docker Promtail pipeline collects console output. Runtime profiles, Config Server, environment overrides and custom appenders make a path to a Spring Boot configuration file insufficient to identify the actual Loki line. The optional formatFile now holds ordered jsonFormats alongside the existing plain formats. A JSON profile selects by required scalar paths and exact field values, then supplies preferred field paths; the first match wins. When none matches, the existing generic JSON extraction applies. Loki labels and structured metadata retain their precedence. The example file covers Spring Boot ECS, GELF and Logstash. Per-event selection allows these formats and plain lines to coexist in one result. The profiles only alter local rendering, not queries or interpretation.
 
 ## Open items
 

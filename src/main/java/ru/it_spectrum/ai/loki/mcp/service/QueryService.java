@@ -112,7 +112,7 @@ public class QueryService {
 
     private static List<PageRow> pageRows(List<LogEvent> events, ConnectionDefinition definition, boolean raw) {
         var rows = new ArrayList<PageRow>();
-        var normalizer = new EventNormalizer(definition.formats());
+        var normalizer = new EventNormalizer(definition.formats(), definition.jsonFormats());
         LocalDate previousDay = null;
         for (int i = 0; i < events.size();) {
             LogEvent event = events.get(i);
