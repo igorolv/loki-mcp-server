@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.igorolv/loki-mcp-server",
+  "title": "Loki MCP Server",
+  "description": "Read-only Grafana Loki for AI agents: label discovery, bounded LogQL queries, counts, exports",
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/igorolv/loki-mcp-server#readme",
+  "repository": {
+    "url": "https://github.com/igorolv/loki-mcp-server",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/igorolv/loki-mcp-server:0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--mount",
+          "value": "type=bind,src={data_dir},dst=/data",
+          "description": "Host directory holding connections.json; the server also writes its logs and default exports there.",
+          "isRequired": true,
+          "variables": {
+            "data_dir": {
+              "description": "Host directory containing connections.json (for example ~/.loki-mcp-server)",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,11 @@
 # Loki MCP Server
 
+[![build](https://github.com/igorolv/loki-mcp-server/actions/workflows/build.yml/badge.svg)](https://github.com/igorolv/loki-mcp-server/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/igorolv/loki-mcp-server?include_prereleases)](https://github.com/igorolv/loki-mcp-server/releases/latest)
+[![License](https://img.shields.io/github/license/igorolv/loki-mcp-server)](LICENSE)
+[![Java 21](https://img.shields.io/badge/Java-21%2B-blue?logo=openjdk)](https://adoptium.net/)
+[![MCP](https://img.shields.io/badge/MCP-server-8A2BE2)](https://modelcontextprotocol.io/)
+
 A local stdio MCP server for reading Grafana Loki with an agent. It exposes five text tools and supports Loki 2.6.1 and 3.x. Loki itself is read only; the only write is a local exportLogs file.
 
 | Tool | Purpose |
@@ -22,6 +28,24 @@ java -jar build/libs/loki-mcp-server.jar
 ~~~
 
 On Linux/macOS use ./gradlew. The process waits for MCP JSON-RPC on stdin. stdout is reserved for JSON-RPC; diagnostics go to stderr and ~/.loki-mcp-server/logs/loki-mcp-server.log.
+
+A prebuilt loki-mcp-server.jar is attached to every [release](https://github.com/igorolv/loki-mcp-server/releases/latest), so building is optional.
+
+For Claude Code, registering the jar is one command:
+
+~~~bash
+claude mcp add --scope user loki -- java -jar /path/to/loki-mcp-server.jar
+~~~
+
+### Docker
+
+The image is published to GHCR with every release. Mount the directory holding connections.json at /data; the server also writes its logs and default exports there:
+
+~~~bash
+docker run -i --rm -v ~/.loki-mcp-server:/data ghcr.io/igorolv/loki-mcp-server:latest
+~~~
+
+The same command is what an MCP client should launch; -i keeps stdin open for the stdio transport. Loki URLs in connections.json must be reachable from inside the container: use the Loki host name rather than localhost, or add --network host on Linux. An exportLogs directory outside /data is a path inside the container, so mount it as well. To build the image locally: docker build -t loki-mcp-server .
 
 ## Connections
 
@@ -91,3 +115,7 @@ python scripts/live_smoke/run_smoke.py --connection dev
 ~~~
 
 build runs unit tests and a separate process stdio smoke against loopback mock Loki. integrationTest needs Docker and pinned Loki 2.6.1/3.6.0 images; it writes test data only to its containers. The live smoke uses the example profile and a configured read only stand URL. Contributor rules are in [AGENTS.md](AGENTS.md); design history and open items are in [docs/decisions.md](docs/decisions.md). Users moving from mcp-loki can read the [migration guide](docs/migration-from-mcp-loki.md).
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE). Third-party notices are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
