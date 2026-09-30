@@ -43,12 +43,18 @@ import static ru.it_spectrum.ai.loki.mcp.service.ResponseText.*;
 @Service
 public class ExportService {
     static final String RAW = "raw";
+    static final String DEFAULT = "connection default";
+    static final String TEMPLATE = "template";
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private final ConnectionRegistry registry;
     private final LogEventReader reader;
     private final ExportRoots roots;
     private final Clock clock;
     private final LongSupplier nanoTime;
+    /**
+     * Compiled default export templates of the connections that configured one; a missing entry means raw.
+     */
+    private final Map<String, LineWriter> defaults;
 
     @Autowired
     public ExportService(ConnectionRegistry registry, LokiHttpClient client, ExportRoots roots) {
@@ -66,6 +72,24 @@ public class ExportService {
         this.roots = roots;
         this.clock = clock;
         this.nanoTime = nanoTime;
+        this.defaults = compileDefaults(registry);
+    }
+
+    /**
+     * Compiles the operator's default templates once, so an invalid one stops startup rather than a tool call.
+     */
+    private static Map<String, LineWriter> compileDefaults(ConnectionRegistry registry) {
+        var compiled = new HashMap<String, LineWriter>();
+        for (var definition : registry.list()) {
+            String configured = definition.exportFormat();
+            if (configured == null || configured.isBlank() || configured.equals(RAW)) continue;
+            try {
+                compiled.put(definition.name(), new LineWriter(DEFAULT, LogLayout.compile(configured)));
+            } catch (LokiOperationException ignored) {
+                throw Errors.configuration();
+            }
+        }
+        return Map.copyOf(compiled);
     }
 
     private static String megabytes(long bytes) {
@@ -84,7 +108,7 @@ public class ExportService {
         var definition = registry.require(connection);
         LogQueries.requireLogQuery(query);
         var window = QueryTime.range(start, end, clock.instant(), definition.timezone(), definition.limits().maxIntervalSeconds());
-        var writer = writer(format);
+        var writer = writer(definition, format);
         Path target = roots.resolve(directory);
         ZoneId zone = definition.timezone();
         String base = connection + "_" + STAMP.format(window.start().atZone(zone)) + "_" + STAMP.format(window.end().atZone(zone));
@@ -96,10 +120,11 @@ public class ExportService {
         }
     }
 
-    private LineWriter writer(String format) {
-        String name = format == null || format.isBlank() ? RAW : format.strip();
+    private LineWriter writer(ConnectionDefinition definition, String format) {
+        String name = format == null || format.isBlank() ? null : format.strip();
+        if (name == null) return defaults.getOrDefault(definition.name(), new LineWriter(RAW, null));
         if (name.equals(RAW)) return new LineWriter(RAW, null);
-        if (name.contains("{")) return new LineWriter("template", LogLayout.compile(name));
+        if (name.contains("{")) return new LineWriter(TEMPLATE, LogLayout.compile(name));
         throw Errors.invalid("format must be raw or a template like "
                 + "\"{time} {level:5} [{thread}] {logger} : {message}{stack}\".");
     }

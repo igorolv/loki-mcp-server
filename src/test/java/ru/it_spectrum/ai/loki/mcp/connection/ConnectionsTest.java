@@ -34,6 +34,7 @@ class ConnectionsTest {
                 {"exportRoots":["exports"],"connections":{
                   "dev":{"description":"Development","hint":"Use {app=backend}.","url":"http://localhost:3100",
                          "timezone":"Europe/Moscow","serviceLabels":["app","job"],"formatFile":"formats.json",
+                         "exportFormat":"{level} {message}",
                          "limits":{"maxExportLines":10,"maxExportBytes":20}},
                   "secured":{"url":"https://localhost:3101","auth":{"type":"BEARER","token":"${TOKEN}"}}}}
                 """);
@@ -41,6 +42,7 @@ class ConnectionsTest {
         var dev = config.connections().getFirst();
         assertEquals(List.of("app", "job"), dev.serviceLabels());
         assertEquals("plain", dev.formats().getFirst().id());
+        assertEquals("{level} {message}", dev.exportFormat());
         assertEquals(10, dev.limits().maxExportLines());
         assertEquals(20, dev.limits().maxExportBytes());
         assertEquals(86_400, dev.limits().maxCountIntervalSeconds());

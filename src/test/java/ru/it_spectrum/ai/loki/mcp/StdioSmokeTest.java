@@ -113,7 +113,7 @@ class StdioSmokeTest {
                   "test":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":6000,
                     "maxDiscoveryIntervalSeconds":432000,"maxIntervalSeconds":172800,
                     "maxCountIntervalSeconds":259200,"maxTimeCountIntervalSeconds":345600,
-                    "maxEntries":25,"requestTimeoutMs":4500},"serviceLabels":["kind"]},
+                    "maxEntries":25,"requestTimeoutMs":4500},"serviceLabels":["kind"],"exportFormat":"{level} {line}"},
                   "tiny":{"url":"http://127.0.0.1:%d","limits":{"maxResponseBytes":1024}}
                 }}
                 """.formatted(upstream.getAddress().getPort(), upstream.getAddress().getPort()));
@@ -402,8 +402,10 @@ class StdioSmokeTest {
             assertFalse(requestedExport.path("result").path("isError").asBoolean(), requestedReport);
             try (var files = Files.list(requested)) {
                 var file = files.findFirst().orElseThrow();
-                assertEquals(List.of("Ошибка 🐈"), Files.readAllLines(file, StandardCharsets.UTF_8));
+                // The connection's configured exportFormat applies because this call passes no format.
+                assertEquals(List.of("ERROR Ошибка 🐈"), Files.readAllLines(file, StandardCharsets.UTF_8));
                 assertTrue(requestedReport.contains("File: " + file), requestedReport);
+                assertTrue(requestedReport.contains("format connection default"), requestedReport);
             }
             assertNoSecrets(requestedExport.toString());
         } finally {

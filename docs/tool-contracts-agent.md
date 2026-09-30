@@ -10,7 +10,7 @@ Read this when adding, changing, diagnosing or reviewing an MCP tool, its argume
 | `discoverLogs` | `DiscoveryService` | Discover labels, values or matching stream label sets. |
 | `countLogs` | `CountService` | Build a count expression from the caller's LogQL log query; return counts, not interpretation. |
 | `queryLogs` | `QueryService` | Return one bounded, chronological text page from either end of the window. |
-| `exportLogs` | `ExportService` | Write one local file and return its path, counts and completion status. |
+| `exportLogs` | `ExportService` | Write one local file and return its path, counts, effective format and completion status. |
 
 Every data tool requires an explicit `connection`; never select a default stand. `queryLogs`, `countLogs` and `exportLogs` require the caller's LogQL **log query**. Do not infer selectors or filters in Java. Tool classes supply argument defaults, call a service and return its `String`. Keep read-only and idempotent annotations accurate; `exportLogs` writes a new file and must not claim to be read-only.
 

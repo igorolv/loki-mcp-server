@@ -67,6 +67,14 @@ class ExportServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC), nanoTime);
     }
 
+    private ExportService serviceWithDefault(String exportFormat) {
+        var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
+                ConnectionAuth.NONE, null, ZoneId.of("Europe/Moscow"), ConnectionLimits.DEFAULTS,
+                List.of("app"), List.of(), List.of(), null, exportFormat);
+        return new ExportService(new ConnectionRegistry(List.of(definition)), client,
+                new ExportRoots(root, List.of(root)), Clock.fixed(NOW, ZoneOffset.UTC), System::nanoTime);
+    }
+
     /**
      * A mock Loki that reads forward as the real one: start inclusive, end exclusive, the oldest {@code limit} lines of
      * all streams, grouped back into streams.
@@ -160,12 +168,41 @@ class ExportServiceTest {
                 entry(ns(2, 0), "{\"message\":\"generic line\",\"level\":\"WARN\"}"))));
         var definition = new ConnectionDefinition("dev", null, null, URI.create("http://localhost:1"),
                 ConnectionAuth.NONE, null, ZoneId.of("Europe/Moscow"), ConnectionLimits.DEFAULTS,
-                List.of("app"), List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null);
+                List.of("app"), List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null,
+                null);
         var exporter = new ExportService(new ConnectionRegistry(List.of(definition)), client,
                 new ExportRoots(root, List.of(root)), Clock.fixed(NOW, ZoneOffset.UTC), System::nanoTime);
         exporter.export("dev", "{app=\"backend\"}", null, null, "{level} {message}", null);
         assertEquals(List.of("INFO gelf line", "WARN generic line"),
                 read(root.resolve("dev_20260924-140000_20260924-150000.log")));
+    }
+
+    @Test
+    void connectionDefaultFormatAppliesWhenFormatIsOmitted() throws IOException {
+        loki(Map.of(BACKEND, List.of(entry(ns(1, 0), "{\"message\":\"failed\",\"log\":{\"level\":\"ERROR\"}}"))));
+        var text = serviceWithDefault("{level} {message}").export("dev", "{app=\"backend\"}", null, null, null, null);
+        assertEquals(List.of("ERROR failed"), read(root.resolve("dev_20260924-140000_20260924-150000.log")));
+        assertTrue(text.contains("format connection default"), text);
+    }
+
+    @Test
+    void explicitFormatOverridesTheConnectionDefault() throws IOException {
+        String line = "{\"message\":\"failed\",\"log\":{\"level\":\"ERROR\"}}";
+        loki(Map.of(BACKEND, List.of(entry(ns(1, 0), line))));
+        var service = serviceWithDefault("{level} {message}");
+        var raw = service.export("dev", "{app=\"backend\"}", null, null, "raw", null);
+        var inline = service.export("dev", "{app=\"backend\"}", null, null, "{message}", null);
+        assertEquals(List.of(line), read(root.resolve("dev_20260924-140000_20260924-150000.log")));
+        assertEquals(List.of("failed"), read(root.resolve("dev_20260924-140000_20260924-150000-2.log")));
+        assertTrue(raw.contains("format raw"), raw);
+        assertTrue(inline.contains("format template"), inline);
+    }
+
+    @Test
+    void invalidConfiguredDefaultStopsStartupInsteadOfTheExport() {
+        for (String bad : List.of("{level:x}", "no placeholders", "{unbalanced"))
+            assertEquals(ErrorCode.CONFIGURATION_ERROR,
+                    assertThrows(LokiOperationException.class, () -> serviceWithDefault(bad)).error().code(), bad);
     }
 
     @Test

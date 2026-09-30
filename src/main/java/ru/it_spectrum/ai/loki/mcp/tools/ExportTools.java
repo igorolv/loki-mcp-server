@@ -22,6 +22,7 @@ public class ExportTools {
     @McpTool(name = "exportLogs",
             description = "Save matching log lines of a window to a local file, oldest first, when the user asks to save logs. "
                     + "Pass the same LogQL query as queryLogs, e.g. {app=\"backend\"} |= \"ERROR\". "
+                    + "Omit format to use the connection's default export format, which is raw unless the operator set a template; "
                     + "format=\"raw\" keeps the lines returned by Loki, including any LogQL line_format stage; "
                     + "a template like \"{time} {level:5} [{thread}] {logger} : {message}{stack}\" rewrites them locally. "
                     + "Pass a user-specified directory directly; omit it for the default export directory. "
@@ -32,8 +33,9 @@ public class ExportTools {
             @McpToolParam(description = QUERY) String query,
             @McpToolParam(description = START, required = false) String start,
             @McpToolParam(description = "Window end. Default \"now\". Same formats as start.", required = false) String end,
-            @McpToolParam(description = "\"raw\" (default), or a template with {time}, {level}, {service}, "
-                    + "{logger}, {message}, {stack} and line fields like {thread}", required = false) String format,
+            @McpToolParam(description = "Omit it for the connection's default export format (raw unless configured). "
+                    + "\"raw\" forces the lines returned by Loki; a template with {time}, {level}, {service}, "
+                    + "{logger}, {message}, {stack} and line fields like {thread} renders locally.", required = false) String format,
             @McpToolParam(description = "Local directory for the new file, e.g. C:\\tmp\\logs or incident-42. "
                     + "Omit it for the default export directory; a relative path is resolved under that directory. "
                     + "Configured exportRoots, if present, restrict destinations.", required = false)

@@ -52,7 +52,7 @@ class QueryServiceTest {
     void compactPageUsesTheSelectedJsonProfile() {
         var definition = new ConnectionDefinition("json", null, null, URI.create("http://localhost:6"),
                 ConnectionAuth.NONE, null, ZoneId.of("UTC"), ConnectionLimits.DEFAULTS, List.of("app"),
-                List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null);
+                List.of(), ConnectionsLoader.loadJsonFormats(Path.of("examples/log-formats.json")), null, null);
         var query = new QueryService(new ConnectionRegistry(List.of(definition)), client,
                 Clock.fixed(now, ZoneOffset.UTC));
         String gelf = "{\"version\":\"1.1\",\"short_message\":\"gelf line\",\"level\":6,\"_level_name\":\"INFO\"}";

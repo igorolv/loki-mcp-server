@@ -11,13 +11,14 @@ The server loads a JSON file at ~/.loki-mcp-server/connections.json, or LOKI_MCP
       "url": "${LOKI_DEV_URL}",
       "timezone": "Europe/Moscow",
       "serviceLabels": ["app", "container"],
-      "formatFile": "log-formats.json"
+      "formatFile": "log-formats.json",
+      "exportFormat": "{time} {level:5} {service} {logger} : {message}{stack}"
     }
   }
 }
 ~~~
 
-At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. listConnections shows each name, description (up to 512 characters), hint (up to 1024) and a short line of effective limits: the separate discoverLogs windows for unscoped labels/values and match, the windows for queryLogs, countLogs totals/label groups, countLogs time-only buckets and exportLogs, plus the queryLogs line cap and one-request timeout. Durations use d, h, m, s or ms. It does not show the URL, authentication, tenant or full configuration. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC.
+At least one connection is required. Names are case sensitive, 1–64 ASCII letters, digits, dot, dash or underscore, starting with a letter or digit. Every data call passes one name explicitly; there is no default even with one connection. listConnections shows each name, description (up to 512 characters), hint (up to 1024) and a short line of effective limits: the separate discoverLogs windows for unscoped labels/values and match, the windows for queryLogs, countLogs totals/label groups, countLogs time-only buckets and exportLogs, plus the queryLogs line cap and one-request timeout. Durations use d, h, m, s or ms. It does not show the URL, authentication, tenant or full configuration. Put stand specific selectors and field advice in the hint. serviceLabels defaults to service_name, service, app, container, job and names the labels tried in order when a compact line needs a service name. timezone defaults to UTC. exportFormat is an optional default template for exportLogs: it is rendered when a call omits format. Like the format file, it is operator rendering configuration and listConnections does not show it.
 
 url is an absolute HTTP/HTTPS URL and may include a path prefix. URL user info, query and fragment are forbidden. auth is omitted or one of:
 
@@ -27,7 +28,7 @@ url is an absolute HTTP/HTTPS URL and may include a path prefix. URL user info, 
 {"type":"BEARER","token":"${LOKI_TOKEN}"}
 ~~~
 
-tenant, when set, is sent as X-Scope-OrgID. ${VARIABLE} substitution is supported in url, credentials, tenant, formatFile and exportRoots. It happens once without shell evaluation; an unset or malformed variable stops startup. Do not commit real credentials or internal addresses.
+tenant, when set, is sent as X-Scope-OrgID. ${VARIABLE} substitution is supported in url, credentials, tenant, formatFile and exportRoots; exportFormat is literal. It happens once without shell evaluation; an unset or malformed variable stops startup. Do not commit real credentials or internal addresses.
 
 ## Export roots
 
@@ -61,7 +62,7 @@ formats are Java regular expressions searched on the first line of a non JSON ev
 
 ## Export template
 
-The format argument of exportLogs is raw by default or an inline template. {time} is the event time in the connection timezone; {time:HH:mm} chooses a Java time pattern. {level}, {service}, {logger}, {message}, {traceId}, {stack} and {line} are built in. Other placeholders read a dotted JSON field, a plain format group, a stream label or structured metadata. {a|b} chooses the first present field; {level:5} pads left and {logger:-40} pads right; {{ and }} are literal braces. A missing value is empty. An unrecognised plain line is written unchanged unless the template includes {line}. An invalid template returns INVALID_ARGUMENT.
+The format argument of exportLogs is an inline template or the literal raw; omitting it uses the connection's exportFormat template when one is configured, and raw otherwise. raw means the line returned by Loki after the LogQL pipeline, while a template renders fields locally. {time} is the event time in the connection timezone; {time:HH:mm} chooses a Java time pattern. {level}, {service}, {logger}, {message}, {traceId}, {stack} and {line} are built in. Other placeholders read a dotted JSON field, a plain format group, a stream label or structured metadata. {a|b} chooses the first present field; {level:5} pads left and {logger:-40} pads right; {{ and }} are literal braces. A missing value is empty. An unrecognised plain line is written unchanged unless the template includes {line}. An invalid template returns INVALID_ARGUMENT; an invalid configured exportFormat fails startup.
 
 ## Limits
 

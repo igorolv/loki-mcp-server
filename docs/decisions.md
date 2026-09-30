@@ -96,6 +96,10 @@ The user chose one eager `LogEvent` → `NormalizedLogEvent` → writer path for
 
 `QueryService` and `ExportService` now use one `LogEventReader` to request a bounded Loki page, convert its streams to `LogEvent` and return events in chronological order. The reader preserves the requested direction when trimming an oversized response and the caller's metric-expression error text. `QueryService` still owns one-page lookahead, display and response budgeting; `ExportService` owns forward pagination, boundary duplicates, duration and file limits. The MCP contract and output text do not change.
 
+## Default export format (2026-09-30)
+
+In an OpenCode session a request to export logs by incident first produced raw files, and only a second instruction produced the wanted Spring Boot layout. The user chose one per-connection default in `connections.json`: `exportFormat`, the template text itself, not a name. `exportLogs` renders it when the call omits `format`; an explicit `format="raw"` or inline template overrides it; with no `exportFormat` the result stays raw. Named export layouts remain removed: there is no name space, no second section in the format file, and no new tool. Like `formatFile`, `serviceLabels` and `timezone`, the default is operator rendering configuration and `listConnections` does not show it; the export report says `format connection default` or `raw` or `template`. Templates are compiled at startup, so an invalid configured default fails startup rather than a tool call. The model only needs to know that omitting `format` uses the connection default, which the tool description and server instructions state.
+
 ## Open items
 
 - Measure the five-tool flow on representative investigations with the intended small model. Compare answer quality, calls, latency and text volume to the older summary flow before adding any interpretation again.

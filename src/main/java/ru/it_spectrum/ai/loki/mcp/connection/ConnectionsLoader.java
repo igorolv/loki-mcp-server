@@ -70,7 +70,8 @@ public final class ConnectionsLoader {
                         URI.create(resolve(entry.url(), environment)), auth, resolve(entry.tenant(), environment),
                         ZoneId.of(entry.timezone() == null ? "UTC" : entry.timezone()), limits,
                         entry.serviceLabels() == null ? ConnectionDefinition.DEFAULT_SERVICE_LABELS : entry.serviceLabels(),
-                        formats.formats(), formats.jsonFormats(), formats.framePattern()));
+                        formats.formats(), formats.jsonFormats(), formats.framePattern(),
+                        template(entry.exportFormat())));
             }
             return new Config(List.copyOf(definitions), exportRoots(path, config.exportRoots(), environment));
         } catch (Exception ignored) {
@@ -168,6 +169,13 @@ public final class ConnectionsLoader {
         return result.toString();
     }
 
+    /**
+     * The default export template is literal operator configuration, not environment-substituted; blank means raw.
+     */
+    private static String template(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
     public record Config(List<ConnectionDefinition> connections, List<Path> exportRoots) {
     }
 
@@ -175,7 +183,7 @@ public final class ConnectionsLoader {
     }
 
     private record Entry(String description, String hint, String url, Auth auth, String tenant, String timezone,
-                         Limits limits, List<String> serviceLabels, String formatFile) {
+                         Limits limits, List<String> serviceLabels, String formatFile, String exportFormat) {
     }
 
     private record ParserFormats(List<LineFormat> formats, List<JsonFormat> jsonFormats, Pattern framePattern) {

@@ -12,10 +12,13 @@ import java.util.regex.Pattern;
 
 /**
  * One isolated Loki connection. The hint explains the stand's selectors; formats only affect local rendering.
+ * {@code exportFormat} is an optional default template for {@code exportLogs}; it is operator configuration and is
+ * not shown by listConnections.
  */
 public record ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                    String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
-                                   List<LineFormat> formats, List<JsonFormat> jsonFormats, Pattern framePattern) {
+                                   List<LineFormat> formats, List<JsonFormat> jsonFormats, Pattern framePattern,
+                                   String exportFormat) {
     public static final List<String> DEFAULT_SERVICE_LABELS = List.of("service_name", "service", "app", "container", "job");
     public static final int MAX_FORMATS = 32;
     public static final int MAX_JSON_FORMATS = 32;
@@ -23,25 +26,27 @@ public record ConnectionDefinition(String name, String description, String hint,
     public ConnectionDefinition(String name, String description, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits) {
         this(name, description, null, url, auth, tenant, timezone, limits, DEFAULT_SERVICE_LABELS, List.of(),
-                List.of(), null);
+                List.of(), null, null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), List.of(), null);
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, List.of(), List.of(), null,
+                null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
                                 List<LineFormat> formats) {
-        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, List.of(), null);
+        this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, List.of(), null,
+                null);
     }
 
     public ConnectionDefinition(String name, String description, String hint, URI url, ConnectionAuth auth,
                                 String tenant, ZoneId timezone, ConnectionLimits limits, List<String> serviceLabels,
                                 List<LineFormat> formats, Pattern framePattern) {
         this(name, description, hint, url, auth, tenant, timezone, limits, serviceLabels, formats, List.of(),
-                framePattern);
+                framePattern, null);
     }
 
     public ConnectionDefinition {
