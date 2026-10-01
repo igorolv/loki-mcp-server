@@ -6,6 +6,7 @@
 [![Java 21](https://img.shields.io/badge/Java-21%2B-blue?logo=openjdk)](https://adoptium.net/)
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2)](https://modelcontextprotocol.io/)
 [![Glama score](https://glama.ai/mcp/servers/igorolv/loki-mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/igorolv/loki-mcp-server)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/igorolv/loki-mcp-server)
 
 A local stdio MCP server for reading Grafana Loki with an agent. It exposes five text tools and supports Loki 2.6.1 and 3.x. Loki itself is read only; the only write is a local exportLogs file.
 
